@@ -1,0 +1,46 @@
+{
+  "suite_name": "CI/CD Integration Suite",
+  "timestamp": "2025-07-19 22:33:43",
+  "total_tests": 4,
+  "passed_tests": 4,
+  "failed_tests": 0,
+  "skipped_tests": 0,
+  "total_duration": 7.6,
+  "success_rate": 1.0,
+  "results": [
+    {
+      "test_name": "smoke_test_1",
+      "status": "passed",
+      "duration_seconds": 1.2,
+      "error_message": null,
+      "metrics": null
+    },
+    {
+      "test_name": "smoke_test_2",
+      "status": "passed",
+      "duration_seconds": 0.8,
+      "error_message": null,
+      "metrics": null
+    },
+    {
+      "test_name": "regression_test_1",
+      "status": "passed",
+      "duration_seconds": 2.1,
+      "error_message": null,
+      "metrics": null
+    },
+    {
+      "test_name": "performance_gate_1",
+      "status": "passed",
+      "duration_seconds": 3.5,
+      "error_message": null,
+      "metrics": null
+    }
+  ],
+  "environment_info": {
+    "python_version": "3.12.8 (main, Dec  6 2024, 19:59:28) [Clang 18.1.8 ]",
+    "platform": "linux",
+    "fast_mode": false,
+    "timestamp": 1752989623.740611
+  }
+}

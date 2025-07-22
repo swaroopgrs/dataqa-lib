@@ -1,0 +1,85 @@
+# Analytics-Focused DataQA Agent Configuration
+# Specialized configuration for data analytics and reporting
+
+name: "analytics-agent"
+description: "Specialized agent for data analytics, reporting, and business intelligence"
+version: "1.0.0"
+
+# LLM Configuration - Optimized for analytical reasoning
+llm:
+  provider: "openai"
+  model: "gpt-4"
+  api_key: "${OPENAI_API_KEY}"
+  temperature: 0.1  # Low temperature for consistent analysis
+  max_tokens: 2500
+  timeout: 45.0
+  max_retries: 3
+
+# Knowledge Base - Enhanced for business context
+knowledge:
+  provider: "faiss"
+  embedding_model: "all-mpnet-base-v2"
+  chunk_size: 512
+  chunk_overlap: 50
+  top_k: 8
+  similarity_threshold: 0.75
+
+# Executor - Optimized for data processing
+executor:
+  provider: "inmemory"
+  database_type: "duckdb"
+  max_execution_time: 180.0  # Longer timeout for complex analytics
+  max_memory_mb: 4096  # More memory for large datasets
+  max_rows: 1000000  # Handle larger result sets
+  
+  # Analytics-focused imports
+  allowed_imports:
+    - "pandas"
+    - "numpy"
+    - "matplotlib"
+    - "seaborn"
+    - "plotly"
+    - "scipy"
+    - "sklearn"
+    - "datetime"
+    - "math"
+    - "statistics"
+    - "itertools"
+  blocked_functions:
+    - "exec"
+    - "eval"
+    - "open"
+    - "__import__"
+    - "compile"
+
+# Workflow - Analytics-optimized workflow
+workflow:
+  strategy: "plan_execute"  # Better for complex analytical tasks
+  max_iterations: 15
+  require_approval: true
+  auto_approve_safe: false
+  conversation_memory: true
+  max_context_length: 6000
+  enable_visualization: true
+  debug_mode: false
+
+# Configuration
+log_level: "INFO"
+data_dir: "./analytics_data"
+cache_dir: "./analytics_cache"
+
+# Analytics-specific configuration
+extra_config:
+  analytics:
+    default_chart_style: "seaborn"
+    auto_generate_summary: true
+    include_statistical_tests: true
+    export_formats: ["png", "svg", "html"]
+  reporting:
+    template_dir: "./templates"
+    output_dir: "./reports"
+    auto_save_results: true
+  business_intelligence:
+    kpi_tracking: true
+    trend_analysis: true
+    anomaly_detection: true
