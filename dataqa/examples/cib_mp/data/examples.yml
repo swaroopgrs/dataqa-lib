@@ -1,0 +1,39 @@
+metadata:
+  version: v1.0
+  updated_at: 2025/05/01
+
+data:
+  - module_name: retrieval_worker
+    module_type: dataqa.components.llm.base_llm_component.BaseLLMComponent
+    formatter: |-
+      Q: {question}
+      A: 
+      <reasoning>
+      {reasoning}
+      </reasoning>
+      <sql>
+      {code}
+      </sql>
+    data:
+      - example: 
+          code: |
+            SELECT SUM(SALES_AMT) AS total_sales
+            FROM sales_data
+            WHERE TD IN ('VI', 'VR', 'CR', 'CZ')
+              AND SALES_DATE >= '2023-01-01' AND SALES_DATE <= '2023-12-31';
+          question: What is the total sales amount for Visa in 2023?
+          reasoning: To calculate the total sales amount for Visa in 2023, we need to sum the SALES_AMT for all transactions where the TD (Transaction Descriptor) is one of the Visa codes ('VI', 'VR', 'CR', 'CZ') and the SALES_DATE falls within the year 2023.
+          query: "what is the total sales amount for Visa in 2023?"
+          search_content: "" 
+          tags: []
+      - example:
+          code: |
+            SELECT SUM(SALES_AMT) AS total_sales
+            FROM sales_data
+            WHERE TD IN ('VI', 'VR', 'CR', 'CZ')
+              AND SALES_DATE >= '2023-01-01' AND SALES_DATE <= '2023-12-31';
+          question: What is the total sales amount for Visa in 2023?
+          reasoning: To calculate the total sales amount for Visa in 2023, we need to sum the SALES_AMT for all transactions where the TD (Transaction Descriptor) is one of the Visa codes ('VI', 'VR', 'CR', 'CZ') and the SALES_DATE falls within the year 2023.
+          query: "what is the total sales amount for Visa in 2023?"
+          search_content: ""
+          tags: [] 

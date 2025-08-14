@@ -1,5 +1,4 @@
 todo:
- - examples (write current example format)
  - pipelines 
  - benchmark
  - knowledge_extraction
