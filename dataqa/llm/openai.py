@@ -4,7 +4,7 @@ import time
 from typing import Any, Dict, Optional
 
 import openai
-from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbedding
+from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
 from pydantic import Field
 
 from dataqa.llm.base_llm import (
