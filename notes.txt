@@ -39,4 +39,21 @@ Response:
 
 ## LLM Callable 
 
-## SQL execute callable 
+## SQL execute callable
+
+
+
+
+
+
+
+==================
+
+This is all the code you need to see that is relevant for that context. There may be few references to other code but you can ignore it. 
+
+You wont be able to run the code since this can only run on a server with the right credentials. my local setup is not equipped to run it. So, do not try to execute the code. 
+
+Do not write unit tests or any kind of tests. i absolutely do not need them now.
+
+Task:
+I want to change the schema.yml, example.yml and rules.yml files to a new format. 
