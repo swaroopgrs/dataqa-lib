@@ -17,28 +17,77 @@ class VectorSchemaRecordType(Enum):
     Value = "value"
 
 
-class ResourceRecordBase(BaseModel):
-    tags = List[Any]
-    search_content: str
+class CategoricalValue(BaseModel):
+    value: str
+    description: Optional[str] = None
 
 
-class Rule(ResourceRecordBase):
+class ForeignKey(BaseModel):
+    column: str
+    reference_table: str
+    reference_column: str
+
+
+class ColumnSchema(BaseModel):
     name: str
-    instructions: str
-
-
-class Example(ResourceRecordBase):
-    query: str 
-    example: Union[Dict, str]
+    type: str
+    description: Optional[str] = None
+    values: Optional[List[CategoricalValue]] = None
+    example_values: Optional[List[Any]] = None
+    distinct_count: Optional[int] = None
+    null_count: Optional[int] = None
+    is_primary_key: Optional[bool] = None
+    foreign_key: Optional[str] = None
 
 
 class TableSchema(BaseModel):
-    name: str
-    description: str
-    tags: List[Any]
-    primary_key: str
-    foreign_key: List[str]
-    columns: List[Dict]
+    table_name: str
+    description: Optional[str] = None
+    columns: List[ColumnSchema]
+    row_count: Optional[int] = None
+    tags: Optional[List[str]] = None
+    primary_keys: Optional[List[str]] = None
+    foreign_keys: Optional[List[ForeignKey]] = None
+
+
+class DatabaseSchema(BaseModel):
+    tables: List[TableSchema]
+
+
+class Rule(BaseModel):
+    rule_name: str
+    module_name: Optional[str] = None
+    instructions: str
+    tags: Optional[List[str]] = None
+    search_content: Optional[str] = None
+
+
+class Rules(BaseModel):
+    rules: List[Rule]
+
+
+class ExampleContent(BaseModel):
+    question: str
+    code: str
+    reasoning: Optional[str] = None
+
+
+class Example(BaseModel):
+    query: str
+    module_name: Optional[str] = None
+    example: ExampleContent
+    tags: Optional[List[str]] = None
+    search_content: Optional[str] = None
+
+
+class Examples(BaseModel):
+    examples: List[Example]
+
+
+class KnowledgeAssets(BaseModel):
+    rules: Optional[Rules] = None
+    schema: Optional[DatabaseSchema] = None
+    examples: Optional[Examples] = None
 
 
 class VectorSchema(BaseModel):
