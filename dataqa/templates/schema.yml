@@ -1,0 +1,58 @@
+metadata:
+  database_name: my_database_name
+  query_language: SQL
+  data_source: snowflake
+  version: v1.01
+  updated_at: 2025/05/09
+
+tables:
+  - name: cpov_chase_deposit
+    description: This table contains deposit balances, outflows, cash buffers, etc.
+    tags:
+      - deposit
+    primary_key: pk_column
+    foreign_key:
+      - fk_column_1
+    columns:
+      - name: ymonth
+        type: Integer
+        description: as of date
+      - name: xref_c1
+        type: varchar
+        description: Unique identifier key for every customers same as experian_consumer_key in other tables
+  - name: vn_br_trade
+    description: This table contains monthly balance (outstanding, credit limit, original loan amount), payment (required, made) and status (all payments up to date, 30 days past due etc.) information for each trade line (card, auto, etc. for each of the 280 million consumers in the US)
+    columns:
+      - name: yearmonth
+        type: bigint
+        description: The year and month of record origination. The first two digits identify the year and last two digits identify the month for example, 202012 means year 202020 and month 12.
+      - name: experian_consumer_key
+        type: bigint
+        description: Unique identifier key for every customers
+      - name: experian_trade_key
+        type: bigint
+        description: Unique identifier key for every trade line
+      - name: account_condition_code
+        type: varchar(16383)
+        description: Account condition code
+        values:
+          - value: A1
+            description: Open account
+          - value: A2
+            description: Paid account/Zero balance
+          - value: A3
+            description: Closed account with a balance
+          - value: A4
+            description: Inactive account
+          - value: 03
+            description: Credit card lost or stolen
+          - value: 05
+            description: Account transferred to another office
+          - value: 10
+            description: Consumer reported as deceased
+          - value: 93
+            description: Account is in the collections period
+          - value: 97
+            description: Charged-off, Unpaid balance reported as a loss by credit grantor
+
+

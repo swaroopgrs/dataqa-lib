@@ -1,0 +1,3194 @@
+**Objective:** Design a config-driven Python library named `dataqa` for natural language querying against databases, focusing on code generation and tool/function calling for execution.
+
+**Core Problem:** Enable users to interact with databases using natural language, translating queries into executable code or actions, performing subsequent data analysis, and visualizing results. The library should be flexible, extensible, and avoid direct database connections, instead relying on user-provided APIs for execution.
+
+**High-Level Process:** The system will generally follow three main steps:
+1.  **Data Querying:** Retrieving data from various sources (SQL databases, APIs, function calls) based on natural language input.
+2.  **Data Analysis:** Performing analytical operations on the retrieved data (e.g., aggregations, calculations, transformations).
+3.  **Data Visualization:** Generating visualizations from the original or analyzed data.
+
+**Key Library Requirements & Design Principles:**
+
+1.  **Config-Driven:** All aspects of the library's behavior (workflows, agents, components, LLM settings, asset retrieval, etc.) must be configurable, primarily through YAML or similar structured configuration files.
+2.  **Modular Components:**
+    *   Develop a set of reusable components (e.g., `QueryRewriter`, `SchemaRetriever`, `CodeGenerator`, `AnalyticsFunction`, `VisualizationGenerator`).
+    *   These components should be designed to be composable into predefined **Workflows** (orchestrated through predefined code paths) or usable as **Tools** by **Agents** (where LLMs dynamically direct their own processes and tool usage).
+    *   Consider a base component class and potential hierarchies (e.g., `BaseExecutor` -> `APIBasedCodeExecutor`, `InMemoryCodeExecutor` [for local testing/simulation]).
+3.  **Orchestration Abstraction:**
+    *   Initial support for **LangGraph** (using its Graph API style for defining workflows/agents).
+    *   Crucially, design the library to be **loosely coupled** with the orchestration framework. It should be straightforward to add support for other frameworks like CrewAI, Autogen, or Pydantic AI in the future without major refactoring of core components. This implies defining clear interfaces or adapter layers.
+4.  **Code Generation Focus (No Direct DB Access):**
+    *   The library's primary output for data interaction is code (SQL, Python) or structured tool/function calls.
+    *   It will **not** directly execute queries against databases. Instead, it will generate the necessary code/calls, which are then passed to user-provided API endpoints for execution.
+    *   Provide a library-level option to restrict code generation to **SQL only** (still allowing Python-based custom functions as tool calls) or enable generation of any code type (e.g., Python for analysis/visualization).
+5.  **Asset Management for Data Querying (RAG):**
+    *   Data Querying relies heavily on contextual assets. Users will provide:
+        *   **Rules:** Custom business logic, definitions, or constraints for a use case (e.g., "definition of delinquency rate").
+        *   **Examples:** Query-code pairs, optionally with reasoning, to guide LLM code generation (few-shot examples).
+        *   **Schema:** Database/API schema details (table/endpoint names, descriptions, column/field names, descriptions, types, sample values).
+    *   These assets will be provided via `yaml` or `txt` files.
+    *   Implement an **Asset Ingestion and Retrieval System**:
+        *   Ingest assets into a knowledge store (e.g., local FAISS/ChromaDB for simplicity, with hooks for future OpenSearch integration).
+        *   Support multiple retrieval strategies: dense (vector-based), sparse (e.g., BM25), hybrid, and tag-based filtering.
+        *   The retriever should be accessible as a component/tool, especially for agents.
+6.  **LLM Integration:**
+    *   Support multiple LLM providers (e.g., Azure OpenAI, Amazon Bedrock) through an abstracted interface. Start with **Azure OpenAI**.
+    *   Include a generic LLM generation component configurable for different tasks (e.g., query rewriting, code generation, planning).
+7.  **Typical Data Querying Workflow (Example):**
+    1.  Rewrite user question for clarity/specificity.
+    2.  Retrieve relevant schema, examples, and rules based on the (rewritten) query.
+    3.  Compose a final prompt incorporating the retrieved assets.
+    4.  Send to LLM for code generation.
+    5.  Pass generated code to a code execution API (user-provided endpoint) and receive results.
+8.  **Agent & Workflow Flexibility:**
+    *   Users should be able to define:
+        *   Simple workflows (e.g., SQL generation only).
+        *   Complex multi-step workflows (e.g., query -> analyze -> visualize using generated code or custom functions).
+        *   Individual agents (e.g., `DataQueryingAgent`, `DataAnalysisAgent`, `DataVisualizationAgent`).
+        *   Multi-agent systems (e.g., a main **Plan and Execute** agent orchestrating specialized sub-agents).
+    *   Support various agent architectures (e.g., ReAct, CoAct, ADaPT, ReWOO), though the initial focus for the main agent is Plan and Execute.
+    *   The Asset Retriever should be a configurable tool for agents, as context is vital (e.g., an `DataAnalysisAgent` might need rule definitions).
+
+**Initial Technology Stack Choices (for starting point):**
+*   Orchestration: LangGraph
+*   LLM Provider: Azure OpenAI
+*   Main Agent Type: Plan and Execute
+
+**Tasks for You (Act as an Expert Software Designer):**
+
+1.  **Detailed Folder Structure:**
+    *   Propose a clear, logical, and scalable folder structure for the `dataqa` library.
+    *   Include nested folders and key Python filenames (e.g., `interfaces.py`, `azure_llm.py`, `sql_code_generator.py`, `asset_retriever.py`, `workflow_builder.py`, `agent_factory.py`).
+    *   Suggest meaningful names for components, tools, tasks, functions, classes, and files that reflect their purpose and adhere to Python conventions.
+
+2.  **Common Configuration Structure:**
+    *   Define a common YAML (or JSON if you prefer, but YAML is often favored for readability) structure for declaring:
+        *   **LLM Providers & Models:** (e.g., specifying Azure OpenAI endpoint, API key, deployment name).
+        *   **Components/Tools:** Their types, specific configurations (e.g., prompt templates for a code generator, model to use).
+        *   **Asset Management:** Retriever types (dense, sparse, hybrid), knowledge base paths/configs.
+        *   **Workflows:** Definition of the graph (nodes representing components, edges representing data flow).
+        *   **Agents:** Agent type (e.g., PlanAndExecute, ReAct), tools available to the agent, system prompts, LLM configuration for the agent.
+        *   **Overall Library Settings:** (e.g., `sql_only_generation: true`).
+    *   Provide a small, illustrative example of a configuration file declaring a simple SQL generation workflow and a basic agent.
+
+Below is some rough overview of the code i have so far (take with a grain of salt). This is not a proposed structure at all. Do not use the structure but the code below might be a good reference on how we can call agents, workflows.. as you can see the sample code below has the naming all over the place, so change it as you see fit. 
+
+Directory Structure:
+dataqa/
+├── __init__.py
+├── errors.py
+├── memory.py
+├── state.py
+├── agent/
+│   ├── __init__.py
+│   ├── base.py
+│   ├── cwd_agent/
+│   │   ├── __init__.py
+│   │   ├── analytics_worker.py
+│   │   ├── cwd_agent.py
+│   │   ├── plot_worker.py
+│   │   ├── retrieval_worker.py
+│   │   ├── state.py
+├── components/
+│   ├── __init__.py
+│   ├── base_component.py
+│   ├── base_utils.py
+│   ├── gather.py
+│   ├── code_executor/
+│   │   ├── __init__.py
+│   │   ├── base_code_executor.py
+│   │   └── in_memory_code_executor.py
+│   ├── langgraph_conditional_edge/
+│   │   ├── __init__.py
+│   │   ├── base_conditional_edge.py
+│   │   └── categorical_variable_condition.py
+│   ├── llm_component/
+│   │   ├── __init__.py
+│   │   ├── base_llm_component.py
+│   │   └── base_prompt_llm_chain.py
+│   ├── plan_execute/
+│   │   ├── __init__.py
+│   │   ├── plan.py
+│   │   └── planner.py
+│   │   └── replanner.py
+│   │   └── worker.py
+│   ├── prompt/
+│   │   ├── __init__.py
+│   │   └── base_prompt.py
+│   └── retriever/
+│       ├── __init__.py
+│       ├── base_retriever.py
+│       └── tag_retriever.py
+├── data_models/
+│   ├── __init__.py
+│   └── asset_models.py
+├── llm/
+│   ├── __init__.py
+│   ├── base_llm.py
+│   └── openai.py
+├── pipelines/
+│   ├── __init__.py
+│   ├── constants.py
+│   ├── pipeline.py
+│   └── schema.py
+├── tools/
+│   ├── __init__.py
+│   ├── analytics/
+│   │   ├── __init__.py
+│   │   ├── tool_generator.py
+│   ├── visualization/
+│   │   ├── __init__.py
+└── utils/
+    ├── __init__.py
+    ├── component_utils.py
+    ├── data_model_util.py
+    ├── ingest_knowledge.py
+    ├── prompt_utils.py
+    └── utils.py
+
+
+File: dataqa/__init__.py
+=======================================
+
+
+File: dataqa/errors.py
+=======================================
+from typing import Optional
+
+
+class PipelineConfigError(Exception):
+    def __init__(self, message: Optional[str] = None):
+        super().__init__()
+        self.message = message
+
+    def __str__(self):
+        return self.message
+
+    def __repr__(self):
+        return str(self)
+
+
+File: dataqa/memory.py
+=======================================
+import pandas as pd
+from typing import Dict
+
+class Memory:
+    # TODO: memory management
+    # remove variables 
+    # summary
+    dataframes: Dict[str, pd.DataFrame]
+
+    def __init__(self):
+        self.dataframes = {}
+
+    def list_dataframes(self):
+        return list(self.dataframes.keys())
+
+    def get_dataframe(self, name: str):
+        return self.dataframes.get(name)
+
+    def put_dataframe(self, name: str, df: pd.DataFrame):
+        self.dataframes[name] = df
+
+    def summarize_one_dataframe(self, df_name: str, df: pd.DataFrame):
+        message = (
+            f"- dataframe_name: {df_name}\n"
+            f"  size: {len(df)} rows, {len(df.columns)} columns\n"
+            f"  Five sample rows:\n"
+        )
+        sampled_rows = df.sample(n=min(5, len(df))).sort_index().to_markdown()
+        message += '\n'.join([f"    {s}" for s in sampled_rows.split('\n')])
+        return message
+
+    def summarize_dataframe(self):
+        if not self.dataframes:
+            return "You don't have access to any dataframes yet."
+        
+        message = [f"You have access to the following {len(self.dataframes)} dataframes:"]
+        for k, v in self.dataframes.items():
+            message.append(self.summarize_one_dataframe(k, v))
+        return '\n\n'.join(message)
+
+    def summarize(self, name: str): # As per image, but unused
+        pass
+
+
+File: dataqa/state.py
+=======================================
+from pydantic import BaseModel, Field
+from typing import List, Union, Any
+from datetime import date, datetime
+from dataqa.components.code_executor.base_code_executor import CodeExecutorOutput
+
+
+class PipelineError(BaseModel):
+    error_code: int
+    error_type: str
+    error_message: str
+
+
+class PipelineInput(BaseModel):
+    query: str = Field(description="the input query.")
+    context: List[str] = (
+        Field(
+            default_factory=list, description="the conversation History"
+        )
+    )
+    previous_rewritten_query: str = Field(
+        default="",
+        description="the `rewritten_query` field from the last state in the same conversation.",
+    )
+    datetime: str = Field(default=str(datetime.today()), description="current datetime")
+
+
+class PipelineOutput(BaseModel):
+    rewritten_query: str = Field(
+        default="None",
+        description="""
+        The newly generated rewritten query for the input query. 
+        Any rewriter components should always save rewritten query to this field.
+        """,
+    )
+    code: str = Field(default="", description="the final generated code to be returned")
+    execution_output: CodeExecutorOutput = Field(
+        default=None,
+        description="execution output, containing dataframes, texts, images etc",  # TODO list?
+    )
+    text: str = Field(
+        default="", description="any textual output generated from LLM pipeline"
+    )
+
+
+class BasePipelineState(BaseModel):
+    # static input fields
+    input: PipelineInput = Field(description="the input to a pipeline")
+    return_output: PipelineOutput = Field(
+        default=None, description="The output that may be displayed to users."
+    )
+
+    # metadata
+    total_time: float = Field(default=0, description="Pipeline running time")
+    error: Union[PipelineError, None] = Field(
+        default=None, description="Save the exception occured during pipeline execution"
+    )
+    full_state: Any = Field(
+        default=None,
+        description="Return full pipeline state for debugging and logging purpose",
+    )
+
+
+File: dataqa/agent/__init__.py
+=======================================
+
+
+
+File: dataqa/agent/base.py
+=======================================
+from langgraph.graph.graph import CompiledGraph
+
+from dataqa.memory import Memory
+from dataqa.llm.base_llm import BaseLLM
+
+
+class Agent:
+    name: str
+    memory: Memory
+    llm: BaseLLM
+    workflow: CompiledGraph
+
+    def __init__(self, memory: Memory, llm: BaseLLM):
+        self.memory = memory
+        self.llm = llm
+        self.workflow = self.build_workflow(memory=memory, llm=llm)
+
+    def build_workflow(self, memory: Memory, llm: BaseLLM) -> CompiledGraph:
+        raise NotImplementedError
+
+    def display_workflow(self, out_path: str): # Added type hint for out_path
+        img = self.workflow.get_graph(xray=True).draw_mermaid_png(output_file_path=out_path)
+
+    async def __call__(self, state): 
+        raise NotImplementedError
+
+
+    
+File: dataqa/agent/cwd_agent/__init__.py
+=======================================
+
+
+File: dataqa/tools/analytics/tool_generator.py
+=======================================
+from typing import List, Literal, Union, Dict, Tuple
+from langchain.tools import tool, StructuredTool # Assuming StructuredTool is the intended return type for get_..._tool
+from dataqalib.memory import Memory # Assuming this is the correct Memory class
+
+# Tool: CalculateCorrelationMatrix
+def get_correlation_matrix_tool(memory: Memory) -> StructuredTool:
+    name = "CalculateCorrelationMatrix"
+
+    @tool
+    def CalculateCorrelationMatrix(
+        df_name: str,
+        output_df_name: str,
+        method: Literal['pearson', 'kendall', 'spearman'] = 'pearson',
+        min_periods: int = 1,
+        numeric_only: bool = False
+    ) -> str:
+        """
+        Compute pairwise correlation of columns for dataframe called `df_name`, excluding NA/null values, save the correlation matrix as a new dataframe called `output_df_name`.
+
+        Parameters
+        ----------
+        df_name : str
+            The name of the dataframe to calculate correlation.
+        output_df_name : str
+            The name of the correlation matrix as a dataframe.
+        method : {'pearson', 'kendall', 'spearman'} or callable, default 'pearson'
+            Method of correlation:
+            * pearson : standard correlation coefficient
+            * kendall : Kendall Tau correlation coefficient
+            * spearman : Spearman rank correlation
+        min_periods : int, optional
+            Minimum number of observations required per pair of columns
+            to have a valid result. Currently only available for Pearson and Spearman correlation.
+        numeric_only : bool, default False
+            Include only `float`, `int` or `boolean` data.
+
+        Returns
+        -------
+        Tool calling response: str
+            - If successful, return a message saying that "The correlation matrix of dataframe `df_name` has been calculated and saved in a new dataframe `output_df_name`."
+            - If failed, return a message of the runtime exception.
+
+        Example
+        -------
+        Assume that we have a dataframe called "df_abc" with 5 rows and 3 columns A, B, C.
+        >>> print(df_abc)
+             A         B         C
+        0  0.655982  0.998371  0.431369
+        1  0.093596  0.595080  0.873763
+        2  0.379816  0.065121  0.772393
+        3  0.479515  0.020517  0.0855805
+        4  0.433931  0.045164  0.734673
+
+        Calculate the correlation matrix of df_abc in a dataframe df_abc_corr
+        >>> CalculateCorrelationMatrix(df_name="df_abc", output_df_name="df_abc_corr")
+        >>> print(df_abc_corr)
+                  A         B         C
+        A  1.000000  0.614068 -0.613955
+        B  0.614068  1.000000 -0.208519
+        C -0.613955 -0.208519  1.000000
+        """
+        try:
+            df = memory.get_dataframe(df_name)
+            out_df = df.corr(method=method, min_periods=min_periods, numeric_only=numeric_only)
+            memory.put_dataframe(output_df_name, out_df)
+            return f"DataFrame {output_df_name} has been successfully generated as the correlation matrix of {df_name}."
+        except Exception as e:
+            return f"Tool {name} failed with the following exception\n{str(e)}"
+    # The @tool decorator makes CalculateCorrelationMatrix callable and assigns attributes.
+    # If explicit naming is needed for registration or consistency:
+    # CalculateCorrelationMatrix.name = name 
+    return CalculateCorrelationMatrix
+
+# Tool: nLargest
+def get_n_largest_tool(memory: Memory) -> StructuredTool:
+    name = "nLargest"
+
+    @tool
+    def nLargest(
+        df_name: str,
+        output_df_name: str,
+        n: int,
+        columns: Union[str, List[str]],
+        keep: Literal['first', 'last', 'all'] = "first"
+    ) -> str:
+        """
+        Return the first `n` rows with the largest values in `columns`, in descending order. The columns that are not specified are returned as well, but not used for ordering.
+
+        Parameters
+        ----------
+        df_name : str
+            The name of the dataframe to get n-largest rows.
+        output_df_name : str
+            The name of n-largest rows as a dataframe.
+        n : int
+            Number of rows to return.
+        columns : column name or list of column names
+            Column label(s) to order by.
+        keep : {'first', 'last', 'all'}, default 'first'
+            Where there are duplicate values:
+            - `first` : prioritize the first occurrence(s)
+            - `last`  : prioritize the last occurrence(s)
+            - `all`   : keep all the ties of the smallest item even if it means selecting more than ``n`` items.
+
+        Returns
+        -------
+        Tool calling response: str
+            - If successful, return a message saying that "N-largest rows of dataframe `df_name` has been calculated and saved in a new dataframe `output_df_name`."
+            - If failed, return a message of the runtime exception.
+
+        Example
+        -------
+        Assume that we have a dataframe called "df_country"
+        >>> print(df_country)
+                   population      GDP alpha-2
+        Italy      59000000  1937894        IT
+        Malta        434000    12011        MT
+        Maldives     434000     4520        MV
+        Iceland      337000    17036        IS
+
+        Select two countries with the largest population
+        >>> nLargest(df_name="df_country", output_df_name="df_top_2_population", n=2, columns="population")
+        >>> print(df_top_2_population)
+                   population      GDP alpha-2
+        Italy      59000000  1937894        IT
+        Malta        434000    12011        MT
+
+        When using ``keep='last'``, ties are resolved in reverse order:
+        >>> nLargest(df_name="df_country", output_df_name="df_top_2_population", n=2, columns="population", keep="last")
+        >>> print(df_top_2_population)
+                   population      GDP alpha-2
+        Italy      59000000  1937894        IT
+        Malta        434000    12011        MT
+
+        When using ``keep='all'``, the number of element kept can go beyond ``n``
+        if there are duplicate values for the largest element, all the
+        ties are kept:
+        >>> nLargest(df_name="df_country", output_df_name="df_top_2_population", n=2, columns="population", keep="all")
+        >>> print(df_top_2_population)
+                   population      GDP alpha-2
+        Italy      59000000  1937894        IT
+        Malta        434000    12011        MT
+        Maldives     434000     4520        MV
+        """
+        try:
+            df = memory.get_dataframe(df_name)
+            out_df = df.nlargest(n, columns=columns, keep=keep)
+            memory.put_dataframe(output_df_name, out_df)
+            return f"Top {n} largest rows of {df_name} has been calculated and saved in a new dataframe {output_df_name}."
+        except Exception as e:
+            return f"Tool {name} failed with the following exception\n{str(e)}"
+    return nLargest
+
+# Tool: nSmallest
+def get_n_smallest_tool(memory: Memory) -> StructuredTool:
+    name = "nSmallest"
+
+    @tool
+    def nSmallest(
+        df_name: str,
+        output_df_name: str,
+        n: int,
+        columns: Union[str, List[str]],
+        keep: Literal['first', 'last', 'all'] = "first"
+    ) -> str:
+        """
+        Return the first `n` rows with the smallest values in `columns`, in ascending order. The columns that are not specified are returned as well, but not used for ordering.
+
+        Parameters
+        ----------
+        df_name : str
+            The name of the dataframe to get n-smallest rows.
+        output_df_name : str
+            The name of n-smallest rows as a dataframe.
+        n : int
+            Number of rows to return.
+        columns : column name or list of column names
+            Column label(s) to order by.
+        keep : {'first', 'last', 'all'}, default 'first'
+            Where there are duplicate values:
+            - `first` : prioritize the first occurrence(s)
+            - `last`  : prioritize the last occurrence(s)
+            - `all`   : keep all the ties of the smallest item even if it means selecting more than ``n`` items.
+
+        Returns
+        -------
+        Tool calling response: str
+            - If successful, return a message saying that "N-smallest rows of dataframe `df_name` has been calculated and saved in a new dataframe `output_df_name`."
+            - If failed, return a message of the runtime exception.
+
+        Example
+        -------
+        Assume that we have a dataframe called "df_country"
+        >>> print(df_country)
+                   population      GDP alpha-2
+        Italy      59000000  1937894        IT
+        Malta        434000    12011        MT
+        Maldives     434000     4520        MV
+        Iceland      337000    17036        IS
+
+        Select two countries with the smallest population
+        >>> nSmallest(df_name="df_country", output_df_name="df_top_2_population", n=2, columns="population")
+        >>> print(df_top_2_population)
+                   population      GDP alpha-2
+        Iceland      337000    17036        IS
+        Malta        434000    12011        MT
+
+        When using ``keep='last'``, ties are resolved in reverse order:
+        >>> nSmallest(df_name="df_country", output_df_name="df_top_2_population", n=2, columns="population", keep="last")
+        >>> print(df_top_2_population)
+                   population      GDP alpha-2
+        Iceland      337000    17036        IS
+        Maldives     434000     4520        MV
+
+        When using ``keep='all'``, the number of element kept can go beyond ``n``
+        if there are duplicate values for the largest element, all the
+        ties are kept:
+        >>> nSmallest(df_name="df_country", output_df_name="df_top_2_population", n=2, columns="population", keep="all")
+        >>> print(df_top_2_population)
+                   population      GDP alpha-2
+        Iceland      337000    17036        IS
+        Malta        434000    12011        MT
+        Maldives     434000     4520        MV
+        """
+        try:
+            df = memory.get_dataframe(df_name)
+            out_df = df.nsmallest(n, columns=columns, keep=keep)
+            memory.put_dataframe(output_df_name, out_df)
+            return f"Top {n} smallest rows of {df_name} has been calculated and saved in a new dataframe {output_df_name}."
+        except Exception as e:
+            return f"Tool {name} failed with the following exception\n{str(e)}"
+    return nSmallest
+
+# Tool: SortValue
+def get_sort_value_tool(memory: Memory) -> StructuredTool:
+    name = "SortValue"
+
+    @tool
+    def SortValue(
+        df_name: str,
+        output_df_name: str,
+        by: Union[str, List[str]],
+        axis: Union[int, Literal['index', 'columns']] = 0,
+        ascending: Union[bool, List[bool], Tuple[bool, ...]] = True,
+    ) -> str:
+        """
+        Sort by the values along either axis.
+
+        Parameters
+        ----------
+        df_name : str
+            The name of the dataframe to get n-smallest rows.
+        output_df_name : str
+            The name of n-smallest rows as a dataframe.
+        by : str or list of str
+            Name or list of names to sort by.
+            - if `axis` is 0 or 'index' then `by` may contain index levels and/or column labels.
+            - if `axis` is 1 or 'columns' then `by` may contain column levels and/or index labels.
+        axis : {0 or 'index', 1 or 'columns'}, default 0
+            Axis to be sorted.
+        ascending : bool or list of bool, default True
+            Sort ascending vs. descending. Specify list for multiple sort orders. If this is a list of bools, must match the length of the by.
+
+        Returns
+        -------
+        Tool calling response: str
+            - If successful, return a message saying that "The sorted dataframe `df_name` has been created and saved as a new dataframe `output_df_name`."
+            - If failed, return a message of the runtime exception.
+
+        Example
+        -------
+        >>> df
+          col1  col2 col3 col4
+        0    A     2    0    a
+        1    A     1    1    b
+        2    B     9    9    c
+        3  NaN     8    4    d
+        4    D     7    2    e
+        5    C     4    3    f
+
+        Sort by col1
+        >>> SortValue(df_name='df', output_df_name='df_sort', by=['col1'])
+        >>> print(df_sort)
+          col1  col2 col3 col4
+        0    A     2    0    a
+        1    A     1    1    b
+        2    B     9    9    c
+        5    C     4    3    f
+        4    D     7    2    e
+        3  NaN     8    4    d
+        """
+        try:
+            df = memory.get_dataframe(df_name)
+            out_df = df.sort_values(by=by, axis=axis, ascending=ascending)
+            memory.put_dataframe(output_df_name, out_df)
+            return f"The sorted dataframe {df_name} has been created and saved as a new dataframe {output_df_name}."
+        except Exception as e:
+            return f"Tool {name} failed with the following exception\n{str(e)}"
+    return SortValue
+
+DEFAULT_ANALYTICS_TOOLS = {
+    'CalculateCorrelationMatrix': get_correlation_matrix_tool,
+    'nLargest': get_n_largest_tool,
+    'nSmallest': get_n_smallest_tool,
+    'SortValue': get_sort_value_tool,
+}
+
+def get_analytics_tools(
+    memory: Memory,
+    tool_names: Union[List[str], Dict[str, callable]] = DEFAULT_ANALYTICS_TOOLS, # Made Dict more specific
+) -> List[StructuredTool]: # Assuming the goal is a list of tool instances
+    tools = []
+    # If tool_names is a list, iterate through it. If it's a dict (like default), iterate its keys.
+    names_to_load = tool_names if isinstance(tool_names, list) else tool_names.keys()
+    
+    for name in names_to_load:
+        if name not in DEFAULT_ANALYTICS_TOOLS:
+            raise ValueError(f"Tool {name} is not defined.")
+        tool_factory = DEFAULT_ANALYTICS_TOOLS[name]
+        tools.append(tool_factory(memory=memory))
+    return tools
+
+
+File: dataqa/agent/cwd_agent/analytics_worker.py
+=======================================
+from typing import List, Tuple
+
+from langgraph.graph import CompiledGraph
+from langgraph.prebuilt import create_react_agent
+from langchain.tools import StructuredTool, tool
+from langchain.prompts import ChatPromptTemplate
+
+from dataqa.agent.base import Agent
+from dataqa.memory import Memory
+from dataqa.llm.openai import AzureOpenAI
+from dataqa.components.plan_execute.plan import (
+    WorkerResponse,
+    TaskResponse,
+    WorkerName
+)
+from dataqa.agent.cwd_agent.state import AnalyzerState, CwdState
+from dataqa.utils.prompt_utils import prompt_type, build_prompt
+from dataqa.tools.analytics.tool_generator import get_analytics_tools
+
+
+class AnalyticsWorker(Agent):
+    def __init__(self, memory: Memory, llm: AzureOpenAI, prompt: prompt_type):
+        self.name = WorkerName.AnalyticsWorker.value
+        self.prompt = build_prompt(prompt)
+        super().__init__(memory=memory, llm=llm)
+
+
+    def build_workflow(self, memory: Memory, llm: AzureOpenAI) -> CompiledGraph:
+        tools = get_analytics_tools(memory=memory)
+        return create_react_agent(model=llm.get_model(), tools=tools)
+
+    async def __call__(self, state: CwdState):
+        task = state.plan.tasks[0].task_description
+        messages = self.prompt.invoke(dict(
+            dataframe_summary=self.memory.summarize_dataframe(),
+            plan=state.plan.summarize(),
+            task=task
+        ))
+        response = await self.workflow.ainvoke({'messages': messages.to_messages()})
+        response_messages = response['messages']
+        return {
+            "worker_response": WorkerResponse(
+                task_response=[TaskResponse(
+                    worker=self.name,
+                    task_description=task,
+                    response=response_messages
+                )],
+            ),
+            "analyzer_state": AnalyzerState(messages=response_messages) 
+        }
+
+
+File: dataqa/agent/cwd_agent/cwd_agent.py
+=======================================
+from typing import Literal, Dict, Union
+
+from langgraph.graph import START, END, StateGraph
+
+from dataqa.memory import Memory
+from dataqa.agent.base import Agent
+from dataqa.llm.base_llm import BaseLLM
+from dataqa.agent.cwd_agent.state import CwdState
+from dataqa.components.plan_execute.planner import Planner
+from dataqa.components.plan_execute.replanner import Replanner
+from dataqa.agent.cwd_agent.retrieval_worker import RetrievalWorker
+from dataqa.agent.cwd_agent.analytics_worker import AnalyticsWorker
+from dataqa.agent.cwd_agent.plot_worker import PlotWorker
+from dataqa.components.code_executor.in_memory_code_executor import InMemoryCodeExecutorConfig
+from dataqa.components.plan_execute.plan import WorkerName
+
+
+def task_router(state: CwdState) -> Union[str, object]:
+    # TODO: quit if reach max number of steps
+    if getattr(state, 'final_response', ''):
+        return END
+    
+    if not state.plan or not state.plan.tasks:
+        return ValueError("Either  `final_response` or `plan` should be provided to task_router")
+    
+    return state.plan.tasks[0].worker.value 
+
+
+class CwdAgent(Agent):
+    """
+    Cwd Agent orchestrates Planner, Replanner, and various Workers.
+    """
+    def __init__(self,
+                 memory: Memory,
+                 llm: BaseLLM,
+                 prompts: Dict,
+                 sql_execution_config: InMemoryCodeExecutorConfig
+                 ):
+        self.prompts = self._preprocess_prompts(prompts)
+        self.sql_execution_config = sql_execution_config
+        super().__init__(memory=memory, llm=llm)
+
+    def _preprocess_prompts(self, prompts: Dict) -> Dict:
+        schema = prompts.get('schema', '')
+        for name in [
+            'planner_prompt', 'replanner_prompt', 
+            'sql_generator_prompt', 'analytics_prompt', 'plot_prompt'
+        ]
+            for msg in prompts[name]:
+                msg['content'] = msg['content'].replace('<schema>', schema)
+        return prompts
+
+    def build_workflow(self, memory: Memory, llm: BaseLLM) -> CompiledGraph:
+        self.planner = Planner(memory=memory, llm=llm, prompt=self.prompts['planner_prompt'])
+        self.replanner = Replanner(memory=memory, llm=llm, prompt=self.prompts['replanner_prompt'])
+        self.retrieval_worker = RetrievalWorker(memory=memory, llm=llm, 
+                                           sql_prompt=self.prompts['sql_generator_prompt'],
+                                           sql_execution_config=self.sql_execution_config)
+        self.analytics_worker = AnalyticsWorker(memory=memory, llm=llm, 
+                                           prompt=self.prompts['analytics_prompt'])
+        self.plot_worker = PlotWorker(memory=memory, llm=llm, 
+                                 prompt=self.prompts['plot_prompt'])
+
+        # Define the graph
+        workflow = StateGraph(CwdState)
+        workflow.add_node("planner", self.planner)
+        workflow.add_node("replanner", self.replanner) 
+        workflow.add_node(WorkerName.RetrievalWorker.value, self.retrieval_worker)
+        workflow.add_node(WorkerName.AnalyticsWorker.value, self.analytics_worker)
+        workflow.add_node(WorkerName.PlotWorker.value, self.plot_worker)
+
+        # Define edges
+        workflow.add_edge(START, "planner")
+        
+        workflow.add_edge("planner", "replanner") # Planner output goes to Replanner
+
+        # Workers return to Replanner to decide next step or finish
+        workflow.add_edge(WorkerName.RetrievalWorker.value, 'replanner')
+        workflow.add_edge(WorkerName.AnalyticsWorker.value, 'replanner')
+        workflow.add_edge(WorkerName.PlotWorker.value, 'replanner')
+
+        # Replanner routes to a worker or to END via task_router
+        workflow.add_conditional_edges("planner",task_router)
+        workflow.add_conditional_edges("replanner",task_router)
+        return workflow.compile()
+
+    def display_workflow(self): 
+        super().display_workflow()
+        self.retrieval_worker.display_workflow()
+        self.analytics_worker.display_workflow()
+        self.plot_worker.display_workflow()
+
+    async def __call__(self, state_input: CwdState) -> CwdState:
+        async for event in self.workflow.astream(
+            state, 
+            stream_mode="updates",
+            subgraphs=True,
+        ):
+            print(event[0])
+            print(self.memory.summarize_dataframe())
+            for k, v in event[1].items():
+                print(f'- {k}')
+                print(self.memory.summarize_dataframe())
+                for k1, v1 in v.items():
+                    if hasattr(state, k1):
+                        state.update_field(k1, v1)
+            return state
+
+
+File: dataqa/agent/cwd_agent/plot_worker.py
+=======================================
+from typing import List, Tuple
+
+from langgraph.graph.graph import CompiledGraph
+from langgraph.prebuilt import create_react_agent
+from langchain.tools import tool
+from langchain.prompts import ChatPromptTemplate 
+
+from dataqa.agent.base import Agent
+from dataqa.memory import Memory
+from dataqa.llm.openai import AzureOpenAI
+from dataqa.components.plan_execute.plan import (
+    WorkerResponse,
+    TaskResponse,
+    WorkerName
+)
+from dataqa.agent.cwd_agent.state import CwdState 
+from dataqa.utils.prompt_utils import build_prompt, prompt_type
+
+class PlotWorker(Agent):
+    def __init__(self, memory: Memory, llm: AzureOpenAI, prompt: prompt_type):
+        self.name = WorkerName.PlotWorker.value
+        self.prompt = build_prompt(prompt) # prompt is a list of message configs or similar
+        super().__init__(memory=memory, llm=llm)
+
+    def build_workflow(self, memory: Memory, llm: AzureOpenAI) -> CompiledGraph:
+        pass
+
+
+File: dataqa/agent/cwd_agent/retrieval_worker.py
+=======================================
+from typing import Union, Dict
+
+from langgraph.graph import END, StateGraph, START
+from langgraph.graph.graph import CompiledGraph
+from dataqa.memory import Memory
+from dataqa.components.code_executor.in_memory_code_executor import InMemoryCodeExecutor, InMemoryCodeExecutorConfig
+from dataqa.llm.openai import AzureOpenAI
+from dataqa.components.plan_execute.plan import (
+    WorkerResponse,
+    TaskResponse,
+    WorkerName
+)
+from dataqa.agent.cwd_agent.state import (
+    CwdState,
+    RetrievalWorkerState,
+    SQLExecutorOutput,
+    SQLGeneratorOutput
+)
+from dataqa.utils.prompt_utils import build_prompt, prompt_type
+from dataqa.agent.base import Agent
+
+
+class SQLGenerator:
+    def __init__(self, llm: AzureOpenAI, prompt: prompt_type):
+        self.llm = llm
+        self.prompt = build_prompt(prompt)
+
+    async def __call__(self, state: RetrievalWorkerState) -> Dict[str, SQLGeneratorOutput]:
+        messages = self.prompt.invoke(dict(query=state.task))
+        response = await self.llm.ainvoke(messages=messages, with_structured_output=SQLGeneratorOutput)
+        return {"sql_generator_output": response.generation}
+
+
+class SQLExecutor(InMemoryCodeExecutor):
+    def __init__(self, config: Union[InMemoryCodeExecutorConfig, Dict], memory: Memory, **kwargs):
+        super().__init__(config=config, **kwargs)
+        self.memory = memory
+
+    async def __call__(self, state: RetrievalWorkerState):
+        df_name = state.sql_generator_output.output
+        sql = state.sql_generator_output.sql
+        try:
+            result_df = self.connection.execute(sql).fetchdf()
+            self.memory.put_dataframe(name=df_name, df=result_df)
+            response = SQLExecutorOutput(sql=sql, dataframe=df_name)
+        except Exception as e:
+            response = SQLExecutorOutput(sql=sql, error=str(e))
+        return {'sql_executor_output': response}
+
+
+class RetrievalWorker(Agent):
+    def __init__(self,
+                 memory: Memory,
+                 llm: AzureOpenAI,
+                 sql_prompt: prompt_type,
+                 sql_execution_config: InMemoryCodeExecutorConfig
+                 ):
+        self.name = WorkerName.RetrievalWorker.value
+        self.sql_prompt = sql_prompt
+        self.sql_execution_config = sql_execution_config
+        super().__init__(memory=memory, llm=llm)
+
+    def build_workflow(self, memory: Memory, llm: AzureOpenAI) -> CompiledGraph:
+        workflow = StateGraph(RetrievalWorkerState)
+
+        workflow.add_node('sql_generator', SQLGenerator(llm=self.llm, prompt=self.sql_prompt))
+        workflow.add_node('sql_executor', SQLExecutor(config=self.sql_execution_config, memory=memory))
+
+        workflow.add_edge(START, 'sql_generator')
+        workflow.add_edge('sql_generator', 'sql_executor')
+        workflow.add_edge('sql_executor', END)
+
+        return workflow.compile()
+
+    async def __call__(self, state: CwdState) -> Dict:
+        task = state.plan.tasks[0].task_description
+        response = await self.workflow.ainvoke(input=RetrievalWorkerState(task=task))
+        response = RetrievalWorkerState(**response) 
+        
+        output = response.sql_executor_output
+        
+        message = (
+            f"To complete the task {task}, the following SQL has been generated:\n"
+            f"```sql\n{output.sql}\n```\n"
+        )
+
+        if output.dataframe:
+            message += f"After running this SQL query, the output is saved in dataframe {output.dataframe}."
+        elif output.error:
+            message += f"While running this SQL query, the following runtime error was thrown:\n{output.error}"
+        
+        return {
+            "worker_response": WorkerResponse(
+                task_response=[TaskResponse(
+                    worker=self.name,
+                    task_description=task,
+                    response=message
+                )],
+            ),
+            "retriever_state": [response]
+        }
+
+
+File: dataqa/agent/cwd_agent/state.py
+=======================================
+from enum import Enum
+from pydantic import BaseModel, Field
+from typing import Annotated, List
+from operator import add 
+
+from dataqa.components.plan_execute.plan import (
+    Plan,
+    WorkerResponse,
+    worker_response_reducer
+)
+
+
+class SQLGeneratorOutput(BaseModel):
+    sql: str = Field(description="the generated SQL query")
+    reasoning: str = Field(description="the reasoning procedure for generating SQL")
+    output: str = Field(description="the name of the output dataframe obtained by executing the generated SQL")
+
+
+class SQLExecutorOutput(BaseModel):
+    sql: str = ''
+    dataframe: str = ''
+    error: str = ''
+
+
+class RetrievalWorkerState(BaseModel):
+    task: str
+    sql_generator_output: SQLGeneratorOutput = None
+    sql_executor_output: SQLExecutorOutput = None
+
+
+class AnalyzerState(BaseModel):
+    messages: Annotated[List, add] = Field(default_factory=list)
+
+
+class CwdState(BaseModel):
+    query: str # TODO conversation history
+    final_response: str = ''
+    plan: Plan = None
+    worker_response: Annotated[WorkerResponse, worker_response_reducer] = WorkerResponse()
+    # log: Annotated[List[Message], add] = Field(default_factory=list) 
+    retriever_state: Annotated[List[RetrievalWorkerState], add] = Field(default_factory=list)
+    analyzer_state: Annotated[List[AnalyzerState], add] = Field(default_factory=list)
+
+
+    def update_field(self, field, value):
+        if not hasattr(self, field):
+            raise ValueError(f"{field} is not a valid field for CwdState")
+        if field in ["log", "retriever_state", "analyzer_state"]: 
+            value = getattr(self, field) + value
+        if field == "worker_response":
+            value = worker_response_reducer(getattr(self, field), value)
+        setattr(self, field, value)
+
+
+
+File: dataqa/components/__init__.py
+=======================================
+
+
+File: dataqa/components/base_component.py
+=======================================
+from pydantic import BaseModel, Field
+from typing import Any, Dict, Optional, Union, Type
+from abc import ABC, abstractmethod
+import logging
+from langchain_core.runnables.config import RunnableConfig
+from pydantic import BaseModel, Field
+
+from dataqa.components.base_utils import import get_field
+
+logger = logging.getLogger(__name__)
+
+
+class Variable(BaseModel):
+    """Define a variable, can be used as the input or output for a tool."""
+
+    name: str
+    type: str
+    description: Optional[str] = None
+    optional: Optional[bool] = Field(
+        default=False, description="If this variable is optional in the input"
+    )
+    default: Optional[Any] = Field(
+        default=None, description="If the variable has a default value."
+    )
+
+
+class OutputVariable(Variable):
+    display: Optional[bool] = Field(
+        default=True,
+        description="If this variable appears in the output message to the orchestrator",
+    )
+
+
+class ComponentInput(BaseModel):
+    """Base input for all components"""
+
+    # Actual input models for the components are defined in the component classes
+    # DISCUSS: component_name, component_type will be used for logging. we could also think about if we can use them as part of .run() method
+    component_name: str = Field(description="Name of the target component")
+    component_type: str = Field(description="Type of the target component")
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Metadata about the input"
+    )
+    # run_mode: langgraph
+
+
+class ComponentOutput(BaseModel):
+    """Base output for all components."""
+
+    output_data: Any = Field(description="Output data of the component")
+    # DISCUSS: component_name, component_type will be used for logging. we could also think about if we can use them as part of .run() method
+    component_name: str = Field(
+        description="Name of the component that produced this output"
+    )
+    component_type: str = Field(description="Type of the component")
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Metadata about the output (e.g., processing time, tokens)",
+    )
+
+
+class ComponentConfig(BaseModel):
+    """Base configuration for all components."""
+
+    name: str = Field(description="Name of the component instance")
+
+
+class Component(ABC):
+    """Abstract base class for all components"""
+
+    is_component = True
+
+    def __init__(self, config: Union[ComponentConfig, Dict] = None, **kwargs) -> None:
+        self.config = config
+        if isinstance(config, Dict):
+            self.config = self.config_base_model(**config)
+        if not config:
+            self.config = self.config_base_model(**kwargs)
+        self.input_mapping: Dict[str, str] = None
+
+    @property
+    @abstractmethod
+    def config_base_model(self) -> Type[BaseModel]:
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def component_type(self) -> str:
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def input_base_model(self) -> Type[BaseModel]:
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def output_base_model(self) -> Type[BaseModel]:
+        raise NotImplementedError
+
+    @abstractmethod
+    async def run(
+        self, input_data: ComponentInput, config: RunnableConfig
+    ) -> ComponentOutput:
+        """Abstract method to execute the component's logic"""
+        pass
+
+    @abstractmethod
+    def display(self):
+        pass
+
+    def set_input_mapping(self, mapping):
+        # validate
+        for field in mapping:
+            assert field in self.input_base_model.__fields__  # TODO field is optional
+
+        self.input_mapping = mapping
+
+    async def __call__(self, state, config: Optional[RunnableConfig] = {}):
+        # build input data from state
+        input_data = {}
+        for field, mapped_field in self.input_mapping.items():
+            input_data[field] = get_field(state, mapped_field)
+
+        input_data = self.input_base_model(**input_data)
+
+        # run
+        response = await self.run(input_data=input_data, config=config)
+
+        # validate output and update state
+        assert isinstance(response, self.output_base_model)
+
+        return {f"{self.config.name}_output": response}
+
+
+File: dataqa/components/base_utils.py
+=======================================
+from pydantic import BaseModel
+
+
+def get_field(model: BaseModel, field: str):
+    try:
+        fields = field.split(".")
+        for field in fields:
+            model = getattr(model, field)
+        return model
+    except AttributeError as e:
+        raise e
+
+
+File: dataqa/components/gather.py
+=======================================
+import logging
+from dataqa.components.base_component import Component, ComponentConfig
+from dataqa.state import PipelineOutput
+
+logger = logging.getLogger(__name__)
+
+
+class GatherOutput(Component):
+    config_base_model = ComponentConfig
+    input_base_model = PipelineOutput
+    output_base_model = PipelineOutput
+    component_type = "GatherOutput"
+
+    def display(self):
+        logger.info("Gather PipelineOutput")
+
+    async def run(self, input_data, config):
+        return input_data
+
+
+File: dataqa/components/code_executor/__init__.py
+=======================================
+
+
+File: dataqa/components/code_executor/base_code_executor.py
+=======================================
+from abc import ABC, abstractmethod
+from typing import Any, List
+
+from pydantic import Field, BaseModel
+from dataqa.components.base_component import (
+    Component,
+    ComponentConfig,
+    ComponentInput,
+    ComponentOutput,
+)
+
+
+class CodeExecutorOutput(BaseModel):
+    code: str = ""
+    dataframe: List[str] = Field(default_factory=list)
+    image_byte_str: List[str] = Field(default_factory=list)
+    html: str = ""
+    markdown: str = ""
+    running_log: str = ""
+    error: str = ""
+
+
+class CodeExecutorConfig(ComponentConfig):
+    component_type: str = Field(
+        description="Type of the component (e.g., InMemoryExecutor)"
+    )
+
+
+class CodeExecutor(Component, ABC):
+    config: CodeExecutorConfig
+
+    def __init__(self, config: CodeExecutorConfig):
+        super().__init__(config)
+
+    @abstractmethod
+    def run(self, input_data: Any) -> CodeExecutorOutput:
+        pass
+
+
+File: dataqa/components/code_executor/in_memory_code_executor.py
+=======================================
+from dataqa.components.base_component import (
+    Component,
+    ComponentConfig,
+    OutputVariable,
+    Variable,
+)
+from dataqa.components.component_utils import build_base_model_from_parameters
+from dataqa.utils.data_model_util import create_base_model
+from pydantic import Field
+from typing import Union, List, Dict, Any
+from dataqa.components.code_executor.base_code_executor import (
+    CodeExecutorOutput,
+)
+import duckdb
+from pathlib import Path
+import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class InMemoryCodeExecutorConfig(ComponentConfig):
+    data_files: Any = Field(
+        description="List of dictionaries containing 'path' to the CSV file and 'table_name' for the DuckDB table"
+    )
+    input: List[Variable] = Field(
+        description="the schema of input parameters", default=[]
+    )
+    output: List[OutputVariable] = Field(
+        description="the schema of output parameters", default=[]
+    )
+
+
+class InMemoryCodeExecutor(Component):
+    component_type = "InMemoryCodeExecutor"
+    config_base_model = InMemoryCodeExecutorConfig
+    input_base_model = "dynamically built"
+    output_base_model = CodeExecutorOutput
+
+    def __init__(
+        self, config: Union[InMemoryCodeExecutorConfig, Dict], **kwargs
+    ) -> None:
+        super().__init__(config=config, **kwargs)
+        self.input_base_model = build_base_model_from_parameters(
+            base_model_name=f"{self.config.name}_input", parameters=self.config.input
+        )
+        self.connection = duckdb.connect(database=":memory:")
+        self.load_data_into_duckdb()
+
+    def display(self):
+        logger.info(f"Component Name: {self.config.name}")
+        logger.info(f"Component Type: {self.component_type}")
+        logger.info(f"Input BaseModel: {self.input_base_model.__fields__}")
+        logger.info(f"Output BaseModel: {self.output_base_model.__fields__}")
+    
+    def load_dataframe(self, path):
+        if path.endswith(".csv"):
+            return pd.read_csv(path)
+        elif path.endswith(".xlsx"):
+            return pd.read_excel(path)
+        else:
+            raise NotImplementedError
+
+    def load_data_into_duckdb(self):
+        for data_file in self.config.data_files:
+            path = data_file["path"]
+            table_name = data_file["table_name"]
+            dataframe = self.load_dataframe(path)
+            self.connection.register("data", dataframe)
+            self.connection.execute(f"CREATE TABLE {table_name} AS SELECT * FROM data")
+
+    def run(self, input_data, config: Dict) -> CodeExecutorOutput:
+        try:
+            result_df = self.connection.execute(input_data.code).fetchdf()
+            response = CodeExecutorOutput(
+                code=input_data.code,
+                dataframe=result_df.to_json(index=False),
+            )
+        except Exception as e:
+            response = CodeExecutorOutput(code=input_data.code, error=str(e))
+        return response
+
+
+File: dataqa/components/langgraph_conditional_edge/__init__.py
+=======================================
+
+
+File: dataqa/components/langgraph_conditional_edge/base_conditional_edge.py
+=======================================
+from abc import ABC, abstractmethod
+from pydantic import BaseModel, Field
+from typing import Coroutine, List, Optional, Union, Dict, Literal
+from langchain_core.runnables.config import RunnableConfig
+from langgraph.constants import START, END
+from dataqa.components.base_component import Component, ComponentConfig
+from dataqa.components.base_utils import import get_field
+from dataqa.pipelines.constants import PIPELINE_START, PIPELINE_END
+
+
+class Condition(BaseModel):
+    output: str = Field(description="the name of target node")
+
+
+class BaseConditionalEdgeConfig(ComponentConfig):
+    condition: List[Condition] = Field(
+        description="the config of every condition"
+    )
+    default_output: Optional[str] = Field(
+        default="__end__",
+        description="the output if failed to meet any conditions",
+    )
+
+
+class BaseConditionalEdge(Component, ABC):
+    is_conditional_edge = True
+    config_base_model = BaseConditionalEdgeConfig
+    output_base_model = str
+    config: BaseConditionalEdgeConfig
+
+    def __init__(
+        self, config: Union[ComponentConfig, Dict] = None, **kwargs
+    ) -> None:
+        super().__init__(config=config, **kwargs)
+        for condition in self.config.condition:
+            if condition.output == PIPELINE_START:
+                condition.output = START
+            if condition.output == PIPELINE_END:
+                condition.output = END
+
+    @abstractmethod
+    def check_condition(self, condition, input_data, **kwargs) -> bool:
+        """
+        Return True if the condition is met, False otherwise.
+        """
+        raise NotImplementedError
+
+    def get_function(self) -> Coroutine:
+        """
+        Return a function pointer as the callable of the conditional edge.
+        Add annotated types.
+        """
+        valid_args = []
+        for condition in self.config.condition:
+            valid_args.append(condition.output)
+        valid_args.append(self.config.default_output)
+        valid_args = list(set(valid_args))
+
+        literal_type_str = f"Literal[{', '.join(repr(s) for s in valid_args)}]"
+
+        async def func(state, config) -> eval(literal_type_str):
+            return await self.__call__(state, config)
+
+        return func
+
+    async def __call__(self, state, config: Optional[RunnableConfig] = {}):
+        # build input data from state
+        input_data = {}
+        for field, mapped_field in self.input_mapping.items():
+            input_data[field] = get_field(state, mapped_field)
+
+        input_data = self.input_base_model(**input_data)
+
+        # run
+        response = await self.run(input_data=input_data, config=config.get('configurable', {}))
+
+        # validate output and update state
+        assert isinstance(response, self.output_base_model)
+
+        return response
+
+
+File: dataqa/components/langgraph_conditional_edge/categorical_variable_condition.py
+=======================================
+import logging
+from typing import List, Dict, Any, Union
+from pydantic import Field, BaseModel
+from dataqa.components.langgraph_conditional_edge.base_conditional_edge import (
+    BaseConditionalEdge,
+    BaseConditionalEdgeConfig,
+    Condition,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class CategoricalVariableCondition(Condition):
+    values: List[Any] = Field(description="allowed values")
+
+
+class CategoricalVariableConditionEdgeConfig(BaseConditionalEdgeConfig):
+    condition: List[CategoricalVariableCondition]
+
+
+class CategoricalVariableConditionInput(BaseModel):
+    variable: Any = Field(description="the variable to check in conditions")
+
+
+class CategoricalVariableConditionEdge(BaseConditionalEdge):
+    component_type = "CategoricalVariableConditionEdge"
+    config_base_model = CategoricalVariableConditionEdgeConfig
+    input_base_model = CategoricalVariableConditionInput
+    config: CategoricalVariableConditionEdgeConfig
+
+    def __init__(
+        self, config: Union[CategoricalVariableConditionEdgeConfig, Dict] = None, **kwargs
+    ) -> None:
+        super().__init__(config=config, **kwargs)
+
+    def check_condition(self, condition: CategoricalVariableCondition, input_data: CategoricalVariableConditionInput) -> bool:
+        """
+        Return True if the condition is met, False otherwise.
+        """
+        if input_data.variable in condition.values:
+            return True
+        return False
+
+    def display(self):
+        logger.info(f"Component Name: {self.config.name}")
+        logger.info(f"Component Type: {self.component_type}")
+        logger.info(f"Input BaseModel: {self.input_base_model.__fields__}")
+        logger.info(f"Output BaseModel: {self.output_base_model.__fields__}")
+
+    async def run(self, input_data: CategoricalVariableConditionInput, config: Dict):
+        for condition in self.config.condition:
+            if self.check_condition(condition, input_data):
+                logger.debug(
+                    f"'{input_data.variable}' matches condition {condition.values}.\nNext node is {condition.output}"
+                )
+                return condition.output
+        logger.debug(
+            f"No condition is matched by value {input_data.variable}.\nNext node is {self.config.default_output}"
+        )
+        return self.config.default_output
+
+
+File: dataqa/components/llm_component/__init__.py
+=======================================
+
+
+File: dataqa/components/llm_component/base_llm_component.py
+=======================================
+from typing import List, Literal, Union, Dict, Tuple
+from pydantic import Field, BaseModel
+import logging
+from dataqa.llm.base_llm import BaseLLM
+from dataqa.components.base_component import (
+    OutputVariable,
+    RunnableConfig,
+    Component,
+    ComponentConfig,
+)
+from dataqa.utils.component_utils import build_base_model_from_parameters, extract
+
+
+logger = logging.getLogger(__name__)
+
+
+class BaseLLMComponentConfig(ComponentConfig):
+    output: List[OutputVariable] = Field(
+        description="the schema of output parameters", default=[]
+    )
+    output_parser: Literal["basemodel", "xml"] = Field(
+        default="basemodel",
+        description="""How to parse the llm generation to output_base_model.
+- Default is 'basemodel', use llm.with_structured_output(output_base_model)
+- If use 'xml', manually parse every field of 'output_base_model' as text between <field> </field>
+""",
+    )
+
+
+class BaseLLMComponentInput(BaseModel):
+    messages: List[Tuple[str, str]] = Field(description="The input messages")
+
+
+class BaseLLMComponent(Component):
+    component_type = "BaseLLMComponent"
+    config_base_model = BaseLLMComponentConfig
+    input_base_model = BaseLLMComponentInput
+    output_base_model = "build dynamically from config.output"
+    # prompt: ChatPromptTemplate # TODO should prompt be a str or a list of messages
+    config: BaseLLMComponentConfig
+
+    def __init__(
+        self,
+        llm: BaseLLM,
+        config: Union[ComponentConfig, Dict] = None,
+        **kwargs,
+    ):
+        super().__init__(config=config, **kwargs)
+        self.llm = llm
+        # self.prompt = prompt
+        self.output_base_model = build_base_model_from_parameters(
+            base_model_name=f"{self.config.name}_output", parameters=self.config.output
+        )
+        if self.config.output_parser == "basemodel":
+            self.llm.with_structured_output = self.output_base_model
+
+    def display(self):
+        logger.info(f"Component Name: {self.config.name}")
+        logger.info(f"Component Type: {self.component_type}")
+        logger.info(f"Input BaseModel: {self.input_base_model.__fields__}")
+        logger.info(f"Output BaseModel: {self.output_base_model.__fields__}")
+
+    async def run(self, input_data, config: RunnableConfig = {}):
+        # logger.info(f"Run {self.config.component_name} with input: {input_data.model_dump_json(indent=4)}")
+
+        assert isinstance(input_data, self.input_base_model)
+
+        api_key = config.get("configurable", {}).get("api_key", "")
+        base_url = config.get("configurable", {}).get("base_url", "")
+
+        if self.config.output_parser == "basemodel":
+            with_structured_output = self.output_base_model
+        else:
+            with_structured_output = None
+
+        response = await self.llm.ainvoke(
+            messages=input_data.messages, # TODO validation
+            api_key=api_key,
+            base_url=base_url,
+            from_component=self.config.name,
+            with_structured_output=with_structured_output,
+        )
+
+        if self.config.output_parser == "xml":
+            assert isinstance(response.generation, str)
+            response.generation = self.output_base_model( # TODO validation
+                **{
+                    field: extract(response.generation, f"<{field}>", f"</{field}>")
+                    for field in self.output_base_model.__fields__
+                }
+            )
+
+        assert isinstance(response.generation, self.output_base_model)
+
+        # logger.info(
+        #     f"{self.config.name} gets response {response.generation.model_dump_json(indent=4)}"
+        # )
+        return response.generation # TODO return raw llm response to a list
+
+
+File: dataqa/components/llm_component/base_prompt_llm_chain.py
+=======================================
+from typing import List, Literal, Union, Dict, Tuple
+from pydantic import Field, BaseModel
+import logging
+from langchain_core.prompts import ChatPromptTemplate
+from dataqa.llm.base_llm import BaseLLM
+from dataqa.components.base_component import (
+    OutputVariable,
+    RunnableConfig,
+    Component,
+    ComponentConfig,
+    Variable,
+)
+from dataqa.utils.component_utils import build_base_model_from_parameters, extract
+from dataqa.utils.prompt_utils import prompt_type, build_prompt
+
+logger = logging.getLogger(__name__)
+
+
+class BasePromptLLMChainConfig(ComponentConfig):
+    prompt: prompt_type
+    input: List[Variable] = Field(
+        description="the schema of input parameters", default=[]
+    )
+    output: List[OutputVariable] = Field(
+        description="the schema of output parameters", default=[]
+    )
+    output_parser: Literal["basemodel", "xml"] = Field(
+        default="basemodel",
+        description="""How to parse the llm generation to output_base_model.
+- Default is 'basemodel', use llm.with_structured_output(output_base_model)
+- If use 'xml', manually parse every field of 'output_base_model' as text between <field> </field>
+""",
+    )
+
+
+class BasePromptLLMChain(Component):
+    component_type = "BasePromptLLMChain"
+    config_base_model = BasePromptLLMChainConfig
+    input_base_model = "build dynamically from config.input"
+    output_base_model = "build dynamically from config.output"
+    # prompt: ChatPromptTemplate # TODO should prompt be a str or a list of messages
+    config: BasePromptLLMChainConfig
+
+    def __init__(
+        self,
+        llm: BaseLLM,
+        config: Union[BasePromptLLMChainConfig, Dict] = None,
+        **kwargs,
+    ):
+        super().__init__(config=config, **kwargs)
+        self.llm = llm
+        self.prompt = build_prompt(self.config.prompt)
+        self.input_base_model = build_base_model_from_parameters(
+            base_model_name=f"{self.config.name}_input", parameters=self.config.input
+        )
+        self.output_base_model = build_base_model_from_parameters(
+            base_model_name=f"{self.config.name}_output", parameters=self.config.output
+        )
+        # add structured output
+        self.llm.config.with_structured_output = self.output_base_model
+        self.validate_llm_input()
+
+    def validate_llm_input(self):
+        for field in self.prompt.input_schema.__annotations__:
+            assert field in self.input_base_model.__annotations__, (
+                f"The prompt of {self.config.name} requires '{field}' as input, but it is not defined the input BaseModel"
+            )
+
+    def display(self):
+        logger.info(f"Component Name: {self.config.name}")
+        logger.info(f"Component Type: {self.component_type}")
+        logger.info(f"Input BaseModel: {self.input_base_model.__fields__}")
+        logger.info(f"Output BaseModel: {self.output_base_model.__fields__}")
+
+    async def run(self, input_data, config: RunnableConfig = {}):
+        logger.info(f"Run {self.config.name} with input: {input_data.model_dump_json(indent=4)}")
+
+        assert isinstance(input_data, self.input_base_model)
+        messages = self.prompt.invoke(input_data.model_dump())
+
+        api_key = config.get("configurable", {}).get("api_key", "")
+        base_url = config.get("configurable", {}).get("base_url", "")
+
+        if self.config.output_parser == "basemodel":
+            with_structured_output = self.output_base_model
+        else:
+            with_structured_output = None
+
+        response = await self.llm.ainvoke(
+            messages=messages, # TODO validation
+            api_key=api_key,
+            base_url=base_url,
+            from_component=self.config.name,
+            with_structured_output=with_structured_output,
+        )
+
+        if self.config.output_parser == "xml":
+            assert isinstance(response.generation, str)
+            response.generation = self.output_base_model( # TODO validation
+                **{
+                    field: extract(response.generation, f"<{field}>", f"</{field}>")
+                    for field in self.output_base_model.__fields__
+                }
+            )
+
+        assert isinstance(response.generation, self.output_base_model)
+
+        # logger.info(
+        #     f"{self.config.name} gets response {response.generation.model_dump_json(indent=4)}"
+        # )
+        return response.generation # TODO return raw llm response to a list
+
+
+File: dataqa/components/plan_execute/__init__.py
+=======================================
+
+
+File: dataqa/components/plan_execute/plan.py
+=======================================
+from pydantic import BaseModel, Field
+from typing import Union, List
+from enum import Enum
+
+
+class WorkerName(Enum):
+    RetrievalWorker = "retrieval_worker"
+    AnalyticsWorker = "analytics_worker"
+    PlotWorker = "plot_worker"
+
+class Task(BaseModel):
+    worker: WorkerName = Field(description="The worker that should be for solving the task")
+    task_description: str = Field(description="the description of the task")
+
+
+class Plan(BaseModel):
+    """The plan that consists a list of tasks"""
+    tasks: List[Task] = Field(default_factory=list)
+
+    def summarize(self):
+        if not self.tasks:
+            return "No plan generated yet."
+        tasks = []
+        for i, task in enumerate(self.tasks):
+            tasks.append(
+                f'Step {i+1}:\n'                
+                f' Worker: {task.worker.value}\n'
+                f' Task: {task.task_description}\n'
+            )
+        return ''.join(tasks)
+
+
+class TaskResponse(BaseModel):
+    response: str = Field(description="Summarize the execution of one task")
+
+
+class WorkerResponse(BaseModel):
+    """The list of completed tasks and their response"""
+    task_response: List[TaskResponseTask] = Field(default_factory=list)
+
+    def summarize(self): 
+        if not self.task_response:
+            return "No tasks completed yet."
+        tasks = []
+        for i, task in enumerate(self.task_response):
+            tasks.append(
+                f'Completed Task {i+1}:\n'
+                f' Worker: {task.worker.value}\n'
+                f' Task: {task.task_description}\n'
+                f' Execution response: {tr_task.response}\n'
+            )
+        return ''.join(tasks)
+
+
+class Response(BaseModel):
+    """Response to user."""
+    response: str
+
+class Act(BaseModel):
+    """Action to perform."""
+    action: Union[Response, Plan] = Field(description="Action to perform. If you want to respond to user, use Response. If you want to assign more tasks to get the answer, use Plan.")
+
+def worker_response_reducer(res1: WorkerResponse, res2: WorkerResponse) -> WorkerResponse:
+    return WorkerResponse(task_response=res1.task_response + res2.task_response)
+
+
+File: dataqa/components/plan_execute/planner.py
+=======================================
+from typing import list
+from dataqa.memory import Memory
+from dataqa.components.plan_execute.plan import Plan
+from dataqa.llm.openai import AzureOpenAI
+from dataqa.utils.prompt_utils import build_prompt, prompt_type
+
+class Planner:
+    """
+    Input: query: str
+    Output: plan: Plan
+    """
+
+    def __init__(self, memory: Memory, llm: AzureOpenAI, prompt: prompt_type):
+        self.memory = memory
+        self.prompt = build_prompt(prompt)
+        self.llm = llm
+    
+    async def __call__(self, state):
+        messages = self.prompt.invoke(dict(query=state.query))
+        response = await self.llm.ainvoke(messages=messages, with_structured_output=Plan)
+        plan = response.generation
+        return dict(plan=plan)
+        
+
+
+File: dataqa/components/plan_execute/replanner.py
+=======================================
+from dataqa.memory import Memory
+from dataqa.llm.openai import AzureOpenAI
+from dataqa.utils.prompt_utils import build_prompt, prompt_type
+from dataqa.components.plan_execute.plan import Response, Act
+
+class Replanner:
+    """
+    Input: 
+        query: str
+        plan: Plan
+        past_steps: List[WorkerResponse]
+        memory_summary: str
+    Output: (plan or final_response)
+        plan: Plan
+        final_response: str
+    """
+    def __init__(self, memory: Memory, llm: AzureOpenAI, prompt: prompt_type):
+        self.memory = memory
+        self.prompt = build_prompt(prompt)
+        self.llm = llm
+    
+    async def __call__(self, state):
+        messages = self.prompt.invoke(dict(
+            query=state.query,
+            plan=state.plan.summarize(),
+            past_steps=state.worker_response.summarize(),
+            dataframe_summary=self.memory.summarize_dataframe()
+        ))
+        response = await self.llm.ainvoke(messages=messages, with_structured_output=Act)
+        action = response.generation.action
+        if isinstance(action, Response):
+            return dict(final_response=action.response)
+        else:
+            return dict(plan=action)
+
+
+File: dataqa/components/plan_execute/worker.py
+=======================================
+
+
+File: dataqa/components/prompt/__init__.py
+=======================================
+
+
+File: dataqa/components/prompt/base_prompt.py
+=======================================
+import logging
+from typing import List, Union, Dict, Tuple, Literal
+from pydantic import Field, BaseModel
+from langchain_core.prompts import ChatPromptTemplate
+from dataqa.components.base_component import (
+    Component,
+    ComponentConfig,
+    Variable,
+    RunnableConfig,
+)
+from dataqa.utils.component_utils import build_base_model_from_parameters
+from dataqa.utils.prompt_utils import prompt_type, build_prompt 
+
+
+logger = logging.getLogger(__name__)
+
+
+class BasePromptConfig(ComponentConfig):
+    prompt: prompt_type
+    role: str = Field(default="system", description="the role of this generated prompt as a message")
+    input: List[Variable] = Field(
+        description="the schema of input parameters", default=[]
+    )
+
+
+class BasePromptOutput(BaseModel):
+    messages: List[Tuple[str, str]] = Field(description="the generated prompt messages")
+
+
+class BasePromptComponent(Component):
+    component_type = "BasePrompt"
+    config_base_model = BasePromptConfig
+    input_base_model = "build dynamically from config.input"
+    output_base_model = BasePromptOutput
+    config: BasePromptConfig
+
+    def __init__(self, config: Union[ComponentConfig, Dict] = None, **kwargs):
+        super().__init__(config=config, **kwargs)
+        self.prompt = build_prompt(self.config.prompt)
+        self.input_base_model = build_base_model_from_parameters(
+            base_model_name=f"{self.config.name}_input", parameters=self.config.input
+        )
+        self.validate_llm_input()
+
+    def validate_llm_input(self):
+        for field in self.prompt.input_schema.__annotations__:
+            assert field in self.input_base_model.__annotations__, (
+                f"The prompt of {self.config.name} requires '{field}' as input, but it is not defined the input BaseModel"
+            )
+
+    def display(self):
+        logger.info(f"Component Name: {self.config.name}")
+        logger.info(f"Component Type: {self.component_type}")
+        logger.info(f"Input BaseModel: {self.input_base_model.__fields__}")
+        logger.info(f"Output BaseModel: {self.output_base_model.__fields__}")
+
+    async def run(self, input_data, config: RunnableConfig = {}):
+        logger.info(f"Run {self.config.name} with input: {input_data.model_dump_json(indent=4)}")
+
+        assert isinstance(input_data, self.input_base_model)
+        messages = self.prompt.invoke(input_data.model_dump()).to_messages()
+        return self.output_base_model(
+            messages=[(message.type, message.content) for message in messages]
+        )
+
+
+File: dataqa/components/retriever/__init__.py
+=======================================
+
+
+File: dataqa/components/retriever/base_retriever.py
+=======================================
+from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional, Union, Type
+from typing_extensions import Annotated
+from abc import ABC, abstractmethod
+from enum import Enum
+from dataqa.components.base_component import (
+    Component,
+    ComponentConfig,
+    ComponentInput,
+    ComponentOutput,
+)
+from dataqa.data_models.asset_models import RetrievedAsset
+
+
+class RetrievalMethod(Enum):
+    TAG = "tag"
+    VECTOR = "vector"
+    HYBRID = "hybrid"
+
+
+class RetrieverInput(ComponentInput):
+    query: Any = Field(description="Query for the retrieval")
+
+
+class RetrieverConfig(ComponentConfig):
+    knowledge_base_index: str = Field(
+        description="Identifier for the knowledge base index to query"
+    )
+    retrieval_method: RetrievalMethod = Field(
+        description="retrieval algorithm or method"
+    )
+    parameters: Dict[str, Any] = Field(
+        description="parameters of retriever component"
+    )
+
+
+class RetrieverOutput(ComponentOutput):
+    retrieved_asset: List[RetrievedAsset] = Field(description="list of retrieved assets")
+
+
+class Retriever(Component, ABC):
+    config: RetrieverConfig
+    knowledge_base_index: str
+    retrieval_method: RetrievalMethod
+    parameters: Dict[str, Any]
+
+    def __init__(self, config: RetrieverConfig):
+        super().__init__(config)
+        self.knowledge_base_index = self.config.knowledge_base_index
+        self.retrieval_method = self.config.retrieval_method
+        self.parameters = self.config.parameters
+
+    @abstractmethod
+    def retrieve_assets(self, query: Any) -> List[RetrievedAsset]:
+        pass
+
+    async def run(
+        self, input_data: RetrieverInput, config: Dict = {}
+    ) -> RetrieverOutput:
+        pass
+
+
+File: dataqa/components/retriever/tag_retriever.py
+=======================================
+from typing import Dict, List, Any
+from pydantic import BaseModel, Field
+import logging
+import time
+import sys
+import yaml
+import os 
+from datetime import datetime
+
+from dataqa.components.base_component import Component, ComponentInput
+from dataqa.components.retriever.base_retriever import (
+    Retriever,
+    RetrieverConfig,
+    RetrieverInput,
+    RetrieverOutput,
+)
+from dataqa.data_models.asset_models import RetrievedAsset
+from dataqa.ingest_knowledge import KnowledgeBase
+from dataqa.utils.data_model_util import create_base_model
+
+
+logger = logging.getLogger(__name__)
+
+
+class TagRetriever(Retriever):
+    component_type = "TagRetriever"
+    config_base_model = RetrieverConfig
+    input_base_model = "dynamically built"
+    output_base_model = "dynamically built"
+
+    def __init__(
+        self,
+        config: Dict,
+        knowledge_base: KnowledgeBase,
+        input_config: List,
+        output_config: List,
+    ):
+        """
+        :param config: config dictionary of tag retriever component
+        :param knowledge_base: knowledge base object
+        """
+        tag_retriever_config = RetrieverConfig.model_validate(config)
+        super().__init__(tag_retriever_config)
+        self.knowledge_base = knowledge_base.get_kb_by_index(
+            self.knowledge_base_index
+        )
+        input_base_model_name = f"{self.config.name}_input"
+        self.input_base_model = create_base_model(input_base_model_name, input_config)
+        output_base_model_name = f"{self.config.name}_output"
+        self.output_base_model = create_base_model(
+            output_base_model_name, output_config, RetrieverOutput
+        ) 
+        self.output_field_name = output_config[0]["name"] # TODO add support for dynamic multiple output fields
+        logger.info(
+            f"Component {self.config.name} of type {self.component_type} created."
+        )
+
+    def display(self):
+        logger.info(f"Component Name: {self.config.name}")
+        logger.info(f"Component Type: {self.component_type}")
+        logger.info(f"Input BaseModel: {self.input_base_model.__fields__}")
+        logger.info(f"Output BaseModel: {self.output_base_model.__fields__}")
+
+    def prepare_input(self, state: Dict[str, Any]):
+        """
+        temporary. to be replaced by generic component input preparation function
+        :param state:
+        :return:
+        """
+        input_data = self.input_base_model.model_validate(state)
+        return input_data
+
+    def retrieve_assets(self, query: RetrieverInput) -> List[RetrievedAsset]:
+        """
+        :param query: RetrieverInput for tag retrieval method
+        :return: list of retrieved record
+        """
+        search_field = [r for r in self.input_base_model.model_fields]
+        if isinstance(search_field, str):
+            pass
+        elif isinstance(search_field, list):
+            if len(search_field) > 1:
+                raise NotImplementedError(
+                    f"Algorithm of multiple search fields for tag retriever is not implemented. Search field: {search_field}"
+                )
+            elif len(search_field) == 1:
+                search_field = search_field[0]
+        else:
+            raise NotImplementedError(
+                f"Algorithm of search fields of type {type(search_field)} for tag retriever is not implemented. Search field: {search_field}"
+            )
+
+        all_retrieved = []
+        for record in self.knowledge_base["records"]:
+            input_tag = getattr(query, search_field)
+            record_tag = getattr(record, search_field)
+            if self.validate(input_tag, record_tag):
+                retrieved_record = {
+                    "asset_type": self.knowledge_base["name"],
+                    "content": record,
+                    "relevance_score": 1,
+                }
+                retrieved_asset = RetrievedAsset.model_validate(retrieved_record)
+                all_retrieved.append(retrieved_asset)
+        logger.info(
+            f"Finish {query}, retrieved {len(all_retrieved)} records of {self.knowledge_base['name']}."
+        )
+        return all_retrieved
+
+    @staticmethod
+    def validate(input_tag: List, asset_tag: List) -> bool:
+        """
+        :param input_tag: list of input tags
+        :param asset_tag: list of tags of the asset record
+        :return: boolean of whether the asset record should be selected
+        """
+        for conjunction in asset_tag:
+            if not isinstance(conjunction, list):
+                conjunction = [conjunction]
+            f = True
+            for predicate in conjunction:
+                if predicate == "all":
+                    return True
+                if predicate[0] == "~" and predicate[1:] in input_tag:
+                    f = False
+                    break
+                if predicate[0] != "~" and predicate not in input_tag:
+                    f = False
+                    break
+            if f:
+                return True
+        return False
+
+    async def run(self, input_data: RetrieverInput, config: Dict = {}) -> RetrieverOutput:
+        """
+        :param input_data: RetrieverInput for tag retrieval method
+        :return: RetrieverOutput base model for retriever component output
+        """
+        # TODO filter fields of retrieved asset to base model of component output
+        # param query: RetrieverInput for tag retrieval method
+        # return output base model for retriever component
+        start_time = time.time()
+        retrieved_asset = self.retrieve_assets(input_data)
+        retrieve_time = time.time() - start_time
+
+        output_str_list = []
+        for r in retrieved_asset:
+            output_str_list.append(r.content.prompt)
+        output_str = "\n\n".join(output_str_list)
+
+        # print(f"{self.output_field_name}:\n{output_str}")
+
+        component_output = {
+            "component_name": self.config.name,
+            "component_type": self.component_type,
+            "output_data": retrieved_asset, 
+            self.output_field_name: output_str,
+            "metadata": {"time": retrieve_time},
+        }
+        return self.output_base_model.model_validate(component_output)
+
+
+if __name__ == "__main__":
+    config = yaml.safe_load(open("examples/ccb_risk/config/config_retriever.yml", "r"))
+    my_kb = KnowledgeBase(config["components"][0]["parameters"]["config"])
+    mock_state = {"tag": ["trade", "deposit"]}
+
+    for component_config in config["components"][1:]:
+        retriever_node_config = component_config["parameters"]
+        r_config = retriever_node_config["config"]
+        r_config["name"] = component_config["name"]
+        r_input = retriever_node_config["input"]
+        r_output = retriever_node_config["output"]
+        tag_retriever = TagRetriever(r_config, my_kb, r_input, r_output)
+        tag_retriever_input = tag_retriever.prepare_input(mock_state)
+        my_retrieved_asset = tag_retriever.run(tag_retriever_input)
+        print(
+            f"Component {tag_retriever.config.name} of type {tag_retriever.component_type} created."
+        )
+
+
+File: dataqa/data_models/__init__.py
+=======================================
+
+
+File: dataqa/data_models/asset_models.py
+=======================================
+from pydantic import BaseModel, Field
+from typing import Any, Dict, Optional
+
+
+class RetrievedAsset(BaseModel):
+    """
+    Data model for a retrieved knowledge asset at record level.
+    """
+
+    asset_type: str = Field(
+        description="Type of the asset (e.g., 'schema', 'rule', 'example')"
+    )
+    content: Any = Field(
+        description="Content of the retrieved asset (e.g., schema definition, rule text)"
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict, description="Metadata about the asset (e.g., source)"
+    )
+    relevance_score: Optional[float] = Field(
+        default=None, description="Optional relevant score assigned to the asset"
+    )
+    asset_id: Optional[str] = Field(
+        default=None, description="Optional unique identifier for the asset"
+    )
+
+
+File: dataqa/llm/__init__.py
+=======================================
+
+
+File: dataqa/llm/base_llm.py
+=======================================
+from abc import ABC, abstractmethod
+from pydantic import BaseModel, Field
+from typing import List, TypeVar, Dict, Type, Any, Optional, Union
+from langchain_core.messages.utils import AnyMessage
+
+
+_BM = TypeVar("_BM", bound="BaseModel")
+_DictOrPydanticClass = Union[Dict[str, Any], Type[_BM]]
+_StrOrDictOrPydantic = Union[str, Dict, _BM]
+
+
+class LLMConfig(BaseModel):
+    model: str = Field(
+        description="The model name, such as deployment_name for oai llm, such as 'gpt-4o-2024-08-06', but NOT model_name like 'gpt-4o'"
+    )
+    with_structured_output: Optional[Union[None, _DictOrPydanticClass]] = Field(
+        default=None,
+        description="""Parse raw llm generations to structured output.
+The input is a dict or a BaseModel class.
+""",
+    )
+    # with_tools TODO
+
+
+class LLMMetadata(BaseModel):
+    request_id: str = Field(
+        description="A unique identifier for this LLM call. Usually provided by the LLM provider."
+    )
+    model: str = Field(description="The LLM model.")
+    num_generations: int = Field(
+        description="The number of generations requested in this LLM call."
+    )
+    start_timestamp: str = Field(
+        description="Timestamp to send request. The preferred format is %a, %d %b %Y %H:%M:%S %Z, e.g. 'Tue, 04 Mar 2025 16:00:22 GMT'"
+    )
+    end_timestamp: str = Field(
+        description="Timestamp to receive response. In the same format as start timestamp"
+    )
+    latency: float = Field(
+        description="The latency between start and end timestamps in milliseconds"
+    )
+    input_token: int = Field(description="The number of input tokens")
+    output_token: int = Field(
+        description="The number of LLM completion tokens summed over all responses"
+    )
+    reasoning_token: Optional[int] = Field(
+        default=0,
+        description="The number of reasoning tokens. Use for reasoning models only such as GPT-01.",
+    )
+    cost: Union[None, float] = Field(
+        default=None, description="The cost of this LLM call in dollars."
+    )
+    ratelimit_tokens: int = Field(
+        description="The maximum number of tokens to reach rate limit"
+    )
+    ratelimit_remaining_tokens: int = Field(
+        description="The number of remaining tokens to reach rate limit. By default"
+    )
+    ratelimit_requests: int = Field(
+        description="The maximum number of requests to reach rate limit"
+    )
+    ratelimit_remaining_requests: int = Field(
+        description="The number of remaining requests to reach rate limit"
+    )
+
+
+class LLMError(BaseModel):
+    error_code: int
+    error_type: str
+    error_message: str
+
+
+class LLMOutput(BaseModel):
+    prompt: List = Field(description="The input prompt")
+    generation: _StrOrDictOrPydantic = Field(
+        description="""The raw LLM generations.
+Parse to Dict or Pydantic BaseModel is the structured output is required.
+"""
+    )
+    from_component: Optional[str] = Field(
+        default="",
+        description="""The name of component that triggers this LLM call.
+Set to empty if no component name is provided.
+""",
+    )
+    metadata: Union[None, LLMMetadata] = Field(
+        default=None, description="Token usage, cost, latency, ratelimit, ..."
+    )
+    error: Optional[LLMError] = None
+
+
+class BaseLLM(ABC):
+    def __init__(self, config: Union[LLMConfig, Dict] = None, **kwargs):
+        self.config = config
+        if isinstance(config, Dict):
+            self.config = self.config_base_model(**config)
+        if self.config is None:
+            self.config = self.config_base_model(**kwargs)
+
+    @property
+    @abstractmethod
+    def config_base_model(self):
+        raise NotImplementedError
+
+    def invoke(self, messages: List[AnyMessage], **kwargs) -> LLMOutput:
+        raise NotImplementedError
+
+    async def ainvoke(self, messages: List[AnyMessage], **kwargs) -> LLMOutput:
+        raise NotImplementedError
+
+    def stream(self, messages: List[AnyMessage], **kwargs):
+        raise NotImplementedError
+
+    async def astream(self, messages: List[AnyMessage], **kwargs):
+        raise NotImplementedError
+
+
+File: dataqa/llm/openai.py
+=======================================
+import time
+from pydantic import Field
+from typing import Dict, List, Optional, Any, Union
+from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
+from dataqa.llm.base_llm import BaseLLM, LLMConfig, LLMMetadata, LLMOutput, LLMError
+
+
+class AzureOpenAIConfig(LLMConfig):
+    api_version: str
+    api_type: str
+    base_url: Optional[str] = Field(
+        default="",
+        description="""The base URL of AzureOpenAI.
+It should be provided either
+- when define AzureOpenAIConfig
+- call AzureOpenAI.invoke()
+""",
+    )
+    api_key: Optional[str] = Field(
+        default="",
+        description="""The API KEY of AzureOpenAI.
+It should be provided either
+- when define AzureOpenAIConfig
+- call AzureOpenAI.invoke()
+""",
+    )
+    api_version: str
+    api_type: str
+    temperature: float = 1
+    num_response: int = Field ( # TODO how to generate multiple responses
+        default=1, description="The number of LLM response to be generated"
+    )
+    max_response_token: int = Field(
+        default=2000,
+        description="The maximum output tokens", # TODO o1 requires a different attribute "max_completion_token"
+    )
+    oai_params: Optional[Dict[str, Any]] = Field(default={})
+    azure_model_params: Optional[Dict[str, Any]] = Field(default={}) 
+    # TODO
+    # throw exception
+    # retry
+
+
+class AzureOpenAI(BaseLLM):
+    config_base_model = AzureOpenAIConfig
+    config: AzureOpenAIConfig
+
+    def _get_conn(self, **kwargs):
+        llm = AzureChatOpenAI(
+            azure_endpoint=kwargs.get("base_url") or self.config.base_url,
+            azure_deployment=self.config.model,
+            api_key=kwargs.get("api_key") or self.config.api_key,
+            api_version=self.config.api_version,
+            openai_api_type=self.config.api_type,
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_response_token,
+            n=self.config.num_response,
+            include_response_headers=True,
+            **self.config.oai_params,
+            **self.config.azure_model_params,
+        )
+        with_structured_output = kwargs.get(
+            "with_structured_output", self.config.with_structured_output
+        )
+        if with_structured_output is not None:
+            llm = llm.with_structured_output(with_structured_output, include_raw=True)
+        return llm
+
+    async def ainvoke(self, messages, **kwargs) -> LLMOutput:
+        t = time.time()
+        from_component = kwargs.get("from_component", "")
+        generation = []
+        metadata = None
+        error = None
+
+        try:
+            response = await self._get_conn(**kwargs).ainvoke(messages)
+            kwargs_get = {"with_structured_output": kwargs.get(
+                "with_structured_output", self.config.with_structured_output
+            )}
+            if kwargs_get["with_structured_output"] is not None:
+                generation = response["parsed"]
+            else:
+                generation = response.content
+        except Exception as e:
+            # TODO handle exception
+            error = LLMError(error_code=0, error_type="LLM Error", error_message=str(e))
+        return LLMOutput(
+            prompt=messages,
+            generation=generation,
+            from_component=from_component,
+            metadata=metadata,
+            error=error,
+        )
+
+
+File: dataqa/pipelines/__init__.py
+=======================================
+
+
+File: dataqa/pipelines/constants.py
+=======================================
+PIPELINE_START = "START"
+PIPELINE_END = "END"
+STATE_GRAPH_TYPE = "PipelineState"
+COMP_PREFIX = "COMP_"
+FILE_PREFIX = "FILE_"
+COMPONENT_MARKER = "is_component"
+CONDITIONAL_EDGE_MARKER = "is_conditional_edge"
+INPUT_SOURCE = "input_source"
+COMPONENT_OUTPUT_SUFFIX = "_output"
+PIPELINE_INPUT = "input"
+PIPELINE_OUTPUT = "output"
+
+
+File: dataqa/pipelines/pipeline.py
+=======================================
+from pydantic import Field, create_model
+import yaml
+from typing import Any, Dict, List, Optional, Type, Union
+
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.graph import CompiledGraph
+from langgraph.checkpoint.memory import MemorySaver
+from dataqa.errors import PipelineConfigError
+from dataqa.pipelines.constants import (
+    COMP_PREFIX,
+    FILE_PREFIX,
+    PIPELINE_END,
+    PIPELINE_START,
+    INPUT_SOURCE,
+    COMPONENT_MARKER,
+    CONDITIONAL_EDGE_MARKER,
+    COMPONENT_OUTPUT_SUFFIX,
+    PIPELINE_INPUT,
+    PIPELINE_OUTPUT,
+    STATE_GRAPH_TYPE,
+)
+from dataqa.pipelines.schema import PipelineConfig
+from dataqa.utils import cls_from_str, load_file
+from dataqa.state import BasePipelineState
+
+
+# TODO: Add support for loading files from resource manager
+def load_or_get_component(
+    component_name: str,
+    component_definitions: Dict[str, Dict[str, Any]],
+    components: Optional[Dict[str, Type]] = None,
+):
+    """ """
+    if component_name in components:
+        return components[component_name]
+
+    component_params = component_definitions[component_name].get("params", {})
+    component_type = component_definitions[component_name]["type"]
+
+    for key, value in component_params.items():
+        if isinstance(value, str):
+            if value.startswith(COMP_PREFIX):
+                value_component_name = value.removeprefix(COMP_PREFIX)
+                if value_component_name == component_name:
+                    raise PipelineConfigError(
+                        f"Component `{component_name}` references itself in its param `{key}`, please check the config"
+                    )
+                if value_component_name not in components:
+                    load_or_get_component(
+                        value_component_name, component_definitions, components
+                    )
+                component_params[key] = components[value_component_name]
+            elif value.startswith(FILE_PREFIX):
+                component_params[key] = load_file(value.removeprefix(FILE_PREFIX))
+
+        if isinstance(value, dict):
+            for val_key, val in value.items():
+                if isinstance(val, str):
+                    if val.startswith(COMP_PREFIX):
+                        val_component_name = val.removeprefix(COMP_PREFIX)
+                        if val_component_name == component_name:
+                            raise PipelineConfigError(
+                                f"Component `{component_name}` references itself in its param `{key}`, please check the config"
+                            )
+                        if val_component_name not in components:
+                            load_or_get_component(
+                                val_component_name, component_definitions, components
+                            )
+                        value[val_key] = components[val_component_name]
+                    elif val.startswith(FILE_PREFIX):
+                        value[val_key] = load_file(val.removeprefix(FILE_PREFIX))
+
+    component_instance = cls_from_str(component_type)(**component_params)
+    components[component_name] = component_instance
+    return component_instance
+
+
+def update_edge_node_name(node: Union[str, List[str]]) -> Union[str, List[str]]:
+    if isinstance(node, str):
+        name = node
+        if name == PIPELINE_START:
+            return START
+        if name == PIPELINE_END:
+            return END
+        return name
+    if isinstance(node, list):
+        return update_edge_node_name(node)
+
+    return [update_edge_node_name(name) for name in node]
+
+
+def update_input_mapping(mapping: Dict[str, str]) -> Dict[str, str]:
+    new_mapping = {}
+    for field, mapped_field in mapping.items():
+        names = mapped_field.split(".")
+        if names[0] == PIPELINE_START:
+            names[0] = f"{names[0]}{COMPONENT_OUTPUT_SUFFIX}"
+        else:
+            names[0] = PIPELINE_INPUT
+        new_mapping[field] = ".".join(names)
+    return new_mapping
+
+
+def build_graph_from_config(
+    pipeline_schema: PipelineConfig, pipeline_name: Optional[str] = None
+) -> CompiledGraph:
+    """
+    :param pipeline_schema:
+    :return:
+    """
+    # get pipeline definition
+    pipeline_definition = pipeline_schema.get_pipeline_definition(pipeline_name)
+
+    # get component definitions
+    component_definitions = pipeline_schema.get_component_definitions()
+
+    # Add some predefined fields to pipeline_state_fields
+    components = {}
+    pipeline_state_fields = {}
+
+    # First pass to initialize all the components and add their output state to pipeline state
+    for node_name in component_definitions.keys():
+        component_instance = load_or_get_component(
+            node_name, component_definitions, components
+        )
+
+        if getattr(component_instance, COMPONENT_MARKER, False) \
+            and not getattr(component_instance, CONDITIONAL_EDGE_MARKER, False):
+            pipeline_state_fields[f"{node_name}{COMPONENT_OUTPUT_SUFFIX}"] = (
+                component_instance.output_base_model,
+                Field(None, description=f"Output of {node_name}"),
+            )
+
+    pipeline_state_type = create_model(
+        STATE_GRAPH_TYPE, __base__=BasePipelineState, **pipeline_state_fields
+    )
+    graph_workflow = StateGraph(pipeline_state_type)
+
+    nodes = [PIPELINE_END, PIPELINE_START]
+    # add nodes to the graph
+    for node in pipeline_definition.nodes:
+        node_name = node.name
+        if node_name not in [PIPELINE_START, PIPELINE_END]:
+            # add node
+            component_instance = load_or_get_component(
+                node_name, component_definitions, components
+            )
+
+            if not getattr(component_instance, CONDITIONAL_EDGE_MARKER, False):
+                # Component
+                # add node
+                graph_workflow.add_node(node.name, component_instance)
+                nodes.append(node.name)
+                # add edges
+                for parent_group in node.parent_groups:
+                    graph_workflow.add_edge(
+                        update_edge_node_name(parent_group.parent),
+                        update_edge_node_name(node.name),
+                    )
+            else:
+                # conditional edge, assert that conditional edge has EXACT one parent node
+                if not len(node.parent_groups) == 1 \
+                    or not len(node.parent_groups[0].parent) == 1:
+                    raise PipelineConfigError(f"{node.name} is an conditional edge. It requires exactly one parent node.")
+                parent = node.parent_groups[0].parent
+                if isinstance(parent, list):
+                    parent = parent[0]
+                graph_workflow.add_conditional_edges(
+                    update_edge_node_name(parent),
+                    component_instance.get_function()
+                )
+
+        # set input mapping
+        if not component_definitions[node.name].get(INPUT_SOURCE, None):
+            raise PipelineConfigError(f"'{INPUT_SOURCE}' is required for {node.name} to define a node or an conditional edge")
+        mapping = {}
+        for field, mapped_field in component_definitions[node.name][INPUT_SOURCE].items():
+            names = mapped_field.split(".")
+            if names[0] != PIPELINE_START:
+                names[0] = f"{names[0]}{COMPONENT_OUTPUT_SUFFIX}"
+            else: 
+                names[0] = PIPELINE_INPUT
+            mapping[field] = ".".join(names)
+        component_instance.set_input_mapping(
+            update_input_mapping(
+                component_definitions[node.name][INPUT_SOURCE]
+            )
+        )
+
+    elif node.name == PIPELINE_END:
+        for parent_group in node.parent_groups:
+            graph_workflow.add_edge(
+                update_edge_node_name(parent_group.parent),
+                update_edge_node_name(node.name),
+            )
+
+    compiled_graph = graph_workflow.compile(checkpointer=MemorySaver())
+    return compiled_graph, pipeline_state_type
+
+
+def build_graph_from_yaml(
+    pipeline_path: str, pipeline_name: Optional[str] = None
+):
+    pipeline_config = yaml.safe_load(open(pipeline_path))
+    pipeline_schema = PipelineConfig(**pipeline_config)
+    return build_graph_from_config(pipeline_schema, pipeline_name)
+
+
+File: dataqa/pipelines/schema.py
+=======================================
+from typing import Any, Dict, List, Optional, Type, Union, Tuple
+
+from pydantic import BaseModel, Field, model_validator
+from dataqa.errors import PipelineConfigError
+from dataqa.pipelines.constants import PIPELINE_START, PIPELINE_END
+
+
+class PipelineComponent(BaseModel):
+    name: str
+    type: str
+    params: Dict[str, Any]
+    input_source: Optional[Dict[str, str]] = None
+
+
+class ParentGroup(BaseModel):
+    parent: Union[str, List[str]]
+
+
+class NodeEdge(BaseModel):
+    name: str
+    parent_groups: List[ParentGroup] = Field(
+        description="""A list of parent groups.
+One parent group represents a group of nodes required together to trigger this nodess.
+""",
+        default_factory=list
+    )
+
+
+class Pipeline(BaseModel):
+    name: str
+    nodes: List[NodeEdge]
+
+    @model_validator(mode="after")
+    def valid_parent_groups(self):
+        """
+        Validate that every parent is a node in the pipeline
+        """
+        # raises ValueError
+
+        for node in self.nodes:
+            for parent_group in node.parent_groups:
+                if isinstance(parent_group.parent, str):
+                    parent = parent_group.parent
+                    if not any(
+                        parent == n.name
+                        for n in self.nodes
+                    ) and not parent == PIPELINE_START:
+                        raise PipelineConfigError(f"Unknown node {parent} used as the parent node of {node.name}")
+                else:
+                    for parent in parent_group.parent:
+                        if not any(
+                            parent == n.name
+                            for n in self.nodes
+                        ) and not parent == PIPELINE_START:
+                            raise PipelineConfigError(f"Unknown node {parent} used as the parent node of {node.name}")
+        return self
+
+
+class PipelineConfig(BaseModel):
+    components: List[PipelineComponent]
+    pipelines: List[Pipeline]
+    version: Optional[str] = None
+
+    @model_validator(mode="after")
+    def valid_node_name(self):
+        """
+        Validate that every node in pipeline is declared in components
+        """
+        # raises ValueError
+
+        for pipeline in self.pipelines:
+            for node in pipeline.nodes:
+                if not any(
+                    node.name == component.name
+                    for component in self.components
+                ) and not node.name == PIPELINE_END:
+                    raise PipelineConfigError(f"Unknown node {node.name} used in pipeline {pipeline.name}")
+        return self
+
+    def get_pipeline_definition(self, pipeline_name: str = None) -> Pipeline:
+        """
+        :param pipeline_name:
+        :return:
+        """
+        if pipeline_name is None:
+            if len(self.pipelines) == 0:
+                raise PipelineConfigError(
+                    "More than one pipelines specified in the config please specify the pipeline name"
+                )
+            else:
+                return self.pipelines[0]
+
+        pipelines = [
+            pipeline for pipeline in self.pipelines if pipeline.name == pipeline_name
+        ]
+
+        if len(pipelines) == 1:
+            return pipelines[0]
+
+        if not pipelines:
+            raise PipelineConfigError(
+                f"No pipeline with name ('{pipeline_name}') exists, please check your config"
+            )
+
+        if len(pipelines) > 1:
+            raise PipelineConfigError(
+                f"More than one pipelines with name ({pipeline_name}) present, please correct the config and provide a"
+                f" unique pipeline name to every pipeline"
+            )
+
+    def get_component_by_name(self, component_name: str) -> PipelineComponent:
+        """
+        :param component_name:
+        :return:
+        """
+        components = [
+            component
+            for component in self.components
+            if component.name == component_name
+        ]
+
+        if len(components) == 1:
+            return components[0]
+
+        if not components:
+            raise PipelineConfigError(
+                f"No component with the name ('{component_name}') found."
+            )
+
+        if len(components) > 1:
+            raise PipelineConfigError(
+                f"More than one components with name ({component_name}) present, please correct the config and provide a"
+                f" unique component name to every component"
+            )
+
+    def get_component_definitions(self) -> Dict[str, Dict[str, Any]]:
+        """
+        :return:
+        """
+        component_definitions = {}
+        for component in self.components:
+            component_fields = {
+                field: getattr(component, field)
+                for field in component.model_fields.keys()
+            }
+            component_definitions[component.name] = component_fields
+
+        return component_definitions
+
+File: dataqa/tools/__init__.py
+=======================================
+
+
+File: dataqa/tools/analytics/__init__.py
+=======================================
+
+
+File: dataqa/tools/visualization/__init__.py
+=======================================
+
+
+File: dataqa/utils/__init__.py
+=======================================
+
+
+File: dataqa/utils/component_utils.py
+=======================================
+from typing import List, Optional, Any, Type, Dict
+from pydantic import Field, create_model, BaseModel
+from dataqa.components.base_component import Variable
+
+
+def build_base_model_from_parameters(
+    base_model_name: str, parameters: List[Variable]
+) -> Type[BaseModel]:
+    """
+    Dynamically build `base_model_name` as a Pydantic BaseModel class.
+    The new class contains all the variable in parameters as Fields.
+    """
+    model_fields = {}
+    for field_properties in parameters:
+        field_name = field_properties.name
+        field_type = eval(field_properties.type) # TODO if we can avoid using `eval`
+        field_description = field_properties.description
+        default = field_properties.default
+        optional = field_properties.optional
+
+        if optional:
+            field_type = Optional[field_type]
+            model_fields[field_name] = (
+                field_type,
+                Field(description=field_description, default=default),
+            )
+        else:
+            model_fields[field_name] = (
+                field_type,
+                Field(..., description=field_description),
+            )
+
+    return create_model(base_model_name, **model_fields)
+
+
+def extract(
+    response: str, prefix: str, suffix: str, error_tolerant: bool = True
+) -> str:
+    """
+    Parse the response and return the text between the first `prefix` and the last `suffix`.
+    """
+    if len(prefix) == 0:
+        a = 0
+    else:
+        a = response.find(prefix)
+    b = response.rfind(suffix)
+    if a == -1 or b == -1:
+        if error_tolerant:
+            return ""
+        raise ValueError(f"can not find keywords {prefix} or {suffix} in {response}")
+    return response[a + len(prefix) : b].strip()
+
+
+File: dataqa/utils/data_model_util.py
+=======================================
+from pydantic import BaseModel, Field, create_model
+from typing import List, Optional, Type, Any, Dict
+
+
+def create_base_model(
+    model_name: str, parameters: List[Dict], parent_model: Optional[Type[BaseModel]] = None
+) -> Type[BaseModel]:
+    """
+    Create Pydantic base model dynamically
+    :param model_name: name of the base model to be created
+    :param parameters: list of fields as dictionary
+    :param parent_model: class of parent base model
+    :return: created base model
+    """
+    model_fields = dict()
+    for field in parameters:
+        field_name = field["name"]
+        field_type = eval(field["type"])
+        field_description = field["description"]
+        model_fields[field_name] = (field_type, Field(description=field_description))
+    if parent_model is None:
+        return create_model(model_name, **model_fields)
+    else:
+        return create_model(model_name, __base__=parent_model, **model_fields)
+
+
+File: dataqa/ingest_knowledge.py
+=======================================
+import yaml
+from pydantic import BaseModel, Field, create_model, parse_obj_as
+from typing import Any, Dict, List, Optional
+import logging
+import sys
+from datetime import datetime
+from dataqa.utils.data_model_util import create_base_model
+
+
+logger = logging.getLogger(__name__)
+
+
+class KnowledgeBase:
+    """Knowledge base object"""
+
+    def __init__(self, config: Dict):
+        """
+        :param config: config dictionary that defines all retrievable
+        """
+        self.config = config
+        self.data = self.ingest_knowledge_base()
+
+    def get_kb_by_name(self, kb_name: str) -> Optional[Dict]:
+        """
+        :param kb_name: string of knowledge base name
+        :return: knowledge base with given name
+        """
+        for kb in self.data:
+            if kb["name"] == kb_name:
+                return kb
+        return None
+
+    def get_kb_by_index(self, kb_index: str) -> Optional[Dict]:
+        """
+        :param kb_index: string of knowledge base index
+        :return: knowledge base with given index
+        """
+        for kb in self.data:
+            if kb["knowledge_base_index"] == kb_index:
+                return kb
+        return None
+
+    def ingest_knowledge_base(self):
+        # TODO: validate retrievable data path
+        retrievable_data = yaml.safe_load(
+            open(self.config["retrievable_data_path"], "r")
+        )
+        knowledge_base = []
+        for retrievable in self.config["data"]:
+            name = retrievable["name"]
+            fields = retrievable["fields"]
+            knowledge_base_index = retrievable["knowledge_base_index"]
+
+            record_base_model = create_base_model(name, fields)
+
+            data = retrievable_data[name]["data"]
+            parsed_data_list = []
+            for record in data:
+                try:
+                    parsed_data = record_base_model.model_validate(record)
+                    parsed_data_list.append(parsed_data)
+                except:
+                    logger.error(
+                        f"Failed to parse record for {name} retrievable. Record:\n{record}"
+                    )
+
+            knowledge_base.append(
+                {
+                    "name": name,
+                    "base_model": record_base_model,
+                    "knowledge_base_index": knowledge_base_index,
+                    "records": parsed_data_list,
+                }
+            )
+        return knowledge_base
+
+
+if __name__ == "__main__":
+    retriever_config = yaml.safe_load(
+        open("example/ccb_risk/config/config_retriever.yml", "r")
+    )
+    my_kb = KnowledgeBase(retriever_config["components"][0]["parameters"]["config"])
+    print()
+
+
+File: dataqa/utils/prompt_utils.py
+=======================================
+from typing import Union, List, Dict, Literal
+from pydantic import BaseModel
+from langchain_core.prompts import ChatPromptTemplate
+
+class Prompt(BaseModel):
+    role: Literal["system", "user", "assistant"] = "system"
+    content: str
+
+prompt_type = Union[str, Prompt, Dict, List[str], List[Prompt], List[Dict], ChatPromptTemplate]
+
+def build_prompt(prompt: Union[str, Prompt, Dict, List[str], List[Prompt], List[Dict]]) -> ChatPromptTemplate:
+    if isinstance(prompt, ChatPromptTemplate):
+        return prompt
+    
+    if not isinstance(prompt, list):
+        prompt = [prompt]
+    
+    messages = []
+
+    for msg in prompt:
+        if isinstance(msg, str):
+            messages.append(('system', msg))
+        elif isinstance(msg, dict):
+            if 'content' not in msg:
+                raise ValueError('`content` is required to build a prompt from a dictionary.')
+            messages.append((msg.get('role', 'system'), msg['content']))
+        elif isinstance(msg, Prompt):
+            messages.append((msg.role, msg.construct))
+        else:
+            raise ValueError(f'Type {type(msg)} is not supported to build a prompt.')
+    
+    return ChatPromptTemplate.from_messages(messages=messages)
+
+File: dataqa/utils/utils.py
+=======================================
+import importlib
+import inspect
+import json
+import pickle
+from copy import deepcopy
+from pathlib import Path
+from typing import Any, Optional, Text, Type, TypeVar, Union
+
+import yaml
+
+T = TypeVar("T")
+
+
+def class_from_module_path(
+    module_path: Text, lookup_path: Optional[Text] = None
+) -> Type:
+    """Given the module path and name of a class, tries to retrieve the class.
+
+    The loaded class can be used to instantiate new objects.
+
+    Args:
+        module_path: either an absolute path to a Python class,
+                     or the name of the class in the local / global scope.
+        lookup_path: a path where to load the class from, if it cannot
+                     be found in the local / global scope.
+
+    Returns:
+        A Python class.
+
+    Raises:
+        ImportError, in case the module path cannot be found.
+        RasaException, in case the imported result is something other than a class
+    """
+
+    klass = None
+    if "." in module_path:
+        module_name, _, class_name = module_path.rpartition(".")
+        m = importlib.import_module(module_name)
+        klass = getattr(m, class_name, None)
+    elif lookup_path:
+        # try to import the class from the lookup path
+        m = importlib.import_module(lookup_path)
+        klass = getattr(m, module_path, None)
+
+    if klass is None:
+        raise ImportError(f"Cannot retrieve class from path {module_path}.")
+
+    if not inspect.isclass(klass):
+        raise TypeError(
+            f"class_from_module_path() is expected to return a class, "
+            f"but for {module_path} we got a {type(klass)}."
+        )
+    return klass
+
+
+def cls_from_str(name: str) -> Type[Union[Any, T]]:
+    """
+    Returns a class object with the given name as a string.
+    :param name: The name of the class as a string.
+    :return: The class object.
+    :raises ImportError: If the class cannot be retrieved from the path.
+    """
+    try:
+        return class_from_module_path(name)
+    except (AttributeError, ImportError, TypeError, ValueError):
+        raise ImportError(f"Cannot retrieve class from name {name}.")
+
+
+def load_file(file_path: Union[str, Path]):
+    file_path = deepcopy(file_path)
+    if isinstance(file_path, Path):
+        str_file_path = str(file_path)
+    else:
+        str_file_path = file_path
+
+    if str_file_path.endswith("json"):
+        return json.load(open(str_file_path, "r"))
+    if str_file_path.endswith("yml"):
+        return yaml.safe_load(open(str_file_path, "r"))
+    if str_file_path.endswith("pkl"):
+        return pickle.load(open(str_file_path, "rb"))
+    return open(str_file_path).read()
+
+===================================================================
+
+Example pipeline using the above codebase
+File: examples/payments/config/config.yaml
+================================================
+components:
+  - name: return
+    params:
+      name: return
+    type: dataqa.components.gather.GatherOutput
+
+  - name: gpt_4o_model
+    params:
+      model: gpt-4o-2024-05-13
+      base_url: "gemini-2.0-flash"
+      api_version: "2024-02-01"
+      api_key: "azure_ad"
+      temperature: 0
+      max_response_token: 2000
+    type: dataqa.llm.openai.AzureOpenAI
+
+  - name: query_rewriter
+    params:
+      llm: COMP_gpt_4o_model
+      config:
+        name: query_rewriter
+        model: gpt-4o-2024-05-13
+        prompt: FILE_{BASE_DIR}/examples/payments/data/rewriter_prompt.txt
+        input:
+          - name: query
+            type: str
+            description: input query
+          - name: previous_rewritten_query
+            type: str
+            description: a list of messages in the conversation history
+        output:
+          - name: rewritten_query
+            type: str
+            description: the rewritten query after considering the conversation history
+          - name: rewriter_reasoning
+            type: str
+            description: the reasoning procedure for generating the rewritten query
+    type: dataqa.components.llm.base_prompt_llm_chain.BasePromptLLMChain
+
+  - name: code_generator_prompt
+    params:
+      config:
+        name: code_generator_prompt
+        prompt: FILE_{BASE_DIR}/examples/payments/data/code_prompt.txt
+        input:
+          - name: rewritten_query
+            type: str
+            description: input query
+    type: dataqa.components.prompt.base_prompt.BasePrompt
+
+  - name: code_generator
+    params:
+      llm: COMP_gpt_4o_model
+      config:
+        name: code_generator
+        output:
+          - name: code
+            type: str
+            description: the generated code
+          - name: reasoning
+            type: str
+            description: the reasoning procedure for generating code
+        output_parser: xml
+    type: dataqa.components.llm.base_llm_component.BaseLLMComponent
+
+  - name: code_executor
+    params:
+      config:
+        name: code_executor
+        data_files:
+          - path: "{BASE_DIR}/examples/payments/data/FAKE_PROD_BD_TH_FLAT_V3.csv"
+            table_name: PROD_BD_TH_FLAT_V3
+          - path: "{BASE_DIR}/examples/payments/data/FAKE_ETS_D_CUST_PORTFOLIO.csv"
+            table_name: ETS_D_CUST_PORTFOLIO
+        input:
+          - name: code
+            type: str
+            description: generated code
+      type: qwd.commons.pipeline.qci_executor.InMemoryCodeExecutor
+
+pipelines:
+  - name: payments_pipeline
+    nodes:
+      - name: query_rewriter
+        edges:
+          - query: START.query
+            previous_rewritten_query: START.previous_rewritten_query
+      - name: code_generator_prompt
+        edges:
+          - rewritten_query: query_rewriter.rewritten_query
+      - name: code_generator
+        edges:
+          - code_generator_promptmessages
+      - name: code_executor
+        edges:
+          - code: code_generator.code
+      - name: return
+        edges:
+          - rewritten_query: query_rewriter.rewritten_query
+            code: code_generator.code
+            execution_output: code_executor
+      - name: END:
+        edges:
+          - return

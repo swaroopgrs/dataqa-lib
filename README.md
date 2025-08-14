@@ -1,64 +1,28 @@
-# DataQA
+uv add pre-commit
+uv run pre-commit
+uv run pre-commit autoupdate
+uv tool install ruff@latest
+uv run gitingest -i "dataqa/ tets/" 
+uv sync
+find . | grep -E "(/__pycache__$|\.pyc$|\.pyo$)" | xargs rm -rf
+git rm -r --cached **/__pycache__
 
-A composable data agent framework for natural language data interaction.
+uv add duckdb gitingest faker pandas pydantic pytest pytest-asyncio langgraph langchain-openai pre-commit
 
-## Overview
 
-DataQA is an enterprise-grade Python framework that enables developers to build intelligent data agents capable of querying databases, performing analysis, and generating visualizations through natural language interfaces.
+find . -name "__pycache__" -type d -exec rm -rf {} +
 
-## Features
 
-- **Intelligent Grounding (RAG)**: Context-aware code generation with business rules and schema knowledge
-- **Secure Execution**: Sandboxed code execution with pluggable backends
-- **Advanced Agentic Framework**: Composable agent strategies with hierarchical capabilities
-- **Interactive & Stateful**: Persistent memory and human-in-the-loop interactions
-- **Declarative Configuration**: YAML-driven agent definition
 
-## Installation
 
-```bash
-pip install dataqa
-```
-
-For development with optional dependencies:
-
-```bash
-pip install dataqa[dev,opensearch]
-```
-
-## Quick Start
-
-```python
-from dataqa import DataAgent, AgentConfig
-
-# Load configuration
-config = AgentConfig.from_yaml("agent_config.yaml")
-
-# Create agent
-agent = DataAgent(config)
-
-# Query your data
-response = agent.query("What are the top 5 customers by revenue?")
-print(response)
-```
-
-## Documentation
-
-### Quick Links
-- [Getting Started Guide](docs/getting-started.md) - Complete setup and usage guide
-- [API Reference](docs/api-reference.md) - Comprehensive API documentation
-- [Troubleshooting](docs/troubleshooting.md) - Common issues and solutions
-
-### Configuration Examples
-- [Basic Agent](config/basic_agent.yaml) - Simple configuration for getting started
-- [Development Agent](config/development_agent.yaml) - Development-optimized settings
-- [Enterprise Agent](config/enterprise_agent.yaml) - Production-ready configuration
-- [Analytics Agent](config/analytics_agent.yaml) - Specialized for data analytics
-
-### Usage Examples
-- [API Usage Examples](examples/api_usage.py) - Python API usage patterns
-- [End-to-End Examples](examples/end_to_end_examples.py) - Complete workflow demonstrations
-
-## License
-
-MIT License - see LICENSE file for details.
+docker pull docker.all-hands.dev/all-hands-ai/runtime:0.38-nikolaik
+docker run -it --rm --pull=always \
+    -e SANDBOX_VOLUMES=/home/swaro/projects/dataqa-oh:/workspace:rw \
+    -e SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.all-hands.dev/all-hands-ai/runtime:0.38-nikolaik \
+    -e LOG_ALL_EVENTS=true \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v ~/.openhands-state:/.openhands-state \
+    -p 3000:3000 \
+    --add-host host.docker.internal:host-gateway \
+    --name openhands-app \
+    docker.all-hands.dev/all-hands-ai/openhands:0.38

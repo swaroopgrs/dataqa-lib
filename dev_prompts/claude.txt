@@ -1,0 +1,870 @@
+I'll help you create a detailed breakdown that you can feed to an LLM to generate your entire `dataqa` library. Based on your requirements, I'll organize this into a comprehensive plan with architecture, components, and implementation steps.
+
+# DataQA Library Design and Implementation Plan
+
+## 1. Project Structure and Setup
+
+First, let's establish the foundational project structure:
+
+```
+dataqa/
+├── pyproject.toml       # Poetry dependency management
+├── README.md           # Usage instructions and developer guide
+├── .github/            # CI/CD workflows
+├── docs/               # Sphinx documentation
+│   ├── conf.py
+│   ├── index.rst
+│   └── ...
+├── dataqa/             # Main package
+│   ├── __init__.py
+│   ├── config/         # Configuration handling
+│   ├── core/           # Core components
+│   ├── components/     # Reusable components
+│   ├── agents/         # Agent implementations
+│   ├── workflows/      # Workflow implementations
+│   ├── knowledge/      # Knowledge base functionality
+│   └── utils/          # Utility functions
+└── tests/              # Test suite
+    ├── conftest.py
+    └── ...
+```
+
+## 2. Core Architecture
+
+The library will be built around these key architectural principles:
+
+1. **Component-based design**: All functionality will be built as modular components
+2. **Provider abstraction**: Framework-specific implementations (LangGraph, CrewAI, etc.) will be abstracted
+3. **Config-driven**: System behavior will be configurable via YAML
+4. **Extensibility**: Easy to add new components, providers, and features
+
+## 3. Component System Design
+
+Create a robust component system that allows:
+- Base components that can be used in both workflows and as agent tools
+- Registration/discovery mechanism
+- Composition and chaining of components
+
+### Base Component Structure
+
+```python
+# Base component all others will inherit from
+class Component:
+    def __init__(self, config):
+        self.config = config
+        
+    async def execute(self, *args, **kwargs):
+        """Execute component functionality"""
+        pass
+        
+    def to_tool(self):
+        """Convert component to a tool format for agent use"""
+        pass
+```
+
+### Component Registry
+
+Create a component registry system that allows:
+- Dynamic discovery of components
+- Configuration of components via YAML
+- Instantiation of components based on configuration
+
+## 4. Knowledge Base System
+
+Design the knowledge base system for storing and retrieving:
+- Schema information
+- Business rules
+- Example query-code pairs
+
+The system should support:
+- Multiple storage backends (OpenSearch, local storage)
+- Multiple retrieval methods (dense, sparse, hybrid, tag-based)
+- Flexible document schema and indexing
+
+## 5. LLM Integration
+
+Create a modular LLM integration system:
+- Support for multiple providers (AzureOpenAI initially, others later)
+- Consistent interface for prompting
+- Streaming support
+- Prompt templating and management
+
+## 6. Workflow System
+
+Design the workflow system using LangGraph:
+- Abstract the LangGraph specifics into a provider implementation
+- Define standard nodes for common operations
+- Support for conditional branches and loops
+- Error handling and recovery
+
+## 7. Agent System
+
+Design the multi-agent system:
+- Orchestration agent that can delegate to specialized agents
+- Specialized agents for data querying, analysis, visualization
+- Tool integration for both built-in and user-defined functionality
+- Memory and state management
+
+## 8. Code Generation and Execution
+
+Design the code generation and execution system:
+- LLM-based code generation for different tasks
+- Code validation and security checking
+- Execution via API or local runtime
+- Error handling and retry mechanisms
+
+## 9. Configuration System
+
+Create a robust configuration system:
+- YAML-based configuration
+- Environment variable substitution
+- Configuration validation
+- Default configurations
+
+## Detailed Implementation Plan
+
+Now, let's break down the implementation into detailed steps:
+
+I've created a comprehensive implementation plan for your DataQA library. This should serve as an excellent guide that you can feed to an LLM to generate the entire library.
+
+
+# DataQA Implementation Plan
+
+## Phase 1: Foundation and Core Components
+
+### Step 1.1: Project Setup
+1. Initialize Poetry project with dependencies
+   ```bash
+   poetry init
+   poetry add pydantic pyyaml langchain langchain-core langgraph azure-openai
+   poetry add --group dev pytest pytest-cov sphinx sphinx-rtd-theme ruff pre-commit
+   ```
+
+2. Set up basic project structure
+   ```bash
+   mkdir -p dataqa/config dataqa/core dataqa/components dataqa/agents dataqa/workflows dataqa/knowledge dataqa/utils
+   mkdir -p tests docs
+   ```
+
+3. Create base configuration and entry points
+   ```bash
+   touch dataqa/__init__.py dataqa/config/__init__.py dataqa/core/__init__.py
+   ```
+
+### Step 1.2: Configuration System
+1. Create configuration schema classes using Pydantic
+2. Implement YAML loader with environment variable substitution
+3. Create configuration validation functionality
+4. Add default configurations
+
+Example configuration structure:
+```python
+# dataqa/config/schema.py
+from pydantic import BaseModel, Field
+from typing import Dict, List, Optional, Union, Any
+
+class LLMConfig(BaseModel):
+    provider: str = "azure_openai"
+    model: str
+    api_version: Optional[str] = None
+    api_key: Optional[str] = None
+    endpoint: Optional[str] = None
+    # Additional provider-specific fields
+
+class KnowledgeBaseConfig(BaseModel):
+    provider: str = "local"  # "local" or "opensearch"
+    # Provider-specific configurations
+    retrieval_methods: List[str] = ["dense"]  # "dense", "sparse", "hybrid", "tag"
+    
+class ComponentConfig(BaseModel):
+    type: str
+    config: Dict[str, Any] = {}
+
+class AgentConfig(BaseModel):
+    type: str
+    llm: LLMConfig
+    tools: List[str] = []
+    # Agent-specific configurations
+
+class WorkflowConfig(BaseModel):
+    type: str
+    components: Dict[str, ComponentConfig]
+    # Workflow-specific configurations
+
+class DataQAConfig(BaseModel):
+    knowledge_base: KnowledgeBaseConfig
+    llm: LLMConfig
+    components: Dict[str, ComponentConfig] = {}
+    agents: Dict[str, AgentConfig] = {}
+    workflows: Dict[str, WorkflowConfig] = {}
+```
+
+### Step 1.3: Base Component System
+1. Create abstract base Component class
+2. Implement component registration mechanism
+3. Build component discovery functionality
+4. Add component factory for instantiation from configuration
+
+Example component system:
+```python
+# dataqa/core/component.py
+from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional, Type, ClassVar, Dict
+
+class Component(ABC):
+    """Base component class that all components will inherit from."""
+    
+    # Class registry for component types
+    _registry: ClassVar[Dict[str, Type["Component"]]] = {}
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+    
+    @abstractmethod
+    async def execute(self, context: Dict[str, Any]) -> Any:
+        """Execute the component's main functionality."""
+        pass
+    
+    def to_tool(self, name: str, description: str):
+        """Convert this component to a tool usable by agents."""
+        # Implementation to create a tool representation
+        pass
+    
+    @classmethod
+    def register(cls, component_type: str):
+        """Decorator to register a component class."""
+        def decorator(component_cls: Type["Component"]):
+            cls._registry[component_type] = component_cls
+            return component_cls
+        return decorator
+    
+    @classmethod
+    def create(cls, component_type: str, config: Dict[str, Any]) -> "Component":
+        """Create a component instance from type and configuration."""
+        if component_type not in cls._registry:
+            raise ValueError(f"Unknown component type: {component_type}")
+        
+        component_cls = cls._registry[component_type]
+        return component_cls(config)
+```
+
+### Step 1.4: LLM Integration
+1. Create LLM provider abstraction
+2. Implement AzureOpenAI provider
+3. Add prompt templates system
+4. Build conversation management utilities
+
+Example LLM integration:
+```python
+# dataqa/core/llm.py
+from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional, Type, ClassVar
+
+class LLMProvider(ABC):
+    """Base class for LLM providers."""
+    
+    _registry: ClassVar[Dict[str, Type["LLMProvider"]]] = {}
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+    
+    @abstractmethod
+    async def generate(self, prompt: str, **kwargs) -> str:
+        """Generate text from a prompt."""
+        pass
+    
+    @abstractmethod
+    async def generate_streaming(self, prompt: str, **kwargs):
+        """Generate streaming text from a prompt."""
+        pass
+    
+    @classmethod
+    def register(cls, provider_name: str):
+        """Decorator to register an LLM provider."""
+        def decorator(provider_cls: Type["LLMProvider"]):
+            cls._registry[provider_name] = provider_cls
+            return provider_cls
+        return decorator
+    
+    @classmethod
+    def create(cls, provider_name: str, config: Dict[str, Any]) -> "LLMProvider":
+        """Create an LLM provider instance."""
+        if provider_name not in cls._registry:
+            raise ValueError(f"Unknown LLM provider: {provider_name}")
+        
+        provider_cls = cls._registry[provider_name]
+        return provider_cls(config)
+
+@LLMProvider.register("azure_openai")
+class AzureOpenAIProvider(LLMProvider):
+    """AzureOpenAI provider implementation."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        # Initialize Azure OpenAI SDK client
+        
+    async def generate(self, prompt: str, **kwargs) -> str:
+        # Implementation using Azure OpenAI
+        pass
+        
+    async def generate_streaming(self, prompt: str, **kwargs):
+        # Implementation for streaming using Azure OpenAI
+        pass
+```
+
+## Phase 2: Knowledge Base and Retrieval
+
+### Step 2.1: Knowledge Base Interface
+1. Define knowledge base provider interface
+2. Implement local file-based knowledge base
+3. Prepare for OpenSearch implementation
+4. Create document schema for business rules, examples, and DB schema
+
+Example knowledge base system:
+```python
+# dataqa/knowledge/base.py
+from abc import ABC, abstractmethod
+from typing import Dict, List, Any, Optional, Type, ClassVar
+
+class Document:
+    """Base document class for knowledge base items."""
+    
+    def __init__(self, content: str, metadata: Dict[str, Any], doc_type: str, tags: List[str] = None):
+        self.content = content
+        self.metadata = metadata
+        self.doc_type = doc_type  # "schema", "rule", "example"
+        self.tags = tags or []
+
+class KnowledgeBase(ABC):
+    """Base class for knowledge base providers."""
+    
+    _registry: ClassVar[Dict[str, Type["KnowledgeBase"]]] = {}
+    
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+    
+    @abstractmethod
+    async def add_document(self, document: Document) -> str:
+        """Add a document to the knowledge base."""
+        pass
+    
+    @abstractmethod
+    async def retrieve(self, query: str, doc_type: Optional[str] = None, 
+                      retrieval_method: str = "dense", top_k: int = 5, 
+                      tags: Optional[List[str]] = None) -> List[Document]:
+        """Retrieve documents from the knowledge base."""
+        pass
+    
+    @classmethod
+    def register(cls, provider_name: str):
+        """Decorator to register a knowledge base provider."""
+        def decorator(provider_cls: Type["KnowledgeBase"]):
+            cls._registry[provider_name] = provider_cls
+            return provider_cls
+        return decorator
+    
+    @classmethod
+    def create(cls, provider_name: str, config: Dict[str, Any]) -> "KnowledgeBase":
+        """Create a knowledge base provider instance."""
+        if provider_name not in cls._registry:
+            raise ValueError(f"Unknown knowledge base provider: {provider_name}")
+        
+        provider_cls = cls._registry[provider_name]
+        return provider_cls(config)
+
+@KnowledgeBase.register("local")
+class LocalKnowledgeBase(KnowledgeBase):
+    """Local file-based knowledge base implementation."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        # Initialize local storage and embedding model
+        
+    async def add_document(self, document: Document) -> str:
+        # Implementation for adding to local storage
+        pass
+        
+    async def retrieve(self, query: str, doc_type: Optional[str] = None, 
+                      retrieval_method: str = "dense", top_k: int = 5, 
+                      tags: Optional[List[str]] = None) -> List[Document]:
+        # Implementation for retrieval from local storage
+        pass
+```
+
+### Step 2.2: Ingestion System
+1. Create ingestion components for YAML/TXT files
+2. Implement schema parser for database metadata
+3. Build business rules parser
+4. Add example parser for query-code pairs
+
+### Step 2.3: Retrieval Methods
+1. Implement dense retrieval using embeddings
+2. Add sparse retrieval using BM25
+3. Create hybrid retrieval combining dense and sparse
+4. Build tag-based filtering
+
+## Phase 3: Data Querying Components
+
+### Step 3.1: Query Rewriting Component
+1. Create component for natural language query rewriting
+2. Implement context-aware query expansion
+3. Add query normalization functionality
+
+Example query component:
+```python
+# dataqa/components/query_rewriter.py
+from dataqa.core.component import Component
+from typing import Dict, Any
+
+@Component.register("query_rewriter")
+class QueryRewriterComponent(Component):
+    """Component for rewriting and refining user queries."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+        # Initialize LLM for query rewriting
+        
+    async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Rewrite the query for better retrieval."""
+        original_query = context.get("query", "")
+        
+        # Use LLM to rewrite the query
+        rewritten_query = await self._rewrite_query(original_query)
+        
+        # Update context with rewritten query
+        context["original_query"] = original_query
+        context["query"] = rewritten_query
+        
+        return context
+    
+    async def _rewrite_query(self, query: str) -> str:
+        # Implementation for query rewriting using LLM
+        pass
+```
+
+### Step 3.2: Schema Retrieval Component
+1. Create component for relevant schema retrieval
+2. Implement table and column filtering based on query
+3. Add schema formatting functionality
+
+### Step 3.3: Context Building Component
+1. Create component to combine retrieved assets
+2. Implement context assembly for LLM prompt
+3. Add dynamic prompt template selection
+
+### Step 3.4: Code Generation Component
+1. Create component for SQL/API code generation
+2. Implement code validation and security checks
+3. Add error handling and feedback mechanisms
+
+## Phase 4: Code Execution System
+
+### Step 4.1: Code Executor Base
+1. Design abstract code executor interface
+2. Implement in-memory sandbox executor
+3. Create API-based executor
+4. Add MCP communication protocol (if chosen)
+
+Example code executor:
+```python
+# dataqa/components/code_executor/base.py
+from dataqa.core.component import Component
+from abc import abstractmethod
+from typing import Dict, Any
+
+class CodeExecutor(Component):
+    """Base class for code execution components."""
+    
+    def __init__(self, config: Dict[str, Any]):
+        super().__init__(config)
+    
+    @abstractmethod
+    async def execute_code(self, code: str, language: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute code and return results."""
+        pass
+    
+    async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute code from context and update with results."""
+        code = context.get("generated_code", "")
+        language = context.get("language", "python")
+        
+        # Execute the code
+        result = await self.execute_code(code, language, context)
+        
+        # Update context with execution results
+        context["execution_result"] = result.get("result")
+        context["execution_success"] = result.get("success", False)
+        context["execution_error"] = result.get("error")
+        
+        return context
+
+@Component.register("in_memory_executor")
+class InMemoryCodeExecutor(CodeExecutor):
+    """In-memory code execution in a sandboxed environment."""
+    
+    async def execute_code(self, code: str, language: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        # Implementation for in-memory execution
+        pass
+
+@Component.register("api_executor")
+class APICodeExecutor(CodeExecutor):
+    """Code execution via external API."""
+    
+    async def execute_code(self, code: str, language: str, context: Dict[str, Any]) -> Dict[str, Any]:
+        # Implementation for API-based execution
+        pass
+```
+
+### Step 4.2: Error Analysis and Retry
+1. Create component for execution error analysis
+2. Implement LLM-based error correction
+3. Add retry strategy with context update
+
+### Step 4.3: Result Processing
+1. Create component for result formatting
+2. Implement data transformation utilities
+3. Add result validation and cleaning
+
+## Phase 5: Data Analysis Components
+
+### Step 5.1: Analysis Planning Component
+1. Create component for analysis planning
+2. Implement analysis technique selection
+3. Add parameter optimization
+
+### Step 5.2: Analysis Execution Component
+1. Create component for analysis code generation
+2. Implement standard analysis library integration
+3. Add pre-built analysis function support
+
+### Step 5.3: Analysis Interpretation Component
+1. Create component for results interpretation
+2. Implement insight extraction
+3. Add recommendation generation
+
+## Phase 6: Data Visualization Components
+
+### Step 6.1: Visualization Planning Component
+1. Create component for visualization planning
+2. Implement chart type selection
+3. Add visualization parameter optimization
+
+### Step 6.2: Visualization Generation Component
+1. Create component for visualization code generation
+2. Implement standard visualization library integration
+3. Add pre-built visualization function support
+
+## Phase 7: Workflow and Agent Systems
+
+### Step 7.1: LangGraph Workflow Integration
+1. Create LangGraph provider abstraction
+2. Implement workflow builder using components
+3. Add state management and persistence
+4. Build error handling and recovery mechanisms
+
+Example workflow system:
+```python
+# dataqa/workflows/langgraph_provider.py
+from typing import Dict, Any, List
+from langgraph.graph import Graph, StateGraph
+from dataqa.core.component import Component
+
+class LangGraphWorkflow:
+    """LangGraph-based workflow implementation."""
+    
+    def __init__(self, config: Dict[str, Any], components: Dict[str, Component]):
+        self.config = config
+        self.components = components
+        self.graph = self._build_graph()
+    
+    def _build_graph(self) -> StateGraph:
+        """Build the LangGraph workflow graph."""
+        # Initialize LangGraph StateGraph
+        graph = StateGraph()
+        
+        # Add nodes for each component
+        for name, component in self.components.items():
+            graph.add_node(name, component.execute)
+        
+        # Add edges based on configuration
+        edges = self.config.get("edges", [])
+        for edge in edges:
+            source = edge.get("source")
+            target = edge.get("target")
+            condition = edge.get("condition")
+            
+            if condition:
+                # Add conditional edge
+                graph.add_conditional_edges(
+                    source,
+                    self._create_condition_function(condition),
+                    {
+                        True: target,
+                        False: edge.get("fallback", source)
+                    }
+                )
+            else:
+                # Add direct edge
+                graph.add_edge(source, target)
+        
+        # Set entry point
+        entry_point = self.config.get("entry_point", next(iter(self.components)))
+        graph.set_entry_point(entry_point)
+        
+        # Compile the graph
+        return graph.compile()
+    
+    def _create_condition_function(self, condition_config: Dict[str, Any]):
+        """Create a condition function from configuration."""
+        # Implementation for creating conditional functions
+        pass
+    
+    async def run(self, initial_state: Dict[str, Any]) -> Dict[str, Any]:
+        """Run the workflow with the given initial state."""
+        # Execute the LangGraph workflow
+        result = await self.graph.arun(initial_state)
+        return result
+```
+
+### Step 7.2: Agent System Implementation
+1. Create orchestration agent implementation
+2. Build specialized agents (querying, analysis, visualization)
+3. Implement tool management for agents
+4. Add agent memory and context management
+
+Example agent system:
+```python
+# dataqa/agents/base.py
+from typing import Dict, Any, List
+from dataqa.core.component import Component
+from dataqa.core.llm import LLMProvider
+
+class Agent:
+    """Base class for LLM-powered agents."""
+    
+    def __init__(self, config: Dict[str, Any], llm: LLMProvider, tools: List[Dict[str, Any]]):
+        self.config = config
+        self.llm = llm
+        self.tools = tools
+        self.memory = {}
+    
+    async def run(self, query: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Run the agent on a query with optional context."""
+        # Implementation for agent execution
+        pass
+
+class OrchestratorAgent(Agent):
+    """Agent responsible for orchestrating other specialized agents."""
+    
+    def __init__(self, config: Dict[str, Any], llm: LLMProvider, 
+                specialized_agents: Dict[str, Agent], tools: List[Dict[str, Any]]):
+        super().__init__(config, llm, tools)
+        self.specialized_agents = specialized_agents
+    
+    async def run(self, query: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        # Implementation for orchestration agent logic
+        pass
+
+class QueryAgent(Agent):
+    """Specialized agent for data querying tasks."""
+    
+    async def run(self, query: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        # Implementation for data querying agent logic
+        pass
+
+class AnalysisAgent(Agent):
+    """Specialized agent for data analysis tasks."""
+    
+    async def run(self, query: str, data: Any, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        # Implementation for data analysis agent logic
+        pass
+
+class VisualizationAgent(Agent):
+    """Specialized agent for data visualization tasks."""
+    
+    async def run(self, query: str, data: Any, context: Dict[str, Any] = None) -> Dict[str, Any]:
+        # Implementation for data visualization agent logic
+        pass
+```
+
+### Step 7.3: LangGraph Agent Integration
+1. Create LangGraph agent implementations
+2. Build agent workflow patterns
+3. Implement agent communication protocols
+4. Add external tool integration
+
+## Phase 8: System Integration and API
+
+### Step 8.1: System Façade
+1. Create main DataQA class as façade
+2. Implement configuration loading and validation
+3. Add component, workflow, and agent initialization
+4. Build system lifecycle management
+
+Example system façade:
+```python
+# dataqa/core/system.py
+from typing import Dict, Any, Optional
+from dataqa.config.loader import load_config
+from dataqa.core.component import Component
+from dataqa.knowledge.base import KnowledgeBase
+from dataqa.core.llm import LLMProvider
+from dataqa.workflows.langgraph_provider import LangGraphWorkflow
+from dataqa.agents.base import OrchestratorAgent
+
+class DataQA:
+    """Main façade for the DataQA system."""
+    
+    def __init__(self, config_path: str = None, config: Dict[str, Any] = None):
+        # Load and validate configuration
+        self.config = config or (load_config(config_path) if config_path else {})
+        
+        # Initialize knowledge base
+        self.knowledge_base = self._init_knowledge_base()
+        
+        # Initialize LLM provider
+        self.llm = self._init_llm()
+        
+        # Initialize components
+        self.components = self._init_components()
+        
+        # Initialize workflows
+        self.workflows = self._init_workflows()
+        
+        # Initialize agents
+        self.agents = self._init_agents()
+        
+        # Initialize orchestrator agent
+        self.orchestrator = self._init_orchestrator()
+    
+    def _init_knowledge_base(self) -> KnowledgeBase:
+        """Initialize knowledge base from configuration."""
+        # Implementation for knowledge base initialization
+        pass
+    
+    def _init_llm(self) -> LLMProvider:
+        """Initialize LLM provider from configuration."""
+        # Implementation for LLM initialization
+        pass
+    
+    def _init_components(self) -> Dict[str, Component]:
+        """Initialize components from configuration."""
+        # Implementation for components initialization
+        pass
+    
+    def _init_workflows(self) -> Dict[str, LangGraphWorkflow]:
+        """Initialize workflows from configuration."""
+        # Implementation for workflows initialization
+        pass
+    
+    def _init_agents(self) -> Dict[str, Any]:
+        """Initialize specialized agents from configuration."""
+        # Implementation for agents initialization
+        pass
+    
+    def _init_orchestrator(self) -> OrchestratorAgent:
+        """Initialize orchestrator agent."""
+        # Implementation for orchestrator initialization
+        pass
+    
+    async def query(self, query: str, mode: str = "agent") -> Dict[str, Any]:
+        """Process a natural language query using specified mode."""
+        if mode == "agent":
+            # Use agent-based approach
+            return await self.orchestrator.run(query)
+        elif mode == "workflow":
+            # Use workflow-based approach
+            workflow_name = self.config.get("default_workflow", "default")
+            workflow = self.workflows.get(workflow_name)
+            if not workflow:
+                raise ValueError(f"Workflow '{workflow_name}' not found")
+            
+            return await workflow.run({"query": query})
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
+```
+
+### Step 8.2: CLI Interface
+1. Create command-line interface
+2. Implement CLI commands for system operations
+3. Add configuration management commands
+4. Build interactive shell mode
+
+### Step 8.3: Python API
+1. Create Python API for library users
+2. Implement asynchronous API methods
+3. Add API documentation and examples
+4. Build API usage tutorials
+
+## Phase 9: Documentation and Testing
+
+### Step 9.1: Documentation
+1. Create Sphinx documentation structure
+2. Write user guide with examples
+3. Add developer documentation with architecture
+4. Build API reference documentation
+
+### Step 9.2: Testing
+1. Create test suite with pytest
+2. Implement unit tests for core components
+3. Add integration tests for workflows and agents
+4. Build end-to-end tests for common scenarios
+
+### Step 9.3: Example Configurations
+1. Create example configurations for common use cases
+2. Implement example knowledge base assets
+3. Add example workflows and agents
+4. Build example notebooks demonstrating usage
+
+## Phase 10: Extensions and Plugins
+
+### Step 10.1: Plugin System
+1. Design plugin architecture for extensions
+2. Implement plugin discovery and loading
+3. Add plugin configuration support
+4. Build plugin developer documentation
+
+### Step 10.2: Additional LLM Providers
+1. Create structure for additional LLM providers
+2. Implement example third-party provider
+3. Add provider-specific configuration
+4. Build provider testing framework
+
+### Step 10.3: Additional Workflow Providers
+1. Create structure for additional workflow providers
+2. Implement example provider (e.g., CrewAI)
+3. Add provider-specific workflow patterns
+4. Build provider integration tests
+
+
+
+
+Some key aspects I've addressed:
+
+1. **Architecture Design**:
+   - Component-based system that can be used in both workflows and agents
+   - Abstraction layers for LLM providers, knowledge base systems, and workflow engines
+   - Config-driven design using YAML throughout
+
+2. **Knowledge Base System**:
+   - Flexible document schema for business rules, examples, and DB schemas
+   - Multiple retrieval methods (dense, sparse, hybrid, tag-based)
+   - Pluggable storage backends (local in-memory and OpenSearch)
+
+3. **Component System**:
+   - Registration mechanism for discoverable components
+   - Hierarchy with base components that specialized components inherit from
+   - Ability to convert components to agent tools
+
+4. **Workflow and Agent Systems**:
+   - LangGraph integration with abstraction for future providers
+   - Multi-agent system with specialization (querying, analysis, visualization)
+   - Orchestrator agent for coordination
+
+5. **Code Generation and Execution**:
+   - Support for both in-memory and API-based execution
+   - Error handling and correction mechanisms
+   - Security validations and safeguards
+
+The implementation plan follows a phased approach, starting with the core infrastructure and progressively building more complex functionality. Each phase has clear objectives and example code to illustrate the design patterns.
+

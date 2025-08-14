@@ -1,0 +1,209 @@
+Okay, let's break down the requirements for the `dataqa` library into a detailed, step-by-step plan suitable for guiding an LLM code generation process.
+
+**Project Goal:** Create `dataqa`, a config-driven Python library for natural language querying of databases, supporting data querying, analysis, and visualization. It should allow users to build both predefined Workflows and dynamic Agents, initially using LangGraph but designed for easy integration with other frameworks (CrewAI, Autogen, etc.). It relies on a user-provided external API for code execution.
+
+**Core Principles:**
+
+1.  **Config-Driven:** All aspects (components, workflows, agents, connections, assets) should be configurable via YAML.
+2.  **Modularity & Extensibility:** Design with interfaces and abstractions to easily swap or add components, LLM providers, knowledge bases, retrieval methods, and orchestration frameworks (LangGraph, CrewAI, etc.). Avoid tight coupling.
+3.  **Component-Based:** Build reusable components for specific tasks (e.g., query rewriting, code generation, data retrieval, execution) that can be used standalone, within Workflows, or as Tools for Agents.
+4.  **External Execution:** Do not include database connectors. Define a clear interface for interacting with a user-provided code execution API.
+5.  **Robust Data Querying:** Implement a sophisticated data querying pipeline involving question rewriting, context retrieval (schema, examples, rules) from a knowledge base, prompt composition, code generation, and execution/error handling.
+6.  **Workflow & Agent Support:** Provide mechanisms to define and run both static LangGraph Workflows and dynamic LangGraph Agents using the defined components.
+7.  **Standard Development Practices:** Use Poetry, Pytest, Ruff, Sphinx, and provide clear documentation.
+
+---
+
+**Detailed Breakdown for LLM Code Generation:**
+
+**Phase 1: Project Setup and Core Abstractions**
+
+1.  **Initialize Project using Poetry:**
+    * Run `poetry init dataqa`
+    * Define basic metadata, Python version (e.g., 3.9+), and core dependencies (`pyyaml`, `pydantic`, `langchain-core`, `langgraph`, `langchain-openai` for Azure).
+    * Add development dependencies: `pytest`, `ruff`, `sphinx`.
+2.  **Establish Directory Structure:**
+    ```
+    dataqa/
+    ├── core/ # Base classes, interfaces, constants
+    │   ├── __init__.py
+    │   ├── base_classes.py # BaseComponent, BaseLLMService, BaseKnowledgeBase, BaseRetriever, etc.
+    │   └── config_models.py # Pydantic models for configuration validation
+    ├── components/ # Reusable building blocks
+    │   ├── __init__.py
+    │   ├── llm/ # LLM related components
+    │   │   ├── __init__.py
+    │   │   ├── base.py # BaseLLMGenerationComponent
+    │   │   └── implementations.py # AzureOpenAIGenerationComponent
+    │   ├── knowledge/ # Knowledge base interaction
+    │   │   ├── __init__.py
+    │   │   ├── base.py # BaseKnowledgeBaseComponent (e.g., Ingestor)
+    │   │   └── implementations.py # LocalFileIngestor, OpenSearchIngestor (Interface)
+    │   ├── retrieval/ # Context retrieval
+    │   │   ├── __init__.py
+    │   │   ├── base.py # BaseRetrieverComponent
+    │   │   └── implementations.py # DenseRetriever, SparseRetriever, HybridRetriever, TagBasedRetriever
+    │   ├── execution/ # Code execution interaction
+    │   │   ├── __init__.py
+    │   │   ├── base.py # BaseCodeExecutorComponent
+    │   │   └── implementations.py # ApiCodeExecutorComponent
+    │   ├── querying/ # Data querying specific steps
+    │   │   ├── __init__.py
+    │   │   ├── query_rewriter.py
+    │   │   ├── prompt_composer.py
+    │   │   └── code_generator.py
+    │   ├── analysis/ # Data analysis
+    │   │   └── ...
+    │   └── visualization/ # Data visualization
+    │       └── ...
+    ├── orchestration/ # Workflow and Agent logic
+    │   ├── __init__.py
+    │   ├── base.py # BaseWorkflowEngine, BaseAgentFramework interfaces
+    │   └── langgraph/ # LangGraph specific implementations
+    │       ├── __init__.py
+    │       ├── engine.py # LangGraphWorkflowEngine
+    │       ├── agent.py # LangGraphAgentFramework
+    │       └── utils.py # Helper functions for building graphs/agents
+    ├── knowledge_bases/ # Implementations for storing assets
+    │   ├── __init__.py
+    │   ├── base.py # BaseKnowledgeBase interface
+    │   └── implementations.py # LocalKnowledgeBase, OpenSearchKnowledgeBase (requires opensearch-py)
+    ├── llm_services/ # LLM provider integrations
+    │   ├── __init__.py
+    │   ├── base.py # BaseLLMService interface
+    │   └── implementations.py # AzureOpenAIService
+    ├── utils/ # General utility functions
+    │   ├── __init__.py
+    │   ├── config_loader.py
+    │   └── logging_config.py
+    ├── __init__.py
+    tests/
+    docs/
+    examples/ # Sample config files and usage scripts
+    pyproject.toml
+    README.md
+    ```
+3.  **Define Core Interfaces (`core/base_classes.py`):**
+    * `BaseComponent(ABC)`: Abstract base class for all components. Must have `run(self, context: Dict) -> Dict` method. Should handle loading its specific config section.
+    * `BaseLLMService(ABC)`: Interface for interacting with LLMs (e.g., `generate(self, prompt: str, **kwargs) -> str`).
+    * `BaseKnowledgeBase(ABC)`: Interface for storing and retrieving assets (e.g., `add_asset(self, asset_type: str, content: Dict, tags: List[str] = None)`, `retrieve_assets(self, query: str, asset_types: List[str], k: int, retrieval_mode: str, tags: List[str] = None) -> List[Dict]`).
+    * `BaseRetriever(ABC)`: Interface for retrieval logic (e.g., `retrieve(self, query: str, knowledge_base: BaseKnowledgeBase, k: int, mode: str, tags: List[str] = None) -> List[Dict]`).
+    * `BaseWorkflowEngine(ABC)`: Interface to build and run workflows (e.g., `build(self, config: Dict) -> Any`, `run(self, workflow: Any, input_data: Dict) -> Dict`).
+    * `BaseAgentFramework(ABC)`: Interface to build and run agents (e.g., `build(self, config: Dict) -> Any`, `run(self, agent: Any, input_data: Dict) -> Dict`).
+4.  **Define Configuration Models (`core/config_models.py`):**
+    * Use Pydantic models to define the structure of the main YAML config file and its sections (e.g., `GlobalConfig`, `LLMServiceConfig`, `KnowledgeBaseConfig`, `ComponentConfig`, `WorkflowConfig`, `AgentConfig`). This enables validation.
+
+**Phase 2: Configuration and Foundational Services**
+
+5.  **Implement Configuration Loading (`utils/config_loader.py`):**
+    * Create a function `load_config(path: str) -> Dict` that reads a YAML file.
+    * Integrate Pydantic validation using the models from `core/config_models.py`.
+6.  **Implement LLM Service (`llm_services/`):**
+    * Create `AzureOpenAIService(BaseLLMService)`: Implement the `generate` method using `langchain-openai`'s AzureChatOpenAI. Load credentials and endpoint details from config.
+7.  **Implement Knowledge Base (`knowledge_bases/`):**
+    * Create `LocalKnowledgeBase(BaseKnowledgeBase)`: Store assets in memory (e.g., dictionary) or simple JSON files. Implement `add_asset` and `retrieve_assets` (basic filtering/search). Suitable for testing.
+    * *(Optional/Advanced)* Define `OpenSearchKnowledgeBase(BaseKnowledgeBase)`: Interface with an OpenSearch cluster. Requires `opensearch-py`. Implement methods using OpenSearch queries (keyword, vector, hybrid).
+
+**Phase 3: Component Implementation**
+
+8.  **Implement Base Components (`components/*/base.py`):**
+    * Define base classes for component categories that inherit from `BaseComponent` if they share common logic (e.g., `BaseLLMGenerationComponent` might take an `BaseLLMService` instance).
+9.  **Implement LLM Generation Component (`components/llm/`):**
+    * `AzureOpenAIGenerationComponent(BaseLLMGenerationComponent)`: Takes configuration (prompt template, LLM service alias, generation parameters). Uses the configured `BaseLLMService` instance to generate text based on input context and the template.
+10. **Implement Code Executor Component (`components/execution/`):**
+    * `ApiCodeExecutorComponent(BaseCodeExecutorComponent)`:
+        * Takes configuration: API endpoint URL, request method (e.g., POST), headers/auth details, expected request/response format (define this clearly, e.g., `{ "code": "...", "context": "..." }` -> `{ "result": "...", "error": "..." }` or `{ "data": [...], "log": "..." }`).
+        * Implements `run`: Sends the code (and potentially context) from its input dictionary to the API, receives the response.
+        * Parses the response, extracting results or error messages. Returns these in its output dictionary.
+        * Handles connection errors, timeouts.
+11. **Implement Knowledge/Retrieval Components (`components/knowledge/`, `components/retrieval/`):**
+    * `AssetIngestorComponent`: Takes file paths/config for assets (schema, rules, examples). Parses them (YAML/TXT). Uses the configured `BaseKnowledgeBase` to store them.
+    * `RetrieverComponent(BaseRetrieverComponent)`:
+        * Takes configuration: knowledge base alias, default `k`, retrieval modes to use (dense, sparse, hybrid, tags).
+        * Uses the configured `BaseRetriever` implementation.
+        * Implements `run`: Takes a query from input context, calls the retriever, returns retrieved assets.
+    * Implement specific `BaseRetriever` strategies (`DenseRetriever`, `SparseRetriever`, etc.). These will likely need embedding models (configurable, e.g., from `langchain-huggingface`) and potentially libraries like `rank_bm25`. The actual retrieval logic happens here, often interacting with the `BaseKnowledgeBase`.
+12. **Implement Data Querying Components (`components/querying/`):**
+    * `QueryRewriterComponent`: Uses an `LLMGenerationComponent`. Takes user query, chat history (optional). Generates a clearer, standalone query suitable for retrieval/code generation.
+    * `PromptComposerComponent`: Takes rewritten query, retrieved context (schema, examples, rules), and a base prompt template (configurable). Constructs the final detailed prompt for the code generation LLM.
+    * `CodeGeneratorComponent`: Uses an `LLMGenerationComponent`. Takes the composed prompt. Generates code (e.g., SQL, Python).
+13. **Implement Analysis/Visualization Components (`components/analysis/`, `components/visualization/`):**
+    * `DataAnalysisComponent`: Can use an `LLMGenerationComponent` ("Summarize this data", "Find outliers") or wrap pre-built Python functions (e.g., pandas operations). Takes data and analysis instruction.
+    * `DataVisualizationComponent`: Can use an `LLMGenerationComponent` ("Create a bar chart of X vs Y") to generate plotting code (e.g., Matplotlib, Plotly) or wrap pre-built plotting functions. Takes data and visualization instruction.
+
+**Phase 4: Orchestration (LangGraph)**
+
+14. **Implement LangGraph Engine (`orchestration/langgraph/engine.py`):**
+    * `LangGraphWorkflowEngine(BaseWorkflowEngine)`:
+        * `build`: Takes a workflow config (defining nodes, edges, state). Maps node names to initialized `dataqa` components. Uses LangGraph's `graph.add_node`, `graph.add_edge`, `graph.set_entry_point`, `graph.set_finish_point`, `graph.add_conditional_edges`. Compiles the graph using `graph.compile()`. Use the Graph API style (`langgraph.graph.Graph()` or `langgraph.graph.MessageGraph()`).
+        * `run`: Executes `compiled_graph.invoke(input_data)`.
+15. **Define a Sample Query Workflow Configuration:**
+    * Create `examples/query_workflow.yaml`:
+        * Define nodes: `rewrite_query`, `retrieve_context`, `compose_prompt`, `generate_code`, `execute_code`, `handle_error`.
+        * Map nodes to `dataqa` components and their configs.
+        * Define state schema (e.g., `user_query`, `rewritten_query`, `retrieved_context`, `prompt`, `generated_code`, `execution_result`, `error_message`, `retry_count`).
+        * Define edges: `rewrite_query` -> `retrieve_context` -> `compose_prompt` -> `generate_code` -> `execute_code`.
+        * Conditional Edge from `execute_code`: If error -> `handle_error`. If success -> END.
+        * `handle_error` node: Analyzes the error. If retries left & recoverable error -> `generate_code` (passing error info for correction). Else -> END (with error state).
+16. **Implement LangGraph Agent Framework (`orchestration/langgraph/agent.py`):**
+    * `LangGraphAgentFramework(BaseAgentFramework)`:
+        * `build`: Takes an agent config (defining agent type - e.g., ReAct, tools, LLM). Maps tool names to initialized `dataqa` components (wrapping their `run` method). Instantiates a LangGraph agent executor (e.g., `create_react_agent`).
+        * `run`: Executes `agent_executor.invoke(input_data)`.
+17. **Define Sample Agent Configurations:**
+    * Create `examples/query_agent.yaml`: Defines a basic agent whose tools are `dataqa` components like `QueryRewriterComponent`, `RetrieverComponent`, `CodeGeneratorComponent`, `ApiCodeExecutorComponent`.
+    * *(Optional/Advanced)* Create `examples/multi_agent_system.yaml`: Defines a supervisor agent and sub-agents (e.g., `DataQueryAgent`, `DataAnalysisAgent`) using LangGraph's multi-agent collaboration features. The sub-agents would use the relevant `dataqa` components as tools.
+
+**Phase 5: Execution Handling and Iteration**
+
+18. **Refine `ApiCodeExecutorComponent` Error Handling:**
+    * Ensure it robustly parses various error types from the user's API response (syntax errors, execution errors, timeouts, data errors). Standardize error representation in the output dictionary.
+19. **Implement Error Handling Logic (within LangGraph Workflow/Agent):**
+    * In the Workflow (`handle_error` node): Add logic to inspect the error from `execute_code`. Increment retry count in state. Based on error type and retry count, decide whether to loop back to `generate_code` (potentially adding error details to the context for the LLM) or terminate.
+    * In the Agent: The agent's LLM decides the next step based on the tool's error output. Ensure the `ApiCodeExecutorComponent` tool provides informative error descriptions. The LLM might decide to re-run the `CodeGeneratorComponent` with modified instructions or try a different approach.
+20. **Address MCP vs API:**
+    * For the initial version, stick to the stateless API approach for the `ApiCodeExecutorComponent`. It's simpler to implement on both sides.
+    * Document the required API interface clearly: endpoint, method, expected JSON request (containing code, maybe context), expected JSON response (containing results OR structured error information).
+    * State that MCP/WebSockets could be future enhancements if real-time, stateful interaction with the execution environment proves necessary, but increases complexity significantly.
+
+**Phase 6: Development Standards, Testing, and Documentation**
+
+21. **Implement Linting and Formatting:**
+    * Configure `ruff` in `pyproject.toml`. Run `ruff check .` and `ruff format .` regularly.
+22. **Write Unit Tests (`tests/`):**
+    * Create unit tests for all core classes and components. Mock dependencies (LLM services, KBs, API calls). Test configuration loading and Pydantic validation.
+    * Test `ApiCodeExecutorComponent`'s parsing of various success and error responses.
+    * Test different retrieval strategies.
+23. **Write Integration Tests (`tests/`):**
+    * Test the integration of components within a sample LangGraph workflow (using mocked execution).
+    * Test a simple LangGraph agent using component-based tools (mocked execution).
+24. **Write Documentation (`docs/`):**
+    * Configure `sphinx`. Use Napoleon extension for Google/NumPy style docstrings.
+    * Write clear docstrings for all public classes and methods (Sphinx style).
+    * Create documentation pages:
+        * `index.rst` (Introduction)
+        * `installation.rst`
+        * `quickstart.rst` (Using a pre-built workflow/agent example)
+        * `configuration.rst` (Detailed explanation of YAML structure)
+        * `components.rst` (Reference for all built-in components)
+        * `knowledge_base.rst` (How to set up assets and KBs)
+        * `retrieval.rst` (Explaining retrieval methods)
+        * `workflows.rst` (How to build custom LangGraph workflows)
+        * `agents.rst` (How to build custom LangGraph agents)
+        * `code_execution_api.rst` (Specification for the user's API)
+        * `developer_guide.rst` (How to contribute, add new components/frameworks)
+        * `api.rst` (Auto-generated API reference using `sphinx.ext.autodoc`)
+25. **Create README (`README.md`):**
+    * Include: Project description, Installation (`poetry install`), Quick Start (simple example code using a config file), Configuration Overview, Link to full documentation, Developer Guide (running tests, linting, contributing).
+
+**Phase 7: Refinement and Examples**
+
+26. **Build Comprehensive Examples (`examples/`):**
+    * Provide complete, runnable examples with sample YAML configs and Python scripts for:
+        * Running a data querying workflow.
+        * Running a data querying agent.
+        * A workflow that includes analysis and visualization steps.
+        * Sample asset files (schema.yaml, rules.txt, examples.yaml).
+27. **Consider Real-time vs. Batch:**
+    * The library itself is synchronous. Whether interaction feels "real-time" depends on how quickly the LLM responds and the user's code execution API returns results. For long-running queries/executions, the process will be batch-like. LangGraph's streaming support could be leveraged for partial results if needed later. Design components to return results when complete.
+
+This detailed breakdown provides a structured plan, emphasizing modularity and configuration, which an LLM can use to generate the initial code structure and implementation details for the `dataqa` library. Remember that iterative refinement and testing will be crucial.

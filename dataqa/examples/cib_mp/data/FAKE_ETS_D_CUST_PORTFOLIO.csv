@@ -1,0 +1,51 @@
+CUST_KEY,CUST_ID,BANK_ENTERPRISE_CUST_ID,CUST_NAME,CUST_TYPE_CD,CUST_STATE_CD,CUST_COUNTRY_CD,CUST_EXTL_ID,CO_ORG_ID,CUST_STAT_CD,MCC_DESC,MKTSEG_CD,OWNRSHP_COMP_LVL_1_EXTL_ID,OWNRSHP_COMP_LVL_1_NAME
+617206,789125,8455891,Starbucks - North Laurastad,CU,RI,CA,592,456,I,"Eating Places, Restaurants",Associations,1001,Starbucks
+505780,795813,3893526,Starbucks - East Sethfort,CU,MN,US,138,456,N,"Eating Places, Restaurants",NATNL,1001,Starbucks
+205196,403257,8301029,Starbucks - East Terribury,CU,GA,CA,234,456,I,"Eating Places, Restaurants",Associations,1001,Starbucks
+959510,963568,9981486,Starbucks - Lisamouth,CO,AR,CA,314,456,R,"Eating Places, Restaurants",Associations,1001,Starbucks
+593847,235311,5015715,Starbucks - North Kelly,BU,MS,US,183,456,N,"Eating Places, Restaurants",CAN-SMBUS,1001,Starbucks
+245952,151676,7819179,Starbucks - West Michael,CU,AR,US,360,456,S,"Eating Places, Restaurants",NATNL,1001,Starbucks
+256896,719889,9059032,Starbucks - Smithfort,CU,AK,CA,378,456,R,"Eating Places, Restaurants",SMBUS,1001,Starbucks
+109451,674344,3308953,Starbucks - Lake Jade,CU,HI,US,330,456,N,"Eating Places, Restaurants",Associations,1001,Starbucks
+540954,147226,5360720,Starbucks - South Juan,CU,PA,US,496,456,A,"Eating Places, Restaurants",CAN-SMBUS,1001,Starbucks
+922744,247605,8774752,Starbucks - Wardside,CU,MA,CA,836,456,A,"Eating Places, Restaurants",SMBUS,1001,Starbucks
+298310,471215,4498813,Home Depot - South William,CH,OH,CA,160,789,S,Home Supply Warehouse Stores,SMBUS,1002,Home Depot
+804393,780294,9945216,Home Depot - Walkerton,CH,CA,CA,270,789,R,Home Supply Warehouse Stores,NATNL,1002,Home Depot
+162522,325458,8572461,Home Depot - South Biancachester,CO,LA,US,458,789,N,Home Supply Warehouse Stores,NATNL,1002,Home Depot
+809497,401299,5362461,Home Depot - Cunninghamchester,CU,SC,US,886,789,R,Home Supply Warehouse Stores,Associations,1002,Home Depot
+881931,529660,3927255,Home Depot - East Heather,TD,LA,US,515,789,I,Home Supply Warehouse Stores,MOMKT,1002,Home Depot
+689442,101996,9315254,Home Depot - New Williamhaven,TD,NV,CA,582,789,I,Home Supply Warehouse Stores,NATNL,1002,Home Depot
+974642,673607,3432963,Home Depot - Jacksonview,CO,AR,CA,246,789,N,Home Supply Warehouse Stores,CAN-SMBUS,1002,Home Depot
+488486,855403,4595135,Home Depot - Davidchester,CO,KY,CA,659,789,R,Home Supply Warehouse Stores,MOMKT,1002,Home Depot
+691696,236456,2568480,Home Depot - Port Rodneybury,CH,SC,US,854,789,N,Home Supply Warehouse Stores,Associations,1002,Home Depot
+127720,348331,1657404,Home Depot - Simsbury,CH,UT,US,706,789,I,Home Supply Warehouse Stores,MOMKT,1002,Home Depot
+661323,523145,9266681,Costco - Cervantesfurt,TD,IA,CA,902,123,A,Wholesale Clubs,NATNL,1003,Costco
+802095,592888,4557341,Costco - East Katherineview,CH,OK,CA,641,123,A,Wholesale Clubs,NATNL,1003,Costco
+448883,649426,6671443,Costco - Michaelton,CU,MO,US,780,123,N,Wholesale Clubs,NATNL,1003,Costco
+520850,628031,6386494,Costco - Justinside,TD,AZ,CA,899,123,S,Wholesale Clubs,CAN-SMBUS,1003,Costco
+639123,334893,5879994,Costco - Williamsonside,BU,TX,CA,679,123,A,Wholesale Clubs,SMBUS,1003,Costco
+466200,527161,8988963,Costco - Dorseyside,CO,MA,US,807,123,S,Wholesale Clubs,MOMKT,1003,Costco
+111194,271599,4063304,Costco - Kaylahaven,CH,CO,US,805,123,A,Wholesale Clubs,CAN-SMBUS,1003,Costco
+981200,515525,7155705,Costco - Willieport,CO,OR,US,733,123,N,Wholesale Clubs,NATNL,1003,Costco
+696679,203029,3491349,Costco - Port Jessica,CH,IL,CA,375,123,N,Wholesale Clubs,NATNL,1003,Costco
+721824,592380,7631505,Costco - New Alyssaton,CU,WV,US,467,123,R,Wholesale Clubs,MOMKT,1003,Costco
+713179,642738,1933779,Barnes & Noble - North Kenneth,BU,SC,CA,286,321,A,Book Stores,SMBUS,1004,Barnes & Noble
+524856,289692,1629446,Barnes & Noble - Taylorborough,BU,OR,CA,556,321,R,Book Stores,Associations,1004,Barnes & Noble
+957370,256104,2923244,Barnes & Noble - Lake Thomaston,TD,SD,US,228,321,N,Book Stores,SMBUS,1004,Barnes & Noble
+913175,804350,5240843,Barnes & Noble - Lindseyton,CH,MT,CA,462,321,S,Book Stores,CAN-SMBUS,1004,Barnes & Noble
+632101,277379,1450370,Barnes & Noble - East Joshua,CH,MA,US,571,321,S,Book Stores,SMBUS,1004,Barnes & Noble
+147003,358700,4824299,Barnes & Noble - Lake Paul,BU,NY,CA,883,321,R,Book Stores,MOMKT,1004,Barnes & Noble
+299333,673793,4853156,Barnes & Noble - Danielberg,BU,ND,US,374,321,I,Book Stores,SMBUS,1004,Barnes & Noble
+351617,664067,4049885,Barnes & Noble - Chadside,TD,NY,US,243,321,A,Book Stores,SMBUS,1004,Barnes & Noble
+822200,231962,9555252,Barnes & Noble - Port Jessica,CH,NY,US,868,321,S,Book Stores,MOMKT,1004,Barnes & Noble
+637741,965079,4669297,Barnes & Noble - Stonetown,CU,CA,CA,395,321,N,Book Stores,SMBUS,1004,Barnes & Noble
+261510,275874,4016332,ExxonMobil - Hernandezport,CO,NE,US,422,654,S,Petroleum & Petroleum Products,SMBUS,1005,ExxonMobil
+172712,764604,4107062,ExxonMobil - Palmerville,CU,FL,CA,796,654,I,Petroleum & Petroleum Products,MOMKT,1005,ExxonMobil
+499718,884637,3736691,ExxonMobil - West Angelicahaven,TD,WY,US,414,654,I,Petroleum & Petroleum Products,NATNL,1005,ExxonMobil
+479938,696437,5033117,ExxonMobil - Loriberg,TD,AZ,US,393,654,I,Petroleum & Petroleum Products,Associations,1005,ExxonMobil
+688296,537103,8690430,ExxonMobil - New Kathleenview,CO,VT,US,938,654,N,Petroleum & Petroleum Products,CAN-SMBUS,1005,ExxonMobil
+395591,526338,3522278,ExxonMobil - New James,TD,NJ,CA,176,654,S,Petroleum & Petroleum Products,MOMKT,1005,ExxonMobil
+586889,414998,1685333,ExxonMobil - North Devinville,TD,NV,US,466,654,R,Petroleum & Petroleum Products,MOMKT,1005,ExxonMobil
+210369,767324,6538407,ExxonMobil - Smithchester,CH,WY,US,897,654,S,Petroleum & Petroleum Products,NATNL,1005,ExxonMobil
+522295,358734,7910437,ExxonMobil - South Michelle,TD,MN,CA,569,654,S,Petroleum & Petroleum Products,Associations,1005,ExxonMobil
+404072,288100,2898229,ExxonMobil - Port Susan,TD,IN,US,198,654,A,Petroleum & Petroleum Products,MOMKT,1005,ExxonMobil

@@ -1,0 +1,822 @@
+# main_agent_script.py
+
+import asyncio
+import yaml
+import pandas as pd
+from enum import Enum
+from typing import List, Dict, Any, Literal, Optional, Union, Annotated
+from pydantic import BaseModel, Field, dataclasses as pydantic_dataclasses
+from dataclasses import field # For InMemoryCodeExecutorConfig default_factory
+
+from langchain_core.language_models import BaseLanguageModel
+from langchain_core.outputs import LLMResult, Generation
+from langchain_core.messages import BaseMessage, HumanMessage #, AIMessage (if needed by react agent)
+from langchain_core.tools import tool
+from langgraph.graph import StateGraph, END, START, CompiledGraph
+
+# --- 1. Mock Data & Config Files (YAML, CSVs) ---
+
+# Dummy cwd_agent_prompt.yaml content
+dummy_prompts_content = """
+schema: |
+  This table includes the data of locate requests and approvals from stock borrow and loan (SBL) trading desk.
+  /* description: date identifier formatted as timestamps e.g. 08/04/2025 00:00:00. */
+  DATE int64,
+  /* description: sedol identifier for the security */
+  SEDOL object,
+  /* description: bloomberg ticker for the security */
+  BLOOMBERG object,
+  /* description: price of the security in USD */
+  PRICE_USD float64
+planner_prompt: "You are a planner... schema: <schema> query: {query}"
+replanner_prompt: "You are a replanner... Past steps: {past_steps_summary}. Dataframe summary: {dataframe_summary}. Query: {query}"
+sql_generator_prompt: "Generate SQL for the following task: {task_description}. Schema: <schema>"
+analyzer_prompt: "Analyze the following: Dataframe summary: {dataframe_summary}. Plan summarize: {plan_summary}. Task: {task_description}"
+"""
+# Simulating file load
+prompts = yaml.safe_load(dummy_prompts_content)
+
+# Mocking dataframes for InMemoryCodeExecutor and GetRowByMaxColumn tool
+df_locate_data = {
+    'SEDOL': ['S1', 'S2', 'S3', 'S4'],
+    'PRICE_USD': [10.0, 20.0, 15.0, 25.0]
+}
+df_locate = pd.DataFrame(df_locate_data)
+
+df_position_data = {
+    'SEDOL': ['S1', 'S2', 'S4', 'S5'],
+    'BLOOMBERG': ['AWPT AB', 'OTHER CO', 'AWPT AB', 'SOMEOTHER']
+}
+df_position = pd.DataFrame(df_position_data)
+
+
+# --- 2. Core Pydantic Models & Enums ---
+
+class WorkerName(Enum):
+    Retriever = "retriever"
+    Analyzer = "analyzer"
+    Visualizer = "visualizer"
+
+class MessageTypeEnum(Enum):
+    Orchestrator = "orchestrator"
+    Evaluator = "evaluator"
+    Retriever = "retriever"
+    Analyzer = "analyzer"
+    Visualizer = "visualizer"
+    tool_message = "tool_message"
+    llm_message = "llm_message"
+
+class MessageRoleEnum(Enum):
+    System = "system"
+    Assistant = "assistant"
+    User = "user"
+
+class Task(BaseModel):
+    worker: WorkerName = Field(description="The worker that should be for solving this task")
+    description: str = Field(description="the description of the task")
+
+class Plan(BaseModel):
+    tasks: List[Task] = Field(default_factory=list)
+
+    def summarize(self):
+        if not self.tasks:
+            return "No plan generated yet."
+        task_summaries = []
+        for i, task in enumerate(self.tasks):
+            task_summaries.append(
+                f'Step {i+1}:\n'                
+                f' Worker: {task.worker.value}\n'
+                f' Task: {task.description}\n'
+            )
+        return '\n'.join(task_summaries)
+
+class MessageBaseModel(BaseModel):
+    type: MessageTypeEnum
+    content: str
+    role: MessageRoleEnum = Field(default=MessageRoleEnum.System)
+
+class SQLGeneratorOutput(BaseModel):
+    sql_str: str = Field(description="the generated SQL query")
+    reasoning: str = Field(description="the reasoning of the output dataframe obtained by executing the generated SQL")
+    output: str = Field(description="the name of the output dataframe obtained by executing the generated SQL")
+
+class SQLExecutorOutput(BaseModel):
+    sql: str
+    dataframe_name: Optional[str] = None
+    error: Optional[str] = None
+
+class RetrieverState(BaseModel):
+    task: Optional[Task] = None
+    sql_generator_output: Optional[SQLGeneratorOutput] = None
+    sql_executor_output: Optional[SQLExecutorOutput] = None
+
+class AnalyzerState(BaseModel):
+    messages: List[MessageBaseModel] = Field(default_factory=list)
+
+class TaskResponseTask(BaseModel):
+    response: str = Field(description="Summarize the execution of one task")
+
+class WorkerResponse(BaseModel):
+    task_response: List[TaskResponseTask] = Field(default_factory=list)
+    task_description: Optional[str] = None
+    response: Optional[str] = None # General response string
+    worker_self_name: Optional[WorkerName] = None
+
+    def summarize(self): # As per image, different from Plan's summarize
+        if not self.task_response:
+            return "No tasks completed yet."
+        summaries = []
+        for i, tr_task in enumerate(self.task_response):
+            # This summarize is a bit vague on what it should contain,
+            # worker_self_name and task_description are outside task_response list.
+            # Assuming it's summarizing the list of TaskResponseTask items.
+            summaries.append(
+                f'Completed Task Response {i+1}:\n'
+                f' Execution response: {tr_task.response}\n'
+            )
+        return '\n'.join(summaries)
+
+class Response(BaseModel):
+    response: str
+
+class Act(BaseModel):
+    action: Union[Response, Plan] = Field(description="Action to perform.")
+
+@pydantic_dataclasses.dataclass
+class InMemoryCodeExecutorConfig:
+    name: str = "in-memory"
+    component_type: str = "in_memory_executor"
+    data_files: Dict[str, Any] = field(default_factory=dict)
+    input: Dict[str, Any] = field(default_factory=lambda: {"name": "code", "type": "str"})
+
+@pydantic_dataclasses.dataclass
+class ExecutorOutput: # For InMemoryCodeExecutor
+    code: str
+    sql: Optional[str] = None
+    error: Optional[str] = None
+    dataframe_name: Optional[str] = None
+
+# --- CwdState needs worker_response_reducer ---
+def worker_response_reducer(res1: WorkerResponse, res2: WorkerResponse) -> WorkerResponse:
+    # Simplified reducer focusing on merging string fields and task_response list
+    combined_task_description = (res1.task_description or "")
+    if res2.task_description and res2.task_description not in combined_task_description:
+        combined_task_description += ("; " if combined_task_description else "") + res2.task_description
+
+    combined_response = (res1.response or "")
+    if res2.response and res2.response not in combined_response:
+        combined_response += ("; " if combined_response else "") + res2.response
+        
+    return WorkerResponse(
+        task_response=res1.task_response + res2.task_response,
+        task_description=combined_task_description.strip('; '),
+        response=combined_response.strip('; '),
+        worker_self_name=res2.worker_self_name or res1.worker_self_name # Prefer most recent
+    )
+
+class CwdState(BaseModel):
+    query: str
+    final_response: str = ''
+    plan: Optional[Plan] = None
+    worker_response: Annotated[WorkerResponse, worker_response_reducer] = Field(default_factory=WorkerResponse)
+    log: Annotated[List[MessageBaseModel], lambda l1, l2: l1 + l2] = Field(default_factory=list)
+    retriever_state: Annotated[List[RetrieverState], lambda r1, r2: r1 + r2] = Field(default_factory=list)
+    analyzer_state: Annotated[List[AnalyzerState], lambda a1, a2: a1 + a2] = Field(default_factory=list)
+
+    def update_field(self, field_name, value): # As per image
+        if not hasattr(self, field_name):
+            raise ValueError(f"'{field_name}' is not a valid field for CwdState")
+        
+        # Specific handling for Annotated fields that are lists (log, retriever_state, analyzer_state)
+        # The Annotated reducer should handle this naturally when LangGraph updates the state.
+        # This manual update_field might be for other purposes or simpler updates.
+        if field_name in ['log', 'retriever_state', 'analyzer_state']:
+            current_list = getattr(self, field_name)
+            if isinstance(value, list):
+                current_list.extend(value)
+            else:
+                current_list.append(value)
+            return
+
+        if field_name == 'worker_response':
+             setattr(self, field_name, worker_response_reducer(getattr(self, field_name), value))
+        else:
+            setattr(self, field_name, value)
+
+
+# --- 3. Helper Functions & Classes (Non-Agent) ---
+
+def task_router(state: CwdState) -> Literal[WorkerName.Retriever.value, WorkerName.Analyzer.value, WorkerName.Visualizer.value, "replanner", "__end__"]:
+    if getattr(state, 'final_response', '') and state.final_response: # Check if final_response is non-empty
+        return "__end__"
+    
+    if not state.plan or not state.plan.tasks:
+        # No plan, or plan is exhausted. Go to replanner.
+        # Replanner can decide to end or create a new plan.
+        return "replanner" 
+    
+    # Get the next task from the plan
+    current_task_worker = state.plan.tasks[0].worker
+    return current_task_worker.value
+
+class Memory:
+    def __init__(self):
+        self.dataframes: Dict[str, pd.DataFrame] = {}
+        # Initialize with mock data for SQL executor
+        self.put_dataframe('locate', df_locate)
+        self.put_dataframe('position', df_position)
+
+    def list_dataframes(self):
+        return list(self.dataframes.keys())
+
+    def get_dataframe(self, name: str) -> Optional[pd.DataFrame]:
+        return self.dataframes.get(name)
+
+    def put_dataframe(self, name: str, df: pd.DataFrame):
+        self.dataframes[name] = df
+
+    def summarize_one_dataframe(self, df_name: str, df: pd.DataFrame):
+        message = (
+            f"- dataframe_name: {df_name}\\n"
+            f"  rows: {len(df)}, columns: {len(df.columns)}, columns_name: {df.columns.to_list()}\\n"
+            f"  Five sample rows:\\n"
+        )
+        sampled_rows = df.sample(n=min(5, len(df))).sort_index().to_markdown()
+        message += '\\n'.join([f"    {s}" for s in sampled_rows.split('\\n')])
+        return message
+
+    def summarize_dataframe(self):
+        if not self.dataframes:
+            return "You don't have access to any dataframes yet."
+        
+        message_parts = [f"You have access to the following {len(self.dataframes)} dataframes:"]
+        for k, v_df in self.dataframes.items():
+            message_parts.append(self.summarize_one_dataframe(k, v_df))
+        return '\\n\\n'.join(message_parts)
+
+    def summarize(self, name: str): # As per image, but unused
+        pass
+
+class InMemoryCodeExecutor:
+    def __init__(self, config: InMemoryCodeExecutorConfig, memory: Memory):
+        self.config = config
+        self.memory = memory
+
+    def run(self, code: str, **kwargs) -> ExecutorOutput:
+        # This is a simplified SQL execution environment using pandas via duckdb (conceptual)
+        # For this mock, we'll try to use pandas query if simple, or just return SQL
+        try:
+            # This is where you'd integrate something like duckdb to run SQL on pandas DFs
+            # For example:
+            # import duckdb
+            # con = duckdb.connect()
+            # for name, df in self.memory.dataframes.items():
+            #     con.register(name, df)
+            # result_df = con.execute(code).fetchdf()
+            # output_df_name = f"sql_output_{abs(hash(code))}"
+            # self.memory.put_dataframe(output_df_name, result_df)
+            # return ExecutorOutput(code=code, sql=code, dataframe_name=output_df_name)
+
+            # Simplified mock: Assume the SQL is valid and an output df name is generated
+            # No actual execution in this simplified mock.
+            if "SELECT" in code.upper(): # Very basic check
+                output_df_name = f"query_result_{pd.Timestamp.now().strftime('%Y%m%d%H%M%S%f')}"
+                # Let's create a dummy result for some queries
+                if "AWPT AB" in code and "AVG(PRICE_USD)" in code:
+                    # Specific query from user's context: 'who has the largest holdings of awpt ab?'
+                    # The SQL for this would be more complex.
+                    # For 'AVG(PRICE_USD)' for 'AWPT AB' (from cell 36 example)
+                    # Let's make a dummy for that for now.
+                    # True SEDOLs for 'AWPT AB': S1, S4
+                    # Prices for S1, S4 in df_locate: 10.0, 25.0. Avg = 17.5
+                    avg_price_df = pd.DataFrame({'average_price': [17.5]})
+                    self.memory.put_dataframe(output_df_name, avg_price_df)
+
+                return ExecutorOutput(code=code, sql=code, dataframe_name=output_df_name)
+            else: # Non-select query
+                return ExecutorOutput(code=code, sql=code)
+
+        except Exception as e:
+            return ExecutorOutput(code=code, sql=code, error=str(e))
+
+# --- Tool Memory and Definition ---
+class MockToolMemory: # Separate memory for tools like GetRowByMaxColumn
+    def __init__(self):
+        self.dataframes: Dict[str, pd.DataFrame] = {}
+    def get_dataframe(self, name: str) -> Optional[pd.DataFrame]:
+        if name not in self.dataframes: # For the tool to not fail if df doesn't exist
+             self.dataframes[name] = pd.DataFrame({'col_A': [1,2,3,4], 'max_col': [10,20,5,15]})
+        return self.dataframes.get(name)
+    def put_dataframe(self, name: str, df: pd.DataFrame):
+        self.dataframes[name] = df
+
+memory_for_tool = MockToolMemory()
+
+@tool
+def GetRowByMaxColumn(df_name: str, column: str, output_df_name: str) -> str:
+    """Tool to extract a row with the maximum value for a column in a dataframe.
+    Parameter:
+        df_name: The name of the dataframe to be applied on.
+        column: The name of the column to extract its maximum value.
+        output_df_name: The name of the dataframe that contains the row with the maximum 'column' value.
+    Returns:
+        A string as a message of completion or any exceptions.
+    """
+    try:
+        df = memory_for_tool.get_dataframe(df_name)
+        if df is None or column not in df.columns:
+            return f"Dataframe '{df_name}' not found or column '{column}' does not exist."
+        out_df = df.loc[[df[column].idxmax()]]
+        memory_for_tool.put_dataframe(output_df_name, out_df)
+        return f"Dataframe '{output_df_name}' has been successfully generated with the row having max value in '{column}'."
+    except Exception as e:
+        return f"Tool '{GetRowByMaxColumn.__name__}' failed: {str(e)}"
+
+# --- 4. Mock LLM and AI Utilities ---
+
+class AzureOpenAIConfig(BaseModel): # Mock from cell 420
+    model: str = 'gpt-4o-2024-08-06'
+    api_type: str = 'azure'
+    api_version: str = '2024-02-01'
+    base_url: str = 'https://mock.openai.azure.com/'
+    api_key: str = 'mock_api_key'
+
+class MockAzureChatOpenAI(BaseLanguageModel):
+    def _generate(self, messages: List[BaseMessage], stop: Optional[List[str]] = None, **kwargs) -> LLMResult:
+        # This is a very basic mock. In reality, you'd parse messages and return appropriate content.
+        response_text = "Mocked LLM response."
+        # Try to be a bit smarter for structured output
+        if "planner_prompt" in messages[-1].content:
+            plan = Plan(tasks=[
+                Task(worker=WorkerName.Retriever, description="Retrieve data for AWPT AB holdings."),
+                Task(worker=WorkerName.Analyzer, description="Analyze retrieved data to find largest holding.")
+            ])
+            response_text = plan.model_dump_json()
+        elif "sql_generator_prompt" in messages[-1].content:
+            # Example SQL from cell 36 for "SARCO AB", adapting for "AWPT AB"
+            sql = """WITH awpt_sedol AS (
+    SELECT DISTINCT SEDOL
+    FROM position
+    WHERE BLOOMBERG = 'AWPT AB'
+)
+SELECT locate.*, position.BLOOMBERG
+FROM locate JOIN awpt_sedol ON locate.SEDOL = awpt_sedol.SEDOL
+JOIN position ON locate.SEDOL = position.SEDOL AND position.BLOOMBERG = 'AWPT AB'
+-- Further logic to determine 'holdings' and 'largest' would be needed.
+-- Assuming 'PRICE_USD' or another column represents holding size for simplicity here.
+-- This SQL is just for data retrieval, analysis of "largest" happens in Analyzer.
+"""
+            # The original query was "who has the largest holdings of awpt ab?"
+            # This implies finding a person/entity or a max value.
+            # The SQL generator should produce SQL to get relevant data.
+            # The analyzer would then process this.
+            # For now, mock SQL to get all data for AWPT AB.
+            sql_output = SQLGeneratorOutput(
+                sql_str=sql,
+                reasoning="Generated SQL to retrieve all transaction data for AWPT AB from locate and position tables.",
+                output="awpt_ab_transactions"
+            )
+            response_text = sql_output.model_dump_json()
+        elif "replanner_prompt" in messages[-1].content:
+             # If replanner is called after tasks, it might give final response or new plan
+            act = Act(action=Response(response="Final answer: Based on analysis, Entity X has the largest holdings of AWPT AB."))
+            response_text = act.model_dump_json()
+        elif "analyzer_prompt" in messages[-1].content:
+            # Analyzer receives data, should produce human-readable analysis or use tools
+            # Mocking a text response that becomes part of WorkerResponse
+             response_text = json.dumps([{"type": "text", "text": "Analysis: AWPT AB has holdings across multiple SEDOLs. Largest holding based on PRICE_USD is SEDOL S4."}])
+
+
+        return LLMResult(generations=[[Generation(text=response_text)]])
+
+    async def ainvoke(self, input: Union[str, List[BaseMessage]], **kwargs) -> Any:
+        structured_output_cls = kwargs.get('structured_output')
+        
+        prompt_content = ""
+        if isinstance(input, list) and input:
+            prompt_content = input[-1].content
+        elif isinstance(input, str):
+            prompt_content = input
+
+        if structured_output_cls:
+            if structured_output_cls == Plan:
+                # Simple plan for "who has the largest holdings of awpt ab?"
+                return Plan(tasks=[
+                    Task(worker=WorkerName.Retriever, description="Retrieve all holdings data for AWPT AB."),
+                    Task(worker=WorkerName.Analyzer, description="Analyze the retrieved data to determine the largest holding and holder.")
+                ])
+            elif structured_output_cls == Act: # For Replaner
+                 # If it's a replan, it might mean tasks are done, provide final answer
+                return Act(action=Response(response="Final mock answer: Entity X has the largest holdings of AWPT AB."))
+            elif structured_output_cls == SQLGeneratorOutput:
+                # SQL for "Retrieve all holdings data for AWPT AB."
+                sql = """
+SELECT p.BLOOMBERG, l.SEDOL, l.PRICE_USD -- Add other relevant columns for 'holdings'
+FROM position p
+JOIN locate l ON p.SEDOL = l.SEDOL
+WHERE p.BLOOMBERG = 'AWPT AB'
+ORDER BY l.PRICE_USD DESC -- Assuming PRICE_USD indicates size of holding
+LIMIT 10 -- Get top 10 for analysis
+"""
+                return SQLGeneratorOutput(
+                    sql_str=sql,
+                    reasoning="SQL to retrieve holdings data for AWPT AB, ordered by price.",
+                    output="awpt_ab_holdings_data"
+                )
+            else: # Default for other structured outputs
+                return structured_output_cls() # Empty instance
+        else: # Simple generation
+            return Generation(text=f"Mock LLM generation for: {prompt_content[:50]}...")
+
+
+    def _llm_type(self) -> str:
+        return "mock_azure_chat_openai"
+
+    def get_model(self): # For create_react_agent
+        return self
+
+# Mock for create_react_agent
+def create_react_agent(llm, tools, messages_modifier=None):
+    class MockReactAgent:
+        async def ainvoke(self, input_dict: Dict[str, Any]) -> Dict[str, Any]:
+            # Analyzer's task is "Analyze the retrieved data to determine the largest holding and holder."
+            # It would look at dataframe_summary from memory.
+            # For "awpt_ab_holdings_data", it would find the max PRICE_USD.
+            # Let's assume 'awpt_ab_holdings_data' was populated by retriever.
+            # Mock analysis:
+            # For this example, the Analyzer's output becomes the `response` field in `WorkerResponse`.
+            # It's a string that summarizes its findings.
+            response_content = "Analyzed 'awpt_ab_holdings_data'. The largest holding by PRICE_USD is for SEDOL S4 with price 25.0."
+            return {'messages': [HumanMessage(content=response_content)]} # LangGraph React agent returns messages
+    return MockReactAgent()
+
+llm = MockAzureChatOpenAI() # Global LLM instance
+
+# --- 5. Base Agent Class ---
+class Agent:
+    name: str
+    memory: Memory
+    llm: MockAzureChatOpenAI
+    workflow: Optional[CompiledGraph] = None # Some agents might not have complex workflows
+
+    def __init__(self, memory: Memory, llm: MockAzureChatOpenAI):
+        self.memory = memory
+        self.llm = llm
+        # self.workflow = self.build_workflow(memory=memory, llm=llm) # Subclasses might call this
+
+    def build_workflow(self, memory: Memory, llm: MockAzureChatOpenAI) -> Optional[CompiledGraph]:
+        # To be implemented by subclasses if they use a LangGraph workflow
+        return None
+
+    def display_workflow(self):
+        # Simple text representation for console
+        if hasattr(self, 'workflow') and self.workflow:
+            print(f"\n--- Workflow for Agent: {self.name or self.__class__.__name__} ---")
+            try:
+                # This is a very simplistic way to show nodes and edges
+                # A real display_workflow would parse the graph structure
+                print("Nodes:", self.workflow.nodes.keys())
+                # Add more details if possible from CompiledGraph structure
+            except Exception:
+                print(" (Could not display detailed workflow structure for this agent type)")
+
+            # Mock display from images
+            if self.name == WorkerName.Retriever.value or isinstance(self, Retriever):
+                print("  __start__ --> sql_generator --> sql_executor --> __end__")
+            elif self.name == "StateModifierAgent": # Not defined, but for completeness of mock
+                print("  __start__ --> StateModifier --> AzureChatOpenAI --> tools --> __end__")
+            elif isinstance(self, CWDAgent): # For the main CWD Agent
+                print("  __start__ --> planner --> [task_router] --> retriever | analyzer | visualizer | replanner --> __end__")
+                print("                   |                                    ^")
+                print("                   '------------------------------------'")
+        else:
+            print(f"Agent {self.name or self.__class__.__name__} does not have a displayable LangGraph workflow.")
+
+
+    async def __call__(self, state: Any, **kwargs) -> Dict[str, Any]:
+        # This is the entry point for an agent to act on a state.
+        # For agents that are nodes in a LangGraph, this method is called by the graph.
+        # It should return a dictionary of updates to the state.
+        raise NotImplementedError(f"__call__ method not implemented for {self.__class__.__name__}")
+
+
+# --- 6. Specific Agent Implementations ---
+
+class SQLGenerator(Agent):
+    def __init__(self, llm: MockAzureChatOpenAI, memory: Memory):
+        super().__init__(memory=memory, llm=llm)
+        self.name = "SQLGenerator"
+        self.prompt_template = prompts['sql_generator_prompt']
+
+    async def __call__(self, state: RetrieverState) -> Dict[str, SQLGeneratorOutput]:
+        # state here is RetrieverState, specifically its 'task' field
+        current_task_description = state.task.description
+        
+        # Format the prompt (simplified)
+        # In a real scenario, HumanMessage might be better if LLM expects chat format
+        formatted_prompt = self.prompt_template.replace("<schema>", prompts['schema']).replace("{task_description}", current_task_description)
+        
+        response: SQLGeneratorOutput = await self.llm.ainvoke(
+            input=[HumanMessage(content=formatted_prompt)], # Pass as list of messages
+            structured_output=SQLGeneratorOutput
+        )
+        return {"sql_generator_output": response}
+
+class SQLExecutor(Agent):
+    def __init__(self, config: InMemoryCodeExecutorConfig, memory: Memory, llm: MockAzureChatOpenAI):
+        super().__init__(memory=memory, llm=llm) # llm might not be used by SQLExecutor, but Agent expects it
+        self.name = "SQLExecutor"
+        self.code_executor = InMemoryCodeExecutor(config=config, memory=self.memory)
+
+    async def __call__(self, state: RetrieverState) -> Dict[str, SQLExecutorOutput]:
+        # state here is RetrieverState, with sql_generator_output populated
+        sql_to_execute = state.sql_generator_output.sql_str
+        
+        executor_run_output: ExecutorOutput = self.code_executor.run(code=sql_to_execute)
+        
+        output = SQLExecutorOutput(
+            sql=executor_run_output.sql,
+            dataframe_name=executor_run_output.dataframe_name,
+            error=executor_run_output.error
+        )
+        return {"sql_executor_output": output}
+
+class Planner(Agent):
+    def __init__(self, memory: Memory, llm: MockAzureChatOpenAI):
+        super().__init__(memory=memory, llm=llm)
+        self.name = "Planner"
+        self.prompt_template = prompts['planner_prompt']
+
+    async def __call__(self, state: CwdState) -> Dict[str, Plan]:
+        formatted_prompt = self.prompt_template.replace("<schema>", prompts['schema']).replace("{query}", state.query)
+        plan_response: Plan = await self.llm.ainvoke(
+            input=[HumanMessage(content=formatted_prompt)],
+            structured_output=Plan
+        )
+        return {"plan": plan_response}
+
+class Replaner(Agent): # Typo as in image
+    def __init__(self, memory: Memory, llm: MockAzureChatOpenAI):
+        super().__init__(memory=memory, llm=llm)
+        self.name = "Replaner" # Consistent with graph node name 'replanner'
+        self.prompt_template = prompts['replanner_prompt']
+
+    async def __call__(self, state: CwdState) -> Dict[str, Any]:
+        past_steps_summary = state.worker_response.summarize() if state.worker_response else "No past steps."
+        dataframe_summary = self.memory.summarize_dataframe()
+        
+        formatted_prompt = self.prompt_template.format(
+            past_steps_summary=past_steps_summary,
+            dataframe_summary=dataframe_summary,
+            query=state.query
+        )
+        
+        act_response: Act = await self.llm.ainvoke(
+            input=[HumanMessage(content=formatted_prompt)],
+            structured_output=Act
+        )
+
+        if isinstance(act_response.action, Response):
+            return {"final_response": act_response.action.response, "plan": None} # Clear plan if final response
+        else: # It's a new Plan
+            return {"plan": act_response.action, "final_response": ""} # Clear final_response if new plan
+
+class Retriever(Agent):
+    def __init__(self, memory: Memory, llm: MockAzureChatOpenAI):
+        super().__init__(memory=memory, llm=llm)
+        self.name = WorkerName.Retriever.value
+        
+        self.sql_generator_agent = SQLGenerator(llm=llm, memory=memory)
+        
+        # Config for the SQLExecutor's InMemoryCodeExecutor
+        executor_conf = InMemoryCodeExecutorConfig(
+            data_files={ # These tell InMemoryCodeExecutor which DFs from Memory to make available
+                'locate': {}, # Path not needed if preloaded in Memory
+                'position': {}
+            }
+        )
+        self.sql_executor_agent = SQLExecutor(config=executor_conf, memory=memory, llm=llm)
+        
+        self.workflow = self._build_internal_workflow()
+
+    def _build_internal_workflow(self) -> CompiledGraph:
+        # Internal workflow for Retriever: SQLGen -> SQLExec
+        workflow = StateGraph(RetrieverState)
+        workflow.add_node("sql_generator", self.sql_generator_agent)
+        workflow.add_node("sql_executor", self.sql_executor_agent)
+        workflow.add_edge(START, "sql_generator")
+        workflow.add_edge("sql_generator", "sql_executor")
+        workflow.add_edge("sql_executor", END)
+        return workflow.compile()
+
+    async def __call__(self, state: CwdState) -> Dict[str, Any]:
+        if not state.plan or not state.plan.tasks:
+            # Should not happen if router sends to retriever only with tasks
+            return {"worker_response": WorkerResponse(response="Retriever called without a task.", worker_self_name=WorkerName.Retriever)}
+
+        current_task = state.plan.tasks[0]
+        
+        # Invoke the internal workflow for SQL generation and execution
+        retriever_run_state = RetrieverState(task=current_task)
+        final_retriever_state: RetrieverState = await self.workflow.ainvoke(retriever_run_state)
+
+        # Prepare message for WorkerResponse
+        msg_parts = [f"Task: {current_task.description}"]
+        if final_retriever_state.sql_generator_output:
+            msg_parts.append(f"Generated SQL: {final_retriever_state.sql_generator_output.sql_str}")
+        if final_retriever_state.sql_executor_output:
+            if final_retriever_state.sql_executor_output.dataframe_name:
+                msg_parts.append(f"SQL executed. Output DF: {final_retriever_state.sql_executor_output.dataframe_name}")
+                # Optionally summarize the new dataframe here if needed for the log
+                # new_df_summary = self.memory.summarize_one_dataframe(
+                #     final_retriever_state.sql_executor_output.dataframe_name,
+                #     self.memory.get_dataframe(final_retriever_state.sql_executor_output.dataframe_name)
+                # )
+                # msg_parts.append(f"New DF Summary: {new_df_summary}")
+
+            if final_retriever_state.sql_executor_output.error:
+                msg_parts.append(f"SQL execution error: {final_retriever_state.sql_executor_output.error}")
+        
+        response_str = "\n".join(msg_parts)
+
+        # Update CwdState fields
+        # The actual RetrieverState (with outputs) is appended to CwdState.retriever_state list by LangGraph reducer
+        # WorkerResponse is also updated by reducer.
+        # Plan needs to be updated by removing the completed task.
+        updated_plan = Plan(tasks=state.plan.tasks[1:])
+
+        return {
+            "worker_response": WorkerResponse(response=response_str, task_description=current_task.description, worker_self_name=WorkerName.Retriever),
+            "retriever_state": [final_retriever_state], # This item will be appended by the reducer
+            "plan": updated_plan
+        }
+
+class Analyzer(Agent):
+    def __init__(self, memory: Memory, llm: MockAzureChatOpenAI):
+        super().__init__(memory=memory, llm=llm)
+        self.name = WorkerName.Analyzer.value
+        self.prompt_template = prompts['analyzer_prompt']
+        # Analyzer uses a react agent (mocked here)
+        self.react_agent_workflow = create_react_agent(
+            llm=llm, 
+            tools=[GetRowByMaxColumn] # Pass the tool instance
+        )
+
+    async def __call__(self, state: CwdState) -> Dict[str, Any]:
+        if not state.plan or not state.plan.tasks:
+            return {"worker_response": WorkerResponse(response="Analyzer called without a task.", worker_self_name=WorkerName.Analyzer)}
+
+        current_task = state.plan.tasks[0]
+        dataframe_summary = self.memory.summarize_dataframe()
+        plan_summary = state.plan.summarize() # Summarize remaining tasks
+
+        formatted_prompt = self.prompt_template.format(
+            dataframe_summary=dataframe_summary,
+            plan_summary=plan_summary,
+            task_description=current_task.description
+        )
+        
+        # React agent expects messages in a specific format, typically a list of BaseMessage
+        # The input here is what the React agent will process.
+        react_input_messages = [HumanMessage(content=formatted_prompt)]
+        react_agent_output = await self.react_agent_workflow.ainvoke({'messages': react_input_messages})
+        
+        # React agent output is typically {'messages': [AIMessage, ToolMessage, ...]}
+        # We need to extract the final textual response for WorkerResponse
+        final_analysis_message = react_agent_output['messages'][-1].content if react_agent_output['messages'] else "No analysis content."
+
+        updated_plan = Plan(tasks=state.plan.tasks[1:])
+        
+        # AnalyzerState stores the conversation with the react_agent
+        analyzer_state_update = AnalyzerState(messages=react_agent_output['messages'])
+
+        return {
+            "worker_response": WorkerResponse(response=final_analysis_message, task_description=current_task.description, worker_self_name=WorkerName.Analyzer),
+            "analyzer_state": [analyzer_state_update], # Will be appended by reducer
+            "plan": updated_plan
+        }
+
+class Visualizer(Agent):
+    def __init__(self, memory: Memory, llm: MockAzureChatOpenAI):
+        super().__init__(memory=memory, llm=llm)
+        self.name = WorkerName.Visualizer.value
+
+    async def __call__(self, state: CwdState) -> Dict[str, Any]:
+        if not state.plan or not state.plan.tasks:
+             return {"worker_response": WorkerResponse(response="Visualizer called without a task.", worker_self_name=WorkerName.Visualizer)}
+
+        current_task = state.plan.tasks[0]
+        # Mock visualization
+        visualization_output = f"Mock visualization for: {current_task.description}. (Data from memory: {self.memory.list_dataframes()})"
+        
+        updated_plan = Plan(tasks=state.plan.tasks[1:])
+        
+        return {
+            "worker_response": WorkerResponse(response=visualization_output, task_description=current_task.description, worker_self_name=WorkerName.Visualizer),
+            "plan": updated_plan
+            # Visualizer might also update a specific 'visualizer_state' if needed
+        }
+
+# --- 7. Main Orchestrator Agent ---
+class CWDAgent(Agent):
+    def __init__(self, memory: Memory, llm: MockAzureChatOpenAI):
+        super().__init__(memory=memory, llm=llm)
+        self.name = "CWDAgent" # As per image for display_workflow
+        
+        self.planner_node = Planner(memory=memory, llm=llm)
+        self.replanner_node = Replaner(memory=memory, llm=llm) # Typo preserved
+        self.retriever_node = Retriever(memory=memory, llm=llm)
+        self.analyzer_node = Analyzer(memory=memory, llm=llm)
+        self.visualizer_node = Visualizer(memory=memory, llm=llm)
+        
+        self.workflow = self._build_main_workflow()
+
+    def _build_main_workflow(self) -> CompiledGraph:
+        graph = StateGraph(CwdState)
+
+        graph.add_node("planner", self.planner_node)
+        graph.add_node("replanner", self.replanner_node) # Node name 'replanner' for router
+        graph.add_node(WorkerName.Retriever.value, self.retriever_node)
+        graph.add_node(WorkerName.Analyzer.value, self.analyzer_node)
+        graph.add_node(WorkerName.Visualizer.value, self.visualizer_node)
+
+        graph.add_edge(START, "planner")
+
+        # Conditional edges after planner and each worker node, routing via task_router
+        nodes_that_route_via_task_router = [
+            "planner", 
+            WorkerName.Retriever.value, 
+            WorkerName.Analyzer.value, 
+            WorkerName.Visualizer.value
+        ]
+        
+        task_router_map = {
+            WorkerName.Retriever.value: WorkerName.Retriever.value,
+            WorkerName.Analyzer.value: WorkerName.Analyzer.value,
+            WorkerName.Visualizer.value: WorkerName.Visualizer.value,
+            "replanner": "replanner", # if task_router decides to go to replanner (e.g. no tasks)
+            "__end__": END # This case might not be hit if task_router always goes to replanner when tasks are done
+        }
+
+        for node_name in nodes_that_route_via_task_router:
+            graph.add_conditional_edges(node_name, task_router, task_router_map)
+        
+        # Conditional edge after replanner
+        def replanner_router(state: CwdState):
+            if state.final_response:
+                return "__end__"
+            # If replanner generated a new plan, route it via task_router
+            return task_router(state) 
+
+        graph.add_conditional_edges("replanner", replanner_router, task_router_map)
+        
+        return graph.compile()
+
+    async def __call__(self, query: str) -> CwdState: # Changed to take query string
+        initial_state = CwdState(query=query)
+        # The graph execution will update this state object
+        final_state: CwdState = await self.workflow.ainvoke(initial_state, config={"recursion_limit": 15})
+        return final_state
+
+
+# --- 8. Main Execution Block ---
+async def main():
+    global_memory = Memory()
+    # LLM instance is already global: llm = MockAzureChatOpenAI()
+
+    main_cwd_agent = CWDAgent(memory=global_memory, llm=llm)
+    main_cwd_agent.display_workflow() # For console
+    
+    # For specific agent workflows if needed (Retriever's is internal)
+    # main_cwd_agent.retriever_node.display_workflow() 
+
+    # query = "who has the largest holdings of awpt ab?" # Original query
+    query = "Find the average price for AWPT AB." # Test query closer to SQL example
+    
+    print(f"\n--- Running CWDAgent for query: '{query}' ---")
+    final_agent_state = await main_cwd_agent(query=query)
+
+    print("\n--- Final State from CWDAgent ---")
+    if final_agent_state.final_response:
+        print(f"Final Response: {final_agent_state.final_response}")
+    else:
+        print("No final response was generated.")
+    
+    print("\n--- Worker Responses Log ---")
+    if final_agent_state.worker_response and (final_agent_state.worker_response.task_response or final_agent_state.worker_response.response):
+        print(f"Last Worker: {final_agent_state.worker_response.worker_self_name}")
+        print(f"Last Task Desc: {final_agent_state.worker_response.task_description}")
+        print(f"Last Response: {final_agent_state.worker_response.response}")
+        # print(f"All Task Responses: {final_agent_state.worker_response.summarize()}") # if using task_response list
+    else:
+        print("No worker responses recorded in final state's main worker_response field.")
+
+    print("\n--- Full CwdState object (simplified) ---")
+    print(f"Query: {final_agent_state.query}")
+    print(f"Plan: {final_agent_state.plan.model_dump_json(indent=2) if final_agent_state.plan else 'None'}")
+    # print(f"Retriever States Logged: {len(final_agent_state.retriever_state)}")
+    # print(f"Analyzer States Logged: {len(final_agent_state.analyzer_state)}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

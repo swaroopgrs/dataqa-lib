@@ -1,0 +1,52 @@
+metadata<RESERVED>:
+  version: v1.01
+  updated_at: 2025/05/09
+
+examples<RESERVED>:
+  - module_name<RESERVED>: query_rewriter
+    module_type<RESERVED>: dataqa.components.llm.base_llm_component.BaseLLMComponent
+    examples<RESERVED>:
+      - query<RESERVED>: How have median cash buffers trended for Chase deposit customers since 2019?
+        example<RESERVED>:
+          - Previous Question: None
+            Current Question: How have median cash buffers trended for Chase deposit customers since 2019?
+            RESULTS: |
+              {{
+                  "rewriter_reasoning": "1. Current Question has no reference to previous questions or conversation.\n2. Current Question is complete question.\n3. No need to rewrite as Current Question is complete",
+                  "rewritten_query": "How have median cash buffers trended for Chase deposit customers since 2019?"
+              }}
+        tags<RESERVED>: []
+        search_content<RESERVED>: ""
+  - module_name: query_tagging
+    module_type: dataqa.components.llm.base_llm_component.BaseLLMComponent
+    examples:
+      - query: How has average monthly payment on new Auto Loans changed from 2018 till now? Is this change different for Chase vs Non-Chase Cards?
+        example:
+          - QUERY: How has average monthly payment on new Auto Loans changed from 2018 till now? Is this change different for Chase vs Non-Chase Cards?
+            RESULTS: |
+              {{
+                  "tag_reasoning": "1. This QUERY talks about 'new Auto Loans', it belongs to the origination category",
+                  "tags": [ "origination" ]
+              }}
+        tags: []
+        search_content: ""
+  - module_name: code_generator
+    module_type: dataqa.components.llm.base_llm_component.BaseLLMComponent
+    examples:
+      - query: Can we analyze new home lending originations by lender since 2020
+        example:
+          - question: Can we analyze new home lending originations by lender since 2020
+            reasoning:  |
+              1. Count unique customers that have new home lending products ('First_Mortgage','Second_Mortgage','Heloc') since 2020
+              2. Group by date of openning and lender type.
+            sql: |
+                select dt_opn,
+                lender_type,
+                count(distinct experian_consumer_key) as cust_count
+                from as_bi_orig_master
+                where dt_opn >= 202001 and product in ('First_Mortgage','Second_Mortgage','Heloc')
+                group by dt_opn, lender_type
+                order by dt_opn, lender_type
+        tags: []
+        search_content: ""
+

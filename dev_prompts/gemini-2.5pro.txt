@@ -1,0 +1,311 @@
+Okay, here is a detailed prompt designed to guide an LLM in generating the `dataqa` Python library based on your requirements. This prompt aims to be comprehensive, covering architecture, components, extensibility, configuration, specific functionalities, and development standards.
+
+```prompt
+**Objective:** Generate the complete source code for a Python library named `dataqa`. This library provides a configurable framework for natural language querying, analysis, and visualization of data, interacting with user-provided data execution endpoints.
+
+**Core Problem:** Enable users to ask questions in natural language about their data and receive answers, potentially including analysis and visualizations. The library should orchestrate the process, translating NL questions into executable code (e.g., SQL, Python), executing it via a user-defined API, and processing the results.
+
+**Key Design Principles:**
+
+1.  **Configuration-Driven:** All aspects (workflows, agents, components, LLM settings, API endpoints, data assets) should be configurable, likely via YAML files parsed into Pydantic models.
+2.  **Modularity:** Build the library around reusable `Components` that perform specific tasks (e.g., question rewriting, code generation, data execution).
+3.  **Extensibility (Agent Frameworks):** Design the agent orchestration layer with abstraction. While initially implementing support for LangGraph, ensure the architecture allows adding support for other frameworks (CrewAI, AutoGen, Pydantic AI) with minimal changes to the core library logic. Avoid tight coupling with LangGraph.
+4.  **Framework Agnostic Data Execution:** The library will *not* include database connectors. It will generate code (SQL, Python for analysis/viz) and send it to a user-provided "Data API" for execution.
+5.  **Support for Workflows and Agents:**
+    * **Workflows:** Allow users to define fixed, predefined graphs of components (using LangGraph initially) via configuration. Suitable for repeatable, structured tasks.
+    * **Agents:** Allow users to configure LLM-powered agents that dynamically decide which components (tools) to use and in what order. Suitable for more complex, exploratory tasks. Implement a multi-agent approach (Coordinator -> specialized agents).
+
+**High-Level Architecture:**
+
+1.  **Configuration Loader:** Parses user-defined YAML configuration files into Pydantic models.
+2.  **Core Components:** A collection of classes, each responsible for a specific step in the NLQ process. These should be designed to be usable independently, within a workflow graph, or as tools for an agent.
+3.  **Workflow Orchestrator:** Takes a workflow configuration and executes the defined graph of components (initially using LangGraph).
+4.  **Agent Orchestrator:** Manages the lifecycle and execution of agents.
+    * **Agent Framework Adapter Interface:** Define a standard interface (`AgentAdapter`) that abstracts the specifics of the underlying agent framework (e.g., LangGraph, CrewAI).
+    * **LangGraph Adapter Implementation:** The initial implementation of the `AgentAdapter` using LangGraph.
+    * **Agent Definitions:** Configuration specifies agent types (e.g., Coordinator, DataQueryAgent, DataAnalysisAgent, DataVisualizationAgent), their LLMs, prompts, and available tools (which map to Core Components).
+5.  **Data API Client:** A component responsible for interacting with the user-provided external API endpoint for code execution.
+
+**Core Components (Implement as Python classes):**
+
+1.  **`QuestionRewriter`:**
+    * Input: Original user question, conversation history (optional).
+    * Function: Rewrites the question for clarity, resolves ambiguity, incorporates context. Uses an LLM.
+    * Output: Rewritten question.
+2.  **`AssetRetriever`:**
+    * Input: Rewritten question, configuration pointing to asset sources.
+    * Function: Retrieves relevant assets needed for code generation based on the question's context. Assets include:
+        * Database Schema (table/column names, descriptions, types, sample values).
+        * Examples (NL question -> Code pairs, optional reasoning).
+        * Business Rules/Glossary.
+        * (Consider using a vector store for efficient retrieval based on semantic similarity).
+    * Output: Subset of relevant schema, examples, and rules.
+3.  **`PromptComposer`:**
+    * Input: Rewritten question, retrieved assets, task type (query, analysis, viz), configured prompt templates.
+    * Function: Constructs the final prompt to be sent to the LLM for code generation, incorporating context, schema, examples, rules, and specific instructions.
+    * Output: Formatted prompt string.
+4.  **`CodeGenerator`:**
+    * Input: Composed prompt, target language (e.g., 'sql', 'python'), LLM configuration.
+    * Function: Sends the prompt to the configured LLM and parses the generated code from the response. Includes basic validation/cleaning if possible.
+    * Output: String containing the generated code.
+5.  **`DataAPIExecutor`:**
+    * Input: Generated code string, configured Data API endpoint details (URL, auth method/token).
+    * Function: Sends the code to the user's external Data API for execution. Handles the request/response cycle.
+    * Output: Execution result (e.g., data payload, success/failure status, error message, logs).
+    * **Error Handling:** Must robustly handle API connection errors and capture execution errors returned by the user's API (e.g., SQL syntax errors, Python exceptions). The error details must be propagated back clearly.
+6.  **`AnalysisExecutor`:** (Could potentially generate Python code executed via `DataAPIExecutor` or run predefined analysis functions)
+    * Input: Data (from `DataAPIExecutor`), analysis request (derived from NL query or workflow step).
+    * Function: Performs data analysis (e.g., aggregations, statistics). Might involve generating Python/pandas code or calling pre-built functions.
+    * Output: Analysis results (text summary, structured data).
+7.  **`VisualizationGenerator`:** (Could potentially generate Python code executed via `DataAPIExecutor` or use pre-built viz functions)
+    * Input: Data, visualization request.
+    * Function: Generates data visualizations (e.g., charts, graphs). Might involve generating Python code (matplotlib, seaborn, plotly) or calling pre-built functions.
+    * Output: Visualization data (e.g., image file path/bytes, JSON spec for a charting library).
+
+**Configuration System (`config.yaml` example structure):**
+
+```yaml
+# config.yaml
+llm:
+  default_provider: openai # or vertexai, anthropic, etc.
+  default_model: gpt-4 # or gemini-pro, claude-3-opus, etc.
+  api_key: "YOUR_API_KEY" # Or loaded from env var
+  # Specific model settings for different tasks
+  code_gen_model: gpt-4-turbo
+  rewrite_model: gpt-3.5-turbo
+
+data_api:
+  endpoint_url: "[http://user-data-api.internal/execute](http://user-data-api.internal/execute)"
+  # Authentication details (e.g., headers, token)
+  auth_token: "YOUR_DATA_API_TOKEN" # Or loaded from env var
+  method: "POST" # Or PUT, etc.
+  # Define expected request/response structure if possible
+  request_format: # { "code": "...", "language": "sql/python" }
+  response_format: # { "success": true/false, "data": [...], "error": "...", "logs": "..." }
+
+assets:
+  schema:
+    type: file # or database, api
+    path: "./path/to/schema.json" # Or connection details
+  examples:
+    type: file
+    path: "./path/to/examples.yaml"
+  rules:
+    type: file
+    path: "./path/to/rules.md"
+  # Optional: Vector store config for retrieval
+
+components:
+  # Configuration for specific components, e.g., prompt templates
+  prompt_composer:
+    sql_generation_template: |
+      You are an expert SQL generator...
+      Schema: {schema}
+      Examples: {examples}
+      Rules: {rules}
+      Question: {question}
+      Generate SQL:
+    python_analysis_template: |
+      You are an expert Python/Pandas coder...
+      Data Schema: {schema} # Input data description
+      Task: {analysis_task}
+      Generate Python Code:
+
+orchestration:
+  default_mode: agent # or workflow
+  
+  # --- Workflow Definitions ---
+  workflows:
+    - name: simple_sql_query
+      engine: langgraph # Specify engine per workflow
+      graph: # LangGraph definition (nodes, edges)
+        nodes:
+          - id: rewrite
+            component: QuestionRewriter
+            config: {} # Override component defaults if needed
+          - id: retrieve
+            component: AssetRetriever
+          - id: compose
+            component: PromptComposer
+            config:
+              task_type: sql_query
+          - id: generate
+            component: CodeGenerator
+            config:
+              language: sql
+          - id: execute
+            component: DataAPIExecutor
+        edges:
+          - from: rewrite
+            to: retrieve
+          - from: retrieve
+            to: compose
+          # ... etc.
+
+  # --- Agent Definitions ---
+  agents:
+    framework: langgraph # Default framework for agents
+    coordinator:
+      agent_type: CoordinatorAgent # A specific agent class
+      llm: default_model # Use default or specify
+      prompt: "You coordinate tasks... Available tools: DataQueryAgent, DataAnalysisAgent, DataVizAgent"
+      tools: [DataQueryAgent, DataAnalysisAgent, DataVisualizationAgent] # These are other agents it can call
+      adapter_config: {} # LangGraph specific config for this agent
+
+    specialized_agents:
+      - name: DataQueryAgent
+        agent_type: ToolUsingAgent # A generic agent class that uses component tools
+        llm: code_gen_model
+        prompt: "You are specialized in generating SQL/Python code for data retrieval..."
+        # Map components to tools the agent can use
+        tools:
+          - QuestionRewriter
+          - AssetRetriever
+          - PromptComposer
+          - CodeGenerator
+          - DataAPIExecutor 
+        adapter_config: {} # LangGraph specific config
+
+      - name: DataAnalysisAgent
+        # ... config ...
+        tools: [AnalysisExecutor, DataAPIExecutor] # Might need data executor if it generates code
+
+      - name: DataVisualizationAgent
+        # ... config ...
+        tools: [VisualizationGenerator, DataAPIExecutor] # Might need data executor
+
+# --- Agent Framework Adapters ---
+adapters:
+  langgraph:
+    # Config specific to the LangGraph adapter implementation
+  # crewai: # Future adapter config
+  # autogen: # Future adapter config
+```
+
+**Data API Interaction and Error Handling:**
+
+1.  **API Contract:** Define a clear, recommended contract for the user's Data API. `dataqa` will act as a client.
+    * *Request:* Should accept `{ "code": "...", "language": "sql|python", "session_id": "..." (optional) }`.
+    * *Response:* Should return `{ "success": boolean, "data": list_of_dicts | string | null, "error": string | null, "logs": string | null }`.
+2.  **`DataAPIExecutor` Implementation:**
+    * Use a standard HTTP library (like `requests`).
+    * Send the code according to the configured endpoint and method.
+    * Include necessary authentication headers/tokens from config.
+    * Handle HTTP errors (timeouts, connection errors, 4xx/5xx status codes).
+    * Parse the response. If `success` is false, extract the `error` message.
+3.  **Retry/Correction Loop:**
+    * **In Workflows:** Error handling can be explicitly defined in the LangGraph graph (e.g., conditional edges based on the `DataAPIExecutor` output). A simple retry might be possible, but complex correction is harder.
+    * **In Agents:** This is where error handling shines.
+        * The `DataAPIExecutor` tool, when it fails (either HTTP error or `success: false`), should return the error details clearly to the agent.
+        * The agent's LLM, prompted appropriately (e.g., "The previous attempt failed with this error: [...]. Analyze the error and decide the next step: retry, modify the code, or ask the user for clarification."), can then choose to:
+            * Call `CodeGenerator` again with the original prompt plus the error context to attempt a fix.
+            * Retry the `DataAPIExecutor` if it was a transient network issue.
+            * Inform the user/coordinator that it cannot proceed.
+    * **MCP vs API:** A standard RESTful API (potentially stateful using session IDs if needed by the *user's* backend) is simpler to implement and integrate initially than MCP. Stick to the API client approach within `dataqa`. The library doesn't need its own server component.
+
+**Extensibility for Agent Frameworks:**
+
+1.  **`AgentAdapter` Interface:** Define a Python abstract base class or Protocol:
+    ```python
+    from abc import ABC, abstractmethod
+    from typing import List, Dict, Any
+
+    class AgentAdapter(ABC):
+        @abstractmethod
+        def initialize_agent(self, agent_config: Dict[str, Any], tools: List[Any]) -> Any: # Returns framework-specific agent object
+            pass
+
+        @abstractmethod
+        def run_agent(self, agent_instance: Any, user_input: str) -> Any: # Returns final result
+            pass
+
+        # Potentially other methods for state management, tool registration etc.
+    ```
+2.  **`LangGraphAdapter`:** Implement the `AgentAdapter` interface using LangGraph functions/classes. It will translate the generic agent configuration into LangGraph-specific setup (StateGraph, nodes, edges, tool invocation).
+3.  **`AgentOrchestrator`:** Uses the configured adapter (loaded dynamically based on config) to initialize and run agents. The core logic interacts only with the `AgentAdapter` interface methods.
+4.  **Adding New Frameworks:** To add CrewAI, implement a `CrewAIAdapter` class conforming to the `AgentAdapter` interface, translating the configuration into CrewAI concepts (Agents, Tasks, Tools, Crew). Update config options to allow selecting `framework: crewai`.
+
+**Development Standards:**
+
+* **Environment Management:** Use Poetry. Generate `pyproject.toml` with dependencies (e.g., `langgraph`, `pydantic`, `pyyaml`, `requests`, `openai`/`google-generativeai`, etc.).
+* **Testing:** Use `pytest`. Include unit tests for components, configuration loading, and adapter logic (can mock external calls like LLMs and Data API). Aim for good test coverage.
+* **Documentation:** Use Sphinx for generating documentation. Docstrings should follow Sphinx style (reStructuredText). Include:
+    * API Reference (auto-generated from docstrings).
+    * Tutorials (how to configure and run simple workflows/agents).
+    * Configuration Guide (explaining all YAML options).
+    * Developer Guide (how to add new components, agent adapters).
+* **Formatting/Linting:** Use `ruff` for formatting and linting. Configure `ruff` in `pyproject.toml`.
+* **README.md:** Create a comprehensive README including:
+    * Project overview and goals.
+    * Installation instructions (using Poetry).
+    * **Quick Start / Usage Guide:** Simple examples of defining and running a workflow and an agent using configuration.
+    * **Configuration:** Link to detailed config docs.
+    * **Developer Guide:** How to contribute, run tests, build docs. Project structure overview. How to add components/adapters.
+    * **Data API Contract:** Clearly specify the expected interface for the user's data execution endpoint.
+    * License (e.g., Apache 2.0 or MIT).
+
+**Output Requirements:**
+
+Generate the complete Python code for the `dataqa` library, organized into a standard Python package structure:
+
+```
+dataqa-project/
+├── dataqa/
+│   ├── __init__.py
+│   ├── config/
+│   │   ├── __init__.py
+│   │   ├── models.py       # Pydantic models for config
+│   │   └── loader.py       # YAML loading logic
+│   ├── components/
+│   │   ├── __init__.py
+│   │   ├── base.py         # Base class for components (optional)
+│   │   ├── question_rewriter.py
+│   │   ├── asset_retriever.py
+│   │   ├── prompt_composer.py
+│   │   ├── code_generator.py
+│   │   ├── data_api_executor.py
+│   │   ├── analysis_executor.py
+│   │   ├── viz_generator.py
+│   │   └── # ... other components ...
+│   ├── orchestration/
+│   │   ├── __init__.py
+│   │   ├── workflows/
+│   │   │   ├── __init__.py
+│   │   │   └── langgraph_runner.py # Runs LangGraph workflows based on config
+│   │   ├── agents/
+│   │   │   ├── __init__.py
+│   │   │   ├── core.py           # Agent Orchestrator logic
+│   │   │   ├── adapters/
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── base.py       # AgentAdapter interface (ABC/Protocol)
+│   │   │   │   └── langgraph_adapter.py # LangGraph implementation
+│   │   │   └── agent_types/      # Predefined agent logic (Coordinator, ToolUser) - optional
+│   │   │       ├── __init__.py
+│   │   │       └── # ... specific agent classes ...
+│   ├── utils/              # Helper functions
+│   │   └── __init__.py
+│   └── main.py             # Entry point (e.g., CLI or function to run config)
+├── tests/
+│   ├── conftest.py
+│   ├── config/
+│   ├── components/
+│   ├── orchestration/
+│   └── # ... test files mirroring structure ...
+├── docs/
+│   ├── conf.py
+│   ├── index.rst
+│   ├── usage.rst
+│   ├── configuration.rst
+│   ├── api.rst
+│   └── developer.rst
+├── examples/               # Example config files and usage scripts
+│   ├── config_workflow_simple.yaml
+│   ├── config_agent_multi.yaml
+│   └── run_example.py
+├── pyproject.toml          # Poetry config, dependencies, ruff config
+├── README.md
+└── .gitignore
+```
+
+Ensure all Python files include necessary imports, type hinting, and Sphinx-style docstrings. Implement the core logic described above, paying close attention to the configuration parsing, component structure, orchestration abstraction (especially the `AgentAdapter`), and Data API interaction with error handling.
+```

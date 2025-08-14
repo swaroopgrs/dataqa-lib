@@ -1,0 +1,117 @@
+components:
+  - name: return
+    params:
+      config:
+        name: return
+    type: dataqa.components.gather.GatherOutput
+
+  - name: gpt_4o_model
+    params:
+      model: gpt-4o-2024-05-13
+      api_version: "2024-02-01"
+      api_key: ""
+      api_type: "azure_ad"
+      temperature: 0
+      num_response: 1
+      max_completion_tokens: 2000
+    type: dataqa.llm.openai.AzureOpenAI
+
+  - name: query_rewriter
+    params:
+      llm: COMP_gpt_4o_model
+      config:
+        name: query_rewriter
+        model:
+          name: gpt-4o-2024-05-13
+          params:
+            temperature: 0
+        prompt:
+          template: dataqa.components.prompt.template.REWRITER
+          instruction: |
+            - If the "Current Question" refers to the current date using identifiers like today, till now, till the current month, current date, rewrite the question to replace the current date identifier with month and year value from "CURRENT_DATE".
+            - If the "Current Question" asks about a statistic from the pandemic, rewrite the question to replace pandemic with the start date Nov 2019 and end date Feb 2022, unless the "Current Question" specifies these dates already.
+          examples:
+            - Previous Question: None
+              Current Question: How have median cash buffers trended for Chase deposit customers since 2019?
+              RESULTS: |
+                {{
+                    "rewriter_reasoning": "1. Current Question has no reference to previous questions or conversation.\n2. Current Question is complete question.\n3. No need to rewrite as Current Question is complete",
+                    "rewritten_query": "How have median cash buffers trended for Chase deposit customers since 2019?"
+                }}
+        input:
+          - name: query
+            type: str
+            description: input query
+          - name: previous_rewritten_query
+            type: str
+            description: a list of messages in the conversation history
+          - name: datetime
+            type: str
+            description: current date
+        output:
+          - name: rewritten_query
+            type: str
+            description: the rewritten query after considering the conversation history
+          - name: rewriter_reasoning
+            type: str
+            description: the reasoning procedure for generating the rewritten query
+    type: dataqa.components.llm.base_prompt_llm_chain.BasePromptLLMChain
+
+  - name: code_generator_prompt
+    params:
+      config:
+        name: code_generator_prompt
+        prompt:
+          template: dataqa.components.prompt.template.code_generator
+          rule:
+            - none
+          example:
+            - none
+        input:
+          - name: rewritten_query
+            type: str
+            description: input query
+    type: dataqa.components.prompt.base_prompt.BasePrompt
+
+  - name: CODE_GENERATOR
+    params:
+      llm: COMP_gpt_4o_model
+      config:
+        name: code_generator
+        model:
+          name: gpt-4o-2024-05-13
+          params:
+            temperature: 0
+        output:
+          - name: code
+            type: str
+            description: the generated code
+          - name: reasoning
+            type: str
+            description: the reasoning procedure for generating code
+        output_parser: xml
+    type: dataqa.components.llm.base_llm_component.BaseLLMComponent
+
+
+pipelines:
+  - name: default_pipeline
+    nodes:
+      - name: query_rewriter
+        edges:
+          - query: START.query
+            previous_rewritten_query: START.previous_rewritten_query
+            datetime: START.datetime
+      - name: code_generator_prompt
+        edges:
+          - rewritten_query: query_rewriter.rewritten_query
+      - name: code_generator
+        edges:
+          - messages: code_generator_prompt.messages
+      - name: return
+        edges:
+          - rewritten_query: query_rewriter.rewritten_query
+            code: code_generator.code
+      - name: END
+        edges:
+          - return
+

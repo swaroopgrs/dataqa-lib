@@ -1,0 +1,43 @@
+todo:
+ - examples (write current example format)
+ - pipelines 
+ - benchmark
+ - knowledge_extraction
+
+
+
+
+# Modify the schema, rules and examples yaml files and support the new structure
+for now only focus on all retriever
+
+# DBC Inference Interface
+
+## Request Response Structure 
+Request:
+    query: str
+    conversation history: ConversationHistory (List[Dict[str, Any]]) -> contains (prev query, text response, final_df_names, final_img_names)
+
+Response:
+    question_id: str
+    conversation_id: str
+    text: str # final output text
+    final_df_names: List # names of dfs saved in s3
+    final_image_names: List  # names of images saved in s3
+    steps: List[Dict]
+        name: str # component name (e.g. planner)
+        content: str # plan response or worker response
+        df_names: [] # name of the dataframe 
+        img_names: [] # names of the images
+
+## DBC Client
+    config_id
+    tenant_id
+    llm_callable # takes in messages and returns messages 
+    s3_callable # both read and write supported here
+    sql_executor_callable # to execute sql
+
+    method: process_query(user_query: str, conversation_history: ConversationHistory, conversation_id: str, question_id: str) -> Response
+
+## LLM Callable 
+
+## SQL execute callable 

@@ -1,0 +1,23 @@
+use_case_config:
+  - name: cdao
+    cwd_config: "examples/cdao_dia/agent/cwd_agent_prompt_template.yaml"
+    test_data_file: "examples/cdao_dia/examples.yml"
+  - name: cib_mp
+    cwd_config: "examples/cib_mp/agent/cwd_agent_prompt_template.yaml"
+    test_data_file: "examples/cib_mp/examples.yaml"
+  - name: gb
+    cwd_config: "examples/gb/agent/cwd_agent_prompt_template.yaml"
+    test_data_file: "examples/gb/examples.yml"
+  - name: cib_tp
+    cwd_config: "examples/cib_tp/agent/cwd_agent_prompt_template.yaml"
+    test_data_file: "examples/cib_tp/examples.yaml"
+output: "benchmark/output/agent_20250605"
+log: "benchmark/log/agent_20250605.log"
+run_llm_eval: true
+run_prediction: true
+num_run: 5
+llm_judge_model: "gpt-4.1-2025-04-14"
+batch_size: 8
+resume: true
+debug: true
+solution_type: agent

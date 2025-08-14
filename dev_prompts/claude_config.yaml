@@ -1,0 +1,405 @@
+# dataqa_config.yaml
+
+# Global configuration settings
+global:
+  name: "example_graph"  # Name of the overall system
+  description: "Example data querying system"  # Description
+  code_generation:
+    sql_only: false  # If true, only SQL code will be generated (no Python)
+  execution:
+    local: true  # If true, execute code locally (for testing)
+  logging:
+    level: "info"  # Logging level
+  knowledge_base:
+    type: "local"  # Type of knowledge base (local, opensearch)
+    path: "./kb"   # Path to knowledge base (for local)
+
+# LLM provider configurations
+llm_providers:
+  - name: "azure_gpt4"
+    type: "azure_openai"
+    model: "gpt-4o-2024-05-13"
+    api_version: "2024-02-01"
+    endpoint: "${AZURE_OPENAI_ENDPOINT}"
+    api_key: "${AZURE_OPENAI_API_KEY}"
+    temperature: 0.0
+    max_tokens: 2000
+
+  - name: "bedrock_claude"
+    type: "bedrock"
+    model: "anthropic.claude-3-sonnet-20240229-v1:0"
+    region: "us-west-2"
+    temperature: 0.1
+    max_tokens: 4000
+
+# Components that can be used in workflows or as tools for agents
+components:
+  - name: "query_rewriter"
+    type: "dataqa.components.query.query_rewriter.QueryRewriter"
+    llm: "azure_gpt4"
+    config:
+      prompt_template: "templates/query_rewriter.txt"
+      input:
+        - name: "query"
+          type: "str"
+          description: "Original user query"
+        - name: "conversation_history"
+          type: "list"
+          description: "Previous conversation history"
+      output:
+        - name: "rewritten_query"
+          type: "str"
+          description: "Rewritten query"
+        - name: "reasoning"
+          type: "str"
+          description: "Reasoning for rewriting"
+
+  - name: "schema_retriever"
+    type: "dataqa.components.retrieval.schema_retriever.SchemaRetriever"
+    config:
+      retrieval_strategy: "hybrid"
+      schema_source: "./schemas"
+      top_k: 5
+      input:
+        - name: "query"
+          type: "str"
+          description: "Query to retrieve schema for"
+      output:
+        - name: "schema"
+          type: "dict"
+          description: "Retrieved schema information"
+
+  - name: "rule_retriever"
+    type: "dataqa.components.retrieval.rule_retriever.RuleRetriever"
+    config:
+      retrieval_strategy: "hybrid"
+      rules_source: "./rules"
+      top_k: 3
+      input:
+        - name: "query"
+          type: "str"
+          description: "Query to retrieve rules for"
+      output:
+        - name: "rules"
+          type: "list"
+          description: "Retrieved rules"
+
+  - name: "example_retriever"
+    type: "dataqa.components.retrieval.example_retriever.ExampleRetriever"
+    config:
+      retrieval_strategy: "dense"
+      examples_source: "./examples"
+      top_k: 3
+      input:
+        - name: "query"
+          type: "str"
+          description: "Query to retrieve examples for"
+      output:
+        - name: "examples"
+          type: "list"
+          description: "Retrieved examples"
+
+  - name: "prompt_composer"
+    type: "dataqa.components.prompt.prompt_composer.PromptComposer"
+    config:
+      template: "templates/code_generation_prompt.txt"
+      input:
+        - name: "query"
+          type: "str"
+          description: "User query"
+        - name: "schema"
+          type: "dict"
+          description: "Database schema"
+        - name: "rules"
+          type: "list"
+          description: "Business rules"
+        - name: "examples"
+          type: "list"
+          description: "Example queries"
+      output:
+        - name: "prompt"
+          type: "str"
+          description: "Composed prompt"
+
+  - name: "code_generator"
+    type: "dataqa.components.code.code_generator.CodeGenerator"
+    llm: "azure_gpt4"
+    config:
+      input:
+        - name: "prompt"
+          type: "str"
+          description: "Prompt for code generation"
+      output:
+        - name: "code"
+          type: "str"
+          description: "Generated code"
+        - name: "reasoning"
+          type: "str"
+          description: "Reasoning for code generation"
+
+  - name: "code_executor"
+    type: "dataqa.components.code.executor.api_executor.ApiExecutor"
+    config:
+      endpoint: "${CODE_EXECUTION_API}"
+      timeout: 30
+      input:
+        - name: "code"
+          type: "str"
+          description: "Code to execute"
+      output:
+        - name: "result"
+          type: "dict"
+          description: "Execution result"
+
+  - name: "data_analyzer"
+    type: "dataqa.components.analytics.data_analyzer.DataAnalyzer"
+    llm: "azure_gpt4"
+    config:
+      input:
+        - name: "data"
+          type: "dict"
+          description: "Data to analyze"
+        - name: "query"
+          type: "str"
+          description: "User query"
+      output:
+        - name: "analysis"
+          type: "dict"
+          description: "Analysis results"
+
+  - name: "visualizer"
+    type: "dataqa.components.visualization.visualizer.Visualizer"
+    llm: "azure_gpt4"
+    config:
+      input:
+        - name: "data"
+          type: "dict"
+          description: "Data to visualize"
+        - name: "analysis"
+          type: "dict"
+          description: "Analysis results"
+        - name: "query"
+          type: "str"
+          description: "User query"
+      output:
+        - name: "visualization_code"
+          type: "str"
+          description: "Visualization code"
+        - name: "visualization_result"
+          type: "dict"
+          description: "Visualization result"
+
+  - name: "result_formatter"
+    type: "dataqa.components.flow.gather.Gather"
+    config:
+      input:
+        - name: "query"
+          type: "str"
+          description: "Original query"
+        - name: "rewritten_query"
+          type: "str"
+          description: "Rewritten query"
+        - name: "code"
+          type: "str"
+          description: "Generated code"
+        - name: "result"
+          type: "dict"
+          description: "Execution result"
+        - name: "analysis"
+          type: "dict"
+          description: "Analysis results (optional)"
+        - name: "visualization"
+          type: "dict"
+          description: "Visualization results (optional)"
+      output:
+        - name: "final_result"
+          type: "dict"
+          description: "Final formatted result"
+
+# Tools available for agents
+tools:
+  - name: "sql_generator_tool"
+    type: "dataqa.tools.data_querying.sql_generator.SqlGeneratorTool"
+    description: "Generate SQL queries from natural language"
+    component: "code_generator"
+    config:
+      dialect: "snowflake"
+
+  - name: "data_stats_tool"
+    type: "dataqa.tools.analytics.statistical.BasicStatsTool"
+    description: "Calculate basic statistics on data"
+    config:
+      metrics: ["mean", "median", "min", "max", "std"]
+
+  - name: "plot_histogram_tool"
+    type: "dataqa.tools.visualization.chart_generator.HistogramTool"
+    description: "Create histogram visualizations"
+    config:
+      default_bins: 10
+
+# Agents in the system
+agents:
+  - name: "coordinator_agent"
+    type: "dataqa.agents.types.plan_execute.PlanExecuteAgent"
+    llm: "azure_gpt4"
+    description: "Main coordinator agent that plans and delegates tasks"
+    config:
+      system_prompt: "templates/coordinator_system_prompt.txt"
+      tools:
+        - "query_agent"
+        - "analytics_agent"
+        - "viz_agent"
+
+  - name: "query_agent"
+    type: "dataqa.agents.specialized.query_agent.QueryAgent"
+    llm: "azure_gpt4"
+    description: "Agent specialized in data querying"
+    config:
+      system_prompt: "templates/query_agent_system_prompt.txt"
+      components:
+        - "schema_retriever"
+        - "rule_retriever"
+        - "example_retriever"
+      tools:
+        - "sql_generator_tool"
+
+  - name: "analytics_agent"
+    type: "dataqa.agents.specialized.analytics_agent.AnalyticsAgent"
+    llm: "bedrock_claude"
+    description: "Agent specialized in data analytics"
+    config:
+      system_prompt: "templates/analytics_agent_system_prompt.txt"
+      components:
+        - "rule_retriever"
+      tools:
+        - "data_stats_tool"
+
+  - name: "viz_agent"
+    type: "dataqa.agents.specialized.viz_agent.VisualizationAgent"
+    llm: "bedrock_claude"
+    description: "Agent specialized in data visualization"
+    config:
+      system_prompt: "templates/viz_agent_system_prompt.txt"
+      tools:
+        - "plot_histogram_tool"
+
+# Workflows in the system
+workflows:
+  - name: "sql_generation_workflow"
+    type: "dataqa.workflows.predefined.query_workflow.QueryWorkflow"
+    description: "Workflow for SQL generation only"
+    adapter: "langgraph"
+    nodes:
+      - name: "query_rewriter"
+        edges:
+          - from: "START"
+            input:
+              query: "query"
+              conversation_history: "conversation_history"
+      - name: "schema_retriever"
+        edges:
+          - from: "query_rewriter"
+            input:
+              query: "rewritten_query"
+      - name: "rule_retriever"
+        edges:
+          - from: "query_rewriter"
+            input:
+              query: "rewritten_query"
+      - name: "example_retriever"
+        edges:
+          - from: "query_rewriter"
+            input:
+              query: "rewritten_query"
+      - name: "prompt_composer"
+        edges:
+          - from: ["schema_retriever", "rule_retriever", "example_retriever"]
+            input:
+              query: "query_rewriter.rewritten_query"
+              schema: "schema_retriever.schema"
+              rules: "rule_retriever.rules"
+              examples: "example_retriever.examples"
+      - name: "code_generator"
+        edges:
+          - from: "prompt_composer"
+            input:
+              prompt: "prompt"
+      - name: "code_executor"
+        edges:
+          - from: "code_generator"
+            input:
+              code: "code"
+      - name: "result_formatter"
+        edges:
+          - from: ["query_rewriter", "code_generator", "code_executor"]
+            input:
+              query: "START.query"
+              rewritten_query: "query_rewriter.rewritten_query"
+              code: "code_generator.code"
+              result: "code_executor.result"
+      - name: "END"
+        edges:
+          - from: "result_formatter"
+            output: "final_result"
+
+  - name: "full_analysis_workflow"
+    type: "dataqa.workflows.base_workflow.BaseWorkflow"
+    description: "Complete workflow with querying, analysis, and visualization"
+    adapter: "langgraph"
+    nodes:
+      - name: "sql_generation_workflow"  # Sub-workflow
+        edges:
+          - from: "START"
+            input:
+              query: "query"
+              conversation_history: "conversation_history"
+      - name: "data_analyzer"
+        edges:
+          - from: "sql_generation_workflow"
+            input:
+              data: "final_result.result"
+              query: "START.query"
+      - name: "visualizer"
+        edges:
+          - from: ["sql_generation_workflow", "data_analyzer"]
+            input:
+              data: "sql_generation_workflow.final_result.result"
+              analysis: "data_analyzer.analysis"
+              query: "START.query"
+      - name: "final_result_formatter"
+        type: "dataqa.components.flow.gather.Gather"
+        edges:
+          - from: ["sql_generation_workflow", "data_analyzer", "visualizer"]
+            input:
+              query_result: "sql_generation_workflow.final_result"
+              analysis: "data_analyzer.analysis"
+              visualization: "visualizer.visualization_result"
+      - name: "END"
+        edges:
+          - from: "final_result_formatter"
+            output: "final_result"
+
+# Graph configuration (can be agent-based, workflow-based, or hybrid)
+graph:
+  name: "multi_agent_system"
+  type: "agent"  # Can be "agent", "workflow", or "hybrid"
+  entry_point: "coordinator_agent"  # For agent-based system
+  # entry_point: "full_analysis_workflow"  # For workflow-based system
+  
+  # For hybrid systems, define the connections between agents and workflows
+  connections:
+    - from: "coordinator_agent.output"
+      to: "query_agent.input"
+      condition: "query_task"
+    
+    - from: "coordinator_agent.output"
+      to: "sql_generation_workflow.input"
+      condition: "direct_sql_task"
+    
+    - from: "query_agent.output"
+      to: "analytics_agent.input"
+      condition: "needs_analysis"
+    
+    - from: "analytics_agent.output"
+      to: "viz_agent.input"
+      condition: "needs_visualization"

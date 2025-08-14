@@ -1,0 +1,23 @@
+use_case_config:
+#  - name: prime_equities
+#    cwd_config: "examples/prime_eq/agent/cwd_agent_prompt_template.yaml"
+#    test_data_file: "examples/prime_eq/examples.yml"
+#  - name: cdao
+#    cwd_config: "examples/cdao_dia/agent/config_graph_building.yaml"
+#    test_data_file: "examples/cdao_dia/examples.yml"
+#  - name: cib_mp
+#    cwd_config: "examples/cib_mp/agent/config_graph_building.yaml"
+#    test_data_file: "examples/cib_mp/examples.yaml"
+  - name: cib_gb
+    cwd_config: "examples/gb/config/config_graph_building.yaml"
+    test_data_file: "examples/gb/examples.yml"
+output: "benchmark/output/pipeline_20250602_cibgb_1"
+log: "benchmark/log/pipeline_20250602_cibgb_1.log"
+run_llm_eval: true
+run_prediction: true
+num_run: 5
+llm_judge_model: "gpt-4o-2024-08-06"
+batch_size: 4
+resume: true
+debug: true
+solution_type: pipeline

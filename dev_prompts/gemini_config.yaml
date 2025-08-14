@@ -1,0 +1,367 @@
+# dataqa_config_final_v1.yaml
+
+version: "1.3"
+
+# --- Global Settings ---
+global:
+  system_name: "dataqa_enterprise_nlq_system"
+  description: "Comprehensive Natural Language Querying system for databases with analysis and visualization."
+  # If true, LLM components primarily generate SQL for data retrieval.
+  # Python generation for APIs/functions during querying is still possible if component allows.
+  prefer_sql_for_data_retrieval: true
+  default_orchestrator_adapter: "langgraph" # Default adapter if not specified in workflow/agent
+  logging:
+    level: "info" # "debug", "info", "warning", "error"
+  knowledge_base:
+    # Primary asset store implementation
+    type: "dataqa.assets.store.local_file_store.LocalFileAssetStore"
+    config:
+      base_path: "./dataqa_assets_root" # Root directory for all asset files
+      # Defines all known asset types, their structure, and how to find them.
+      asset_types:
+        - name: "database_schemas" # Unique identifier for this asset type
+          model_class: "dataqa.assets.models.DBSchema" # Pydantic model for validation and typing
+          path_glob: "schemas/**/*.json" # Glob pattern relative to base_path
+          description: "Database table and column definitions."
+          # Optional: Default retrieval hints for this asset type if not overridden by a component
+          # default_keyword_search_fields: ["table_name", "column_name", "description_text"]
+          # default_embedding_source_field: "concatenated_schema_text" # Field used to generate embeddings
+        - name: "business_rules"
+          model_class: "dataqa.assets.models.BusinessRule"
+          path_glob: "rules/**/*.txt"
+          loader: "text" # How to load the raw content (text, yaml, json)
+          description: "Business logic, definitions, and constraints."
+        - name: "query_examples"
+          model_class: "dataqa.assets.models.QueryExample" # e.g., {query: str, code: str, reasoning: str}
+          path_glob: "examples/queries/**/*.yaml"
+          loader: "yaml"
+          description: "Few-shot examples of natural language queries to code."
+        - name: "analysis_code_snippets"
+          model_class: "dataqa.assets.models.CodeSnippet" # e.g., {name: str, description: str, code: str, language: str}
+          path_glob: "examples/analysis_snippets/**/*.py"
+          loader: "text_with_frontmatter" # if snippets have metadata
+          description: "Reusable Python/R code snippets for common analyses."
+
+# --- LLM Provider Configurations ---
+llm_providers:
+  - id: "azure_openai_gpt4o" # Unique ID for this LLM provider instance
+    type: "dataqa.llms.azure_openai_provider.AzureOpenAIProvider" # Full class path
+    model_deployment: "gpt-4o" # Azure deployment name
+    config:
+      api_version: "2024-02-15-preview"
+      endpoint_env: "AZURE_OPENAI_ENDPOINT_GPT4O" # Environment variable for the endpoint URL
+      api_key_env: "AZURE_OPENAI_API_KEY_GPT4O"   # Environment variable for the API key
+      temperature: 0.0
+      max_tokens: 3000
+      # timeout_seconds: 60
+
+  - id: "bedrock_claude3_sonnet"
+    type: "dataqa.llms.bedrock_provider.BedrockProvider" # Full class path
+    model_id: "anthropic.claude-3-sonnet-20240229-v1:0" # Bedrock model ID
+    config:
+      aws_region_env: "AWS_DEFAULT_REGION" # Environment variable for AWS region
+      # aws_access_key_id_env: "AWS_ACCESS_KEY_ID" # Optional, if not using instance profile
+      # aws_secret_access_key_env: "AWS_SECRET_ACCESS_KEY" # Optional
+      temperature: 0.1
+      max_tokens: 4000
+
+# --- Component Blueprints ---
+# These are definitions of available component types and their default configurations.
+# Workflow/agent nodes will be instances of these blueprints.
+components:
+  # --- Dynamic LLM Task Component (Reusable for various LLM-driven tasks) ---
+  - name: "dynamic_llm_processor" # Blueprint name for the generic LLM task component
+    type: "dataqa.components.llm.dynamic_llm_task.DynamicLLMTaskComponent"
+    # This component is highly configurable. Its specific behavior (rewriting, generation, summarization)
+    # is determined by the `config` provided when it's instantiated in a workflow/agent.
+    # Default llm_provider_id can be set here, or overridden in instance.
+    # llm_provider_id: "azure_openai_gpt4o"
+    # No 'config' here at the blueprint level, or only very generic defaults.
+    # The actual prompt, input_schema, output_schema are defined per-instance.
+
+  # --- Asset-Specific Retriever Components ---
+  - name: "schema_retriever_blueprint" # Blueprint name
+    type: "dataqa.components.retrieval.asset_specific.SchemaRetrieverComponent"
+    # Default config for instances of this schema retriever. Can be overridden.
+    config:
+      top_k: 5
+      retrieval_mechanism:
+        type: "keyword" # Default mechanism for schemas
+        params: { search_fields: ["table_name", "column_name", "description"] }
+    input_docs: [{ name: "search_query", type: "str" }]
+    output_docs: [{ name: "retrieved_schemas", type: "list[dataqa.assets.models.DBSchema]" }]
+
+  - name: "rule_retriever_blueprint"
+    type: "dataqa.components.retrieval.asset_specific.RuleRetrieverComponent"
+    config:
+      top_k: 3
+      retrieval_mechanism:
+        type: "hybrid"
+        params: { keyword_weight: 0.4, vector_weight: 0.6 }
+    input_docs: [{ name: "search_query", type: "str" }]
+    output_docs: [{ name: "retrieved_rules", type: "list[dataqa.assets.models.BusinessRule]" }]
+
+  - name: "example_retriever_blueprint"
+    type: "dataqa.components.retrieval.asset_specific.ExampleRetrieverComponent"
+    config:
+      top_k: 3
+      retrieval_mechanism: { type: "vector" } # Params for vector might include default embedding model
+    input_docs: [{ name: "search_query", type: "str" }]
+    output_docs: [{ name: "retrieved_examples", type: "list[dataqa.assets.models.QueryExample]" }]
+
+  - name: "analysis_snippet_retriever_blueprint"
+    type: "dataqa.components.retrieval.asset_specific.AnalysisSnippetRetrieverComponent"
+    config:
+      top_k: 2
+      retrieval_mechanism: { type: "tag_and_vector" } # Example of a more complex mechanism
+    input_docs: [{ name: "search_query", type: "str" }, {name: "required_tags", type: "list[str]", optional: true}]
+    output_docs: [{ name: "retrieved_snippets", type: "list[dataqa.assets.models.CodeSnippet]" }]
+
+
+  # --- Other Specialized Components ---
+  - name: "master_prompt_composer_blueprint"
+    type: "dataqa.components.prompt.master_prompt_composer.MasterPromptComposerComponent"
+    config: { master_template_path: "templates/prompts/default_master_query_prompt.txt" }
+    input_docs: # Reflects the component's Pydantic input model
+      - { name: "user_query", type: "str" }
+      - { name: "schemas_context", type: "list[dataqa.assets.models.DBSchema]", optional: true }
+      - { name: "rules_context", type: "list[dataqa.assets.models.BusinessRule]", optional: true }
+      - { name: "examples_context", type: "list[dataqa.assets.models.QueryExample]", optional: true }
+    output_docs: [{ name: "composed_prompt_text", type: "str" }]
+
+  - name: "api_code_executor_blueprint"
+    type: "dataqa.components.execution.api_executor.ApiExecutor"
+    config:
+      endpoint_env: "DEFAULT_CODE_EXECUTION_API_ENDPOINT"
+      timeout_seconds: 60
+    input_docs: [{ name: "code_to_execute", type: "dataqa.core.types.CodeBlock" }] # e.g., {language: "sql", content: "..."}
+    output_docs: [{ name: "execution_response", type: "dataqa.core.types.ExecutionResponse" }] # e.g., {status: "success", data: ..., logs: ...}
+
+  - name: "result_aggregator_blueprint" # For collecting results at the end of a workflow
+    type: "dataqa.components.utility.result_aggregator.ResultAggregatorComponent"
+    # This component is dynamic; its specific inputs are defined by workflow usage.
+    # It outputs a single dictionary containing all its inputs.
+    output_docs: [{ name: "aggregated_data_package", type: "dict" }]
+
+# --- Tool Definitions ---
+# Tools are capabilities exposed to agents. They can wrap components, workflows, or be custom Python functions.
+tools:
+  - id: "generate_and_execute_sql_tool" # Unique tool ID
+    type: "dataqa.tools.factories.workflow_as_tool_factory.WorkflowAsTool" # Wraps an entire workflow
+    description: "Generates and executes a SQL query based on a natural language request and conversation history, returning the data."
+    config: # Configuration for the WorkflowAsTool factory
+      workflow_id: "core_sql_query_workflow" # ID of a workflow defined in the 'workflows' section
+      # Maps tool input fields (seen by agent) to the wrapped workflow's initial input fields
+      tool_input_to_workflow_input_mapping:
+        natural_language_request: "user_query"
+        current_conversation_history: "conversation_history"
+      # Maps wrapped workflow's output fields to the tool's output fields (seen by agent)
+      workflow_output_to_tool_output_mapping:
+        query_result_data: "execution_data"
+        generated_sql_statement: "executed_sql"
+    # Schema for the tool as seen by the agent's LLM
+    input_schema:
+      type: "object"
+      properties:
+        natural_language_request: { type: "string", description: "The user's data request." }
+        current_conversation_history: { type: "array", items: {type: "object"}, description: "Previous turns.", optional: true }
+      required: ["natural_language_request"]
+    output_schema:
+      type: "object"
+      properties:
+        execution_data: { type: "any", description: "The data returned by the SQL query execution." }
+        executed_sql: { type: "string", description: "The SQL query that was executed." }
+        error_message: { type: "string", description: "Any error message if execution failed.", optional: true}
+
+  - id: "python_code_analysis_tool"
+    type: "dataqa.tools.factories.component_as_tool_factory.ComponentAsTool" # Wraps the api_code_executor
+    description: "Executes a given Python script for data analysis on specified input data (referenced by name/ID from previous steps) and returns the result or a reference to it."
+    config:
+      target_component_id: "api_code_executor_blueprint" # Uses the executor component
+      # Fixed parameters for this tool instance when calling the component
+      fixed_component_params:
+        "code_to_execute.language": "python" # Always Python for this tool
+      tool_input_to_component_input_mapping:
+        python_script_content: "code_to_execute.content"
+        # input_data_references: "code_to_execute.context_data" # If executor supports passing data context
+      component_output_to_tool_output_mapping:
+        "execution_response.data": "analysis_result_data"
+        "execution_response.status": "execution_status"
+        "execution_response.error_message": "error_details"
+    input_schema:
+      type: "object"
+      properties:
+        python_script_content: { type: "string", description: "The Python script to execute." }
+        # input_data_references: { type: "array", items: {type: "string"}, description: "Names/IDs of dataframes from previous steps to make available to the script.", optional: true }
+      required: ["python_script_content"]
+    output_schema:
+      type: "object"
+      properties:
+        analysis_result_data: { type: "any", description: "Result of the analysis (e.g., summary, new dataframe reference)." }
+        execution_status: { type: "string", enum: ["success", "error"] }
+        error_details: { type: "string", optional: true }
+
+# --- Agent Definitions ---
+# Defines agent archetypes and their configurations.
+agents:
+  - id: "main_orchestrator_agent" # Unique agent ID
+    type: "dataqa.agents.archetypes.plan_and_execute_agent.PlanExecuteAgent" # Full class path
+    llm_provider_id: "azure_openai_gpt4o" # LLM used by this agent for planning/reasoning
+    description: "Top-level agent that plans tasks and delegates to specialized tools (which can be other agents or workflows)."
+    config: # Parameters for the PlanExecuteAgent
+      planner_system_prompt_path: "templates/prompts/plan_execute_main_planner_prompt.txt"
+      max_iterations: 7
+      # Details on how the agent should reflect on past steps, retry, etc.
+    available_tools: # Tools (by ID) this agent can choose to use/delegate to
+      - "generate_and_execute_sql_tool"
+      - "python_code_analysis_tool"
+      # - "visualization_generation_tool" # If defined
+      # - "sub_task_delegator_agent" # If there's another layer of agents
+
+# --- Workflow Definitions ---
+# Predefined sequences of component instances.
+workflows:
+  - id: "core_sql_query_workflow" # Unique workflow ID (can be used by tools or other workflows)
+    display_name: "Core SQL Query Generation and Execution"
+    orchestrator_adapter: "langgraph" # Specifies the orchestration engine adapter
+    state_schema_class: "dataqa.workflows.states.SQLQueryWorkflowState" # Pydantic model for this workflow's state
+    inputs: # Fields expected in the initial state when this workflow is invoked
+      - { name: "user_query", type: "str" }
+      - { name: "conversation_history", type: "list[dict]", optional: true }
+    nodes: # Each node is an instance of a component blueprint
+      # Query Rewriting (Instance of Dynamic LLM Processor)
+      - id: "step_rewrite_query"
+        component_id: "dynamic_llm_processor" # Using the generic LLM component blueprint
+        llm_provider_id: "azure_openai_gpt4o" # LLM for this specific step
+        config: # Configuration for this specific instance of dynamic_llm_processor
+          task_description: "Query rewriting for SQL generation context."
+          prompt_template_path: "templates/prompts/query_rewriter_sql_context_prompt.txt"
+          input_schema:
+            - { name: "current_query", type: "str" }
+            - { name: "history", type: "list[dict]", optional: true }
+          output_schema:
+            - { name: "rewritten_query_text", type: "str" }
+            - { name: "rewriting_reason", type: "str", optional: true }
+        input_mapping: # From workflow state to component instance's input_schema fields
+          current_query: "state.user_query"
+          history: "state.conversation_history"
+        output_mapping: # From component instance's output_schema fields to workflow state
+          rewritten_query_text: "state.contextual_query"
+          rewriting_reason: "state.logs.query_rewrite_reason"
+
+      # Asset Retrieval (using specialized retriever blueprints)
+      - id: "step_retrieve_schemas"
+        component_id: "schema_retriever_blueprint" # Instance of the schema retriever blueprint
+        # Can override default config from blueprint if needed:
+        # config_override: { top_k: 3, retrieval_mechanism: { type: "vector" } }
+        input_mapping: { search_query: "state.contextual_query" }
+        output_mapping: { retrieved_schemas: "state.assets.database_schemas" }
+
+      - id: "step_retrieve_rules"
+        component_id: "rule_retriever_blueprint"
+        input_mapping: { search_query: "state.contextual_query" }
+        output_mapping: { retrieved_rules: "state.assets.business_rules" }
+
+      - id: "step_retrieve_examples"
+        component_id: "example_retriever_blueprint"
+        input_mapping: { search_query: "state.contextual_query" }
+        output_mapping: { retrieved_examples: "state.assets.query_examples" }
+
+      # Prompt Composition
+      - id: "step_compose_sql_prompt"
+        component_id: "master_prompt_composer_blueprint"
+        input_mapping:
+          user_query: "state.contextual_query"
+          schemas_context: "state.assets.database_schemas"
+          rules_context: "state.assets.business_rules"
+          examples_context: "state.assets.query_examples"
+        output_mapping: { composed_prompt_text: "state.final_sql_prompt" }
+
+      # SQL Generation (Instance of Dynamic LLM Processor)
+      - id: "step_generate_sql"
+        component_id: "dynamic_llm_processor"
+        llm_provider_id: "azure_openai_gpt4o"
+        config:
+          task_description: "SQL code generation from composed prompt."
+          prompt_template_path: "templates/prompts/sql_generation_from_composed_prompt.txt" # Uses {{final_prompt_from_composer}}
+          input_schema: [{ name: "final_prompt_from_composer", type: "str" }]
+          output_schema: # Instructs LLM to produce this structure
+            - { name: "generated_sql_code", type: "str" }
+            - { name: "generation_explanation", type: "str", optional: true }
+        input_mapping: { final_prompt_from_composer: "state.final_sql_prompt" }
+        output_mapping:
+          generated_sql_code: "state.generated_code_block.content" # Assuming CodeBlock structure
+          generation_explanation: "state.generated_code_block.reasoning"
+          # Add language to the CodeBlock structure in state
+          # This might require a small utility node or the LLM component to output language.
+          # For simplicity, let's assume this step also sets state.generated_code_block.language = "sql"
+
+      # Code Execution
+      - id: "step_execute_sql"
+        component_id: "api_code_executor_blueprint"
+        input_mapping: { code_to_execute: "state.generated_code_block" } # Pass the CodeBlock
+        output_mapping: { execution_response: "state.sql_execution_result" }
+
+      # Final Result Aggregation
+      - id: "step_aggregate_workflow_output"
+        component_id: "result_aggregator_blueprint"
+        input_mapping: # Dynamically collects these state fields
+          original_query: "state.user_query"
+          contextual_query_used: "state.contextual_query"
+          generated_sql: "state.generated_code_block.content"
+          execution_status: "state.sql_execution_result.status"
+          query_result_data: "state.sql_execution_result.data"
+          error_info: "state.sql_execution_result.error_message"
+        output_mapping: { aggregated_data_package: "state.final_output_for_workflow" }
+
+    entry_point: "step_rewrite_query" # First node in the workflow
+    edges: # Defines the graph structure for the orchestrator adapter
+      - { from: "step_rewrite_query", to: "step_retrieve_schemas" }
+      - { from: "step_rewrite_query", to: "step_retrieve_rules" }
+      - { from: "step_rewrite_query", to: "step_retrieve_examples" }
+      - { from: "step_retrieve_schemas", to: "step_compose_sql_prompt" }
+      - { from: "step_retrieve_rules", to: "step_compose_sql_prompt" }
+      - { from: "step_retrieve_examples", to: "step_compose_sql_prompt" }
+      - { from: "step_compose_sql_prompt", to: "step_generate_sql" }
+      - { from: "step_generate_sql", to: "step_execute_sql" }
+      - { from: "step_execute_sql", to: "step_aggregate_workflow_output" }
+      - { from: "step_aggregate_workflow_output", to: "__END__" } # LangGraph special end node
+
+    outputs: # Defines what this workflow returns from its final state
+      - { name: "workflow_result_package", value_from_state: "state.final_output_for_workflow" }
+      - { name: "generated_sql_statement", value_from_state: "state.generated_code_block.content" }
+
+
+# --- Main System Graph Definition ---
+# Defines the top-level entry point and orchestration of the entire system.
+graph:
+  id: "main_nlq_system_orchestrator"
+  display_name: "Main Natural Language Query System"
+  # 'type' indicates how this top-level graph operates.
+  # "single_entry_point": The system is one agent or one workflow.
+  # "composite_graph": The system is a graph of agents and/or workflows (more complex routing).
+  type: "single_entry_point"
+  # ID of the agent or workflow from 'agents' or 'workflows' sections that starts the system.
+  entry_point_id: "main_orchestrator_agent"
+
+  # If 'type' were "composite_graph", 'connections' would define routing between agents/workflows.
+  # connections:
+  #   - from_id: "main_orchestrator_agent"
+  #     condition_based_routing:
+  #       source_field_in_output: "state.determined_next_action_type" # e.g., output by planner
+  #       routes:
+  #         - case_value: "perform_data_query"
+  #           to_id: "core_sql_query_workflow" # Delegate to a workflow
+  #           # Map orchestrator agent's output to workflow's input
+  #           input_remapping: { "user_query": "state.current_task_description" }
+  #         - case_value: "perform_analysis"
+  #           to_id: "python_code_analysis_tool" # Delegate to a tool (which might be an agent)
+  #           # input_remapping: { ... }
+  #       default_to_id: "__END__" # Or an error handling node/workflow
+
+  # Defines the final outputs of the entire system, mapped from the entry_point's outputs/state.
+  outputs:
+    - name: "system_final_response_to_user"
+      value_from_entry_point_state: "state.final_consolidated_answer" # Assumes the entry agent/workflow produces this
+    - name: "full_system_interaction_trace"
+      value_from_entry_point_state: "state.audit_trail.full_log"

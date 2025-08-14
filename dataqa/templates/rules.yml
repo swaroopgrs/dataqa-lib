@@ -1,0 +1,55 @@
+metadata<RESERVED>:
+  version: v1.01
+  updated_at: 2025/05/09
+
+rules<RESERVED>:
+  - module_name<RESERVED>: code_generator
+    module_type<RESERVED>: dataqa.components.llm.base_llm_component.BaseLLMComponent
+    rules<RESERVED>:
+      - name<RESERVED>: business_rule_trade_rules
+        instructions<RESERVED>: |
+          Business rules for Trade Table
+          - Deliquent account: ac_st not in ('NA','CURRENT') and derog_flag <> 1 and bal_final > 0
+          - Delinquency rate is the percentage of total outstanding balance that is originating from delinquent accounts.
+          - ALWAYS check that the accounts are either open accounts or closed accounts with balance for balance calculation. Unless the "QUESTION" specifies delinquent accounts.
+        tags<RESERVED>:
+          - trade
+        search_content<RESERVED>: ""
+      - name: business_rule_trade_origination_rules
+        instructions: |
+          Business rules for Trade & Origination Table
+          - When using the column state, always filter out the value 'Miss' before calculating the results
+          - If the "QUESTION" mentions just "Auto" or just "Chase Auto" use both "Auto Loan" and "Auto Lease" to filter on the products.
+        tags:
+          - trade
+          - origination
+        search_content: ""
+      - name: business_rule_deposit_rules
+        instructions: |
+          Business rules for Deposit Table
+          - Always multiply cash_buffer with 30 when using it
+        tags:
+          - deposit
+        search_content: ""
+      - name: business_rule_common_business_rules
+        instructions: |
+          Business rules for All Tables
+          - If the "QUESTION" asks for the current date or till now use the current month and year as the end date
+        tags:
+          - trade
+          - origination
+          - deposit
+        search_content: ""
+  - module_name: planner
+    module_type: dataqa.components.plan_execute.planner.Planner
+    rules:
+      - name: planner_general_rules
+        instructions: |
+          - Explain all the terms, entities, keywords, use this understanding to create the PLAN.
+          - Each TASK is small and concrete.
+          - When proposing TASKS - make sure that each TASK can be solved by available TOOLS.
+          - There should be no TASKS in the PLAN that cannot be solved by the TOOLS.
+          - DO NOT mention tools in the TASK - the TASK should be formulated in English, without mentioning specific tools.
+          - Ensure that each TASK is essential and contains all the necessary information, avoid any unnecessary TASKS.
+        tags: []
+        search_content: ""
