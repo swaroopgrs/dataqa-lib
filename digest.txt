@@ -84,6 +84,7 @@ Directory structure:
     │   ├── models.py
     │   ├── resource_manager.py
     │   ├── sql_executor.py
+    │   ├── storage.py
     │   └── __pycache__/
     ├── examples/
     │   └── cib_mp/
@@ -114,6 +115,9 @@ Directory structure:
     ├── scripts/
     │   ├── __init__.py
     │   └── azure_token.py
+    ├── services/
+    │   ├── __init__.py
+    │   └── storage.py
     ├── templates/
     │   ├── default_graph_config.yml
     │   ├── examples.yml
@@ -131,6 +135,7 @@ Directory structure:
     └── utils/
         ├── __init__.py
         ├── agent_util.py
+        ├── asset_formatter.py
         ├── component_utils.py
         ├── data_model_util.py
         ├── dataframe_utils.py
@@ -608,6 +613,8 @@ from dataqa.utils.agent_util import AgentResponseParser
 from dataqa.utils.langgraph_utils import CONFIGURABLE, DEBUG
 from dataqa.utils.prompt_utils import prompt_type
 from dataqa.utils.utils import cls_from_str
+from dataqa.components.resource_manager.resource_manager import ResourceManager
+from dataqa.services.storage import LocalFileDataSource
 
 
 class CWDState(PlanExecuteState):
@@ -673,34 +680,40 @@ class CWDAgent(Agent):
     ]
 
     def __init__(
-            self, 
-            memory: Memory, 
-            config: CwdAgentDefinitionConfig
+        self,
+        memory: Memory,
+        config: CwdAgentDefinitionConfig,
+        llms: Dict[str, BaseLLM] = None,
+        resource_manager: ResourceManager = None,
+        sql_executor: InMemoryCodeExecutor = None,
     ):
         self.config = config
-        self.llms = {}
 
-        if hasattr(config, "llm_configs") and config.llm_configs:
-            llm_configs_map = {}
-            for name, llm_config in config.llm_configs.items():
-                llm_cls = cls_from_str(llm_config.type)
-                llm_instance_config_model = llm_cls.config_base_model
-                llm_specific_config_obj = llm_instance_config_model(
-                    **llm_config.config
-                )
-                llm_configs_map[name] = llm_cls(config=llm_specific_config_obj)
+        # 1. Use injected components or create them locally (fallback)
+        if llms:
+            self.llms = llms
+        else:
+            # Fallback to creating LLMs from config (local mode)
+            self.llms = {}
+            if hasattr(config, "llm_configs") and config.llm_configs:
+                llm_configs_map = {}
+                for name, llm_config in config.llm_configs.items():
+                    llm_cls = cls_from_str(llm_config.type)
+                    llm_instance_config_model = llm_cls.config_base_model
+                    llm_specific_config_obj = llm_instance_config_model(**llm_config.config)
+                    llm_configs_map[name] = llm_cls(config=llm_specific_config_obj)
 
-            if isinstance(config.llm, CwdAgentLLMReferences):
-                for component in self.components:
-                    llm_name = config.llm.get_component_llm_name(component)
-                    if llm_name in llm_configs_map:
-                        self.llms[component] = llm_configs_map[llm_name]
-                    else:
-                        raise ValueError(
-                            f"LLM configuration '{llm_name}' referenced by '{component}' not found in llm_configs"
-                        )
+                if isinstance(config.llm, CwdAgentLLMReferences):
+                    for component in self.components:
+                        llm_name = config.llm.get_component_llm_name(component)
+                        if llm_name in llm_configs_map:
+                            self.llms[component] = llm_configs_map[llm_name]
+                        else:
+                            raise ValueError(f"LLM config '{llm_name}' not found")
+            else:
+                raise ValueError("No LLM configurations provided either in config or via injection.")
 
-        # load tools and descriptions
+        # 2. Load tools and descriptions (standard setup)
         (
             self.analytics_tools,
             self.analytics_worker_short_tool_description,
@@ -713,6 +726,7 @@ class CWDAgent(Agent):
             self.plot_worker_long_tool_description,
         ) = get_plot_tools_and_descriptions(memory)
 
+        # 3. Instantiate prompt templates (standard setup)
         self.processed_prompts = self._instantiate_prompt_template(
             analytics_worker_short_tool_description=self.analytics_worker_short_tool_description,
             analytics_worker_long_tool_description=self.analytics_worker_long_tool_description,
@@ -720,34 +734,37 @@ class CWDAgent(Agent):
             plot_worker_long_tool_description=self.plot_worker_long_tool_description,
         )
 
-        self.retrieval_sql_exec_config = InMemoryCodeExecutorConfig(
-            name=f"{config.agent_name}_in_memory",
-            component_type="in_memory_executor",
-            data_files=config.workers.retrieval_worker.sql_execution_config.data_files,
-            input=[dict(name="code", type="str")],
-            backend=config.workers.retrieval_worker.sql_execution_config.backend,
-        )
+        # 4. Use injected resource manager or create one locally
+        if resource_manager:
+            self.resource_manager = resource_manager
+        else:
+            # Fallback to creating ResourceManager from config (local mode)
+            resource_manager_cfg_dict = config.resource_manager_config.config
+            asset_dir = resource_manager_cfg_dict.get('asset_directory')
+            if not asset_dir:
+                raise ValueError("`asset_directory` not found in resource_manager_config.config for local mode.")
+            
+            local_data_source = LocalFileDataSource(asset_directory=asset_dir)
+            self.resource_manager = ResourceManager(data_source=local_data_source)
 
-        resource_manager_cls = cls_from_str(config.resource_manager_config.type)
-        self.resource_manager = resource_manager_cls(
-            config=config.resource_manager_config.config
-        )
+        # 5. Store the SQL executor (injected or None) to be passed to the worker
+        self.sql_executor = sql_executor
 
+        # 6. Instantiate the retriever (standard setup)
         self.retriever = cls_from_str(config.retriever_config.type)(
             config=config.retriever_config.config,
             resource_manager=self.resource_manager,
         )
-
         self.retriever.set_input_mapping(dict(query="query"))
         retriever_output = {}
         for field in self.retriever.output_base_model.__fields__:
-            if field.split("_")[-1] in ["rule", "example", "schema"]:
-                retriever_output[field] = field
+            retriever_output[field] = field
         self.retriever.output_mapping = retriever_output
 
+        # 7. Finalize initialization by calling the parent constructor
         super().__init__(
             memory=memory, llm=self.llms["default"]
-        )  # Use default LLM for the base agent
+        )
 
     def _process_prompts_from_config(
         self, prompts_config: CwdAgentPromptsConfig, schema: str
@@ -874,9 +891,14 @@ class CWDAgent(Agent):
         config = RetrievalWorkerConfig(
             name="retrieval_worker",
             sql_prompt=self.processed_prompts["sql_generator_prompt"],
-            sql_execution_config=self.retrieval_sql_exec_config,
+            sql_execution_config=self.config.workers.retrieval_worker.sql_execution_config,
         )
-        worker = RetrievalWorker(memory=memory, llm=llm, config=config)
+        worker = RetrievalWorker(
+            memory=memory, 
+            llm=llm, 
+            config=config, 
+            sql_executor=self.sql_executor
+        )
         worker.set_input_mapping(
             dict(
                 plan="plan",
@@ -5539,16 +5561,25 @@ class SQLExecutor(InMemoryCodeExecutor):
             response = SQLExecutorOutput(sql=sql, error=error_msg)
             return {"sql_executor_output": response}
         try:
-            if self.config.backend == "duckdb":
-                result_df = self.connection.execute(sql).fetchdf()
-            elif self.config.backend == "pyspark":
-                result_df = self.spark.sql(sql).toPandas()
+            # We call the generic 'run' method which is implemented by both
+            # the local InMemoryCodeExecutor and our DBCSQLExecutor adapter.
+            # This requires a small change to how we pass input.
+            from pydantic import create_model
+            InputModel = create_model('SqlInput', code=(str, ...))
+            executor_output = await self.run(InputModel(code=sql), config=config)
+
+            if executor_output.error:
+                 raise Exception(executor_output.error)
+            
+            # The output dataframe is a JSON string, need to deserialize
+            import pandas as pd
+            import json
+            result_df = pd.DataFrame(json.loads(executor_output.dataframe[0]))
             self.memory.put_dataframe(name=df_name, df=result_df, config=config)
             response = SQLExecutorOutput(sql=sql, dataframe=df_name)
         except Exception as e:
             response = SQLExecutorOutput(sql=sql, error=repr(e))
         return {"sql_executor_output": response}
-
 
 class RetrievalWorkerConfig(ComponentConfig):
     sql_prompt: prompt_type
@@ -5584,11 +5615,17 @@ class RetrievalWorker(Component):
         memory: Memory,
         llm: AzureOpenAI,
         config: Union[RetrievalWorkerConfig, Dict] = None,
+        sql_executor: InMemoryCodeExecutor = None,
         **kwargs,
     ):
         super().__init__(config=config, **kwargs)
         self.llm = llm
         self.memory = memory
+        if sql_executor:
+            self.sql_executor = sql_executor
+        else:
+            self.sql_executor = SQLExecutor(config=self.config.sql_execution_config, memory=memory)
+
         self.workflow = self.build_workflow(memory=self.memory, llm=self.llm)
 
     def build_workflow(self, memory: Memory, llm: AzureOpenAI) -> CompiledGraph:
@@ -5600,7 +5637,7 @@ class RetrievalWorker(Component):
         )
         workflow.add_node(
             "sql_executor",
-            SQLExecutor(config=self.config.sql_execution_config, memory=memory),
+            self.sql_executor,
         )
 
         workflow.add_edge(START, "sql_generator")
@@ -6113,302 +6150,96 @@ File: components/resource_manager/__init__.py
 File: components/resource_manager/resource_manager.py
 ================================================
 import logging
-import pickle
-import time
-from abc import ABC, abstractmethod
-from typing import Dict, List, Literal, Optional, Union
+from typing import Dict, List, Optional, Union
 
-import yaml
 from pydantic import BaseModel
 
 from dataqa.data_models.asset_models import (
-    CategoricalValue,
+    DatabaseSchema,
     Example,
-    Resource,
+    Examples,
     ResourceType,
     Rule,
+    Rules,
     TableSchema,
-    VectorSchema,
 )
-from dataqa.utils.ingestion import SchemaUtil
+from dataqa.services.storage import BaseDataSource
 
 logger = logging.getLogger(__name__)
 
 
-class ExampleContentFormatter(str):
-    """
-    Custom formatter for example content that handles optional reasoning field.
-    Formats examples with Q&A structure, conditionally including reasoning section.
-    """
-    
-    def format(self, **kwargs):
-        """
-        Format example content with conditional reasoning section.
-        
-        Args:
-            **kwargs: Dictionary containing question, code, and optional reasoning
-            
-        Returns:
-            Formatted string with Q&A structure and optional reasoning
-        """
-        question = kwargs.get("question", "")
-        code = kwargs.get("code", "")
-        reasoning = kwargs.get("reasoning")
-        
-        # Base format
-        result = f"Q: {question}\nA: \n"
-        
-        # Add reasoning section only if reasoning is provided and not empty
-        if reasoning is not None and str(reasoning).strip():
-            result += f"<reasoning>\n{reasoning}\n</reasoning>\n"
-        
-        # Add SQL section
-        result += f"<sql>\n{code}\n</sql>"
-        
-        return result
-
-
-class ResourceConfig(BaseModel):
-    type: ResourceType
-    file_path: str
-    api_url: str
-
-
 class ResourceManagerConfig(BaseModel):
-    source: Literal["yaml", "api"]
-    resources: List[ResourceConfig]
+    asset_directory: str
 
 
-class BaseResourceManager(ABC):
-    @abstractmethod
-    def load(self):
-        pass
+class ResourceManager:
+    rules: Optional[Rules] = None
+    schema: Optional[DatabaseSchema] = None
+    examples: Optional[Examples] = None
 
-    @abstractmethod
-    def get_resource(
-        self, resource_type: ResourceType, module_name: str
-    ) -> Optional[Resource]:
-        pass
-
-
-class ResourceManager(BaseResourceManager):
-    resources: Dict[str, Resource] = {}
-    config_base_model = ResourceManagerConfig
-
-    def __init__(self, config: Union[ResourceManagerConfig, Dict]):
+    def __init__(self, data_source: BaseDataSource):
         """
-        Initialize the resource manager.
+        Initialize the resource manager with a data source.
         
         Args:
-           config (Union[ResourceManagerConfig, Dict]): Either a ResourceManagerConfig object or a dictionary.
-        
-        Returns:
-           None
-
+           data_source: An object that implements the BaseDataSource interface
+                        for reading raw asset data.
         """
-        self.config = config
-        if isinstance(config, Dict):
-            self.config = self.config_base_model(**config)
-        self.raw_data = {}
-        self.resources = self.load()
+        self.data_source = data_source
+        self.load()
 
     def load(self):
-        resources = {}
-        for resource_config in self.config.resources:
-            if self.config.source == "yaml":
-                resource_data_all = yaml.safe_load(
-                    open(resource_config.file_path, "r")
-                )
-                if resource_config.type == ResourceType.Schema:
-                    resource_data = {
-                        "type": resource_config.type,
-                        "module_name": "",
-                        "module_type": "",
-                        "formatter": "",
-                    }
-                    parsed_data_list = []
-                    # Parse flattened tables list directly (new format)
-                    tables_data = resource_data_all["tables"]
-                    for table_data in tables_data:
-                        parsed_data_list.append(TableSchema(**table_data))
-                    
-
-                    
-                    resource_data["data"] = parsed_data_list
-                    resource = Resource(**resource_data)
-                    resources[
-                        f"{resource_config.type.value}:{resource.module_name}"
-                    ] = resource
-                elif resource_config.type == ResourceType.Rule:
-                    # Parse flattened rules list directly (new format)
-                    resource_data = {
-                        "type": resource_config.type,
-                        "module_name": "",
-                        "module_type": "",
-                        "formatter": "{instructions}",  # Default formatter for rules
-                    }
-                    parsed_data_list = []
-                    rules_data = resource_data_all["rules"]
-                    for rule_data in rules_data:
-                        parsed_data_list.append(Rule(**rule_data))
-                    resource_data["data"] = parsed_data_list
-                    resource = Resource(**resource_data)
-                    resources[
-                        f"{resource_config.type.value}:{resource.module_name}"
-                    ] = resource
-                elif resource_config.type == ResourceType.Example:
-                    # Parse flattened examples list directly (new format)
-                    resource_data = {
-                        "type": resource_config.type,
-                        "module_name": "",
-                        "module_type": "",
-                        "formatter": ExampleContentFormatter(),  # Custom formatter that handles optional reasoning
-                    }
-                    parsed_data_list = []
-                    examples_data = resource_data_all["examples"]
-                    for example_data in examples_data:
-                        parsed_data_list.append(Example(**example_data))
-                    resource_data["data"] = parsed_data_list
-                    resource = Resource(**resource_data)
-                    resources[
-                        f"{resource_config.type.value}:{resource.module_name}"
-                    ] = resource
-                # Store raw data with appropriate key format
-                if resource_config.type in [ResourceType.Schema, ResourceType.Rule, ResourceType.Example]:
-                    # For schema, rules, and examples, use empty module_name since they're not module-specific in new format
-                    self.raw_data[
-                        f"resource:{resource_config.type.value}:"
-                    ] = resource_data_all
-                else:
-                    self.raw_data[
-                        f"resource:{resource_config.type.value}:{resource.module_name}"
-                    ] = resource_data_all
-        return resources
-
-    def load_schema_embedding(self, data_file_path: str) -> None:
         """
-        Load schema embedding from file.
-
-        Args:
-           data_file_path (str): Path to the file that contains the schema embedding.
-        
-        Returns:
-           None
-        
-        This function loads the schema embedding from the given file path.
-        If the file path is None, it loads the schema embedding from the raw data.
-        The schema embedding is expected to be in either yaml or pkl format.
-        After loading the schema embedding, it is converted to a list of VectorSchema objects.
-        The list is then added to the data qa resources as a Resource object.
-        The resource is then added to the resources dictionary.
-
+        Load all resources using the provided data source.
+        The parsing logic is here and is NOT duplicated.
         """
-        start_time = time.time()
-        print(f"Start loading schema embedding from {data_file_path}")
-        if data_file_path is not None:
-            if data_file_path.endswith(".yml"):
-                schema_embedding = yaml.safe_load(open(data_file_path, "r"))
-            elif data_file_path.endswith(".pkl"):
-                schema_embedding = pickle.load(open(data_file_path, "rb"))
-        else:
-            schema_util = SchemaUtil()
-            schema_dict = self.raw_data[f"{ResourceType.Schema.value}:"]
-            schema_util.load_schema(
-                schema_dict, schema_file_path=None
-                )
-            schema_util.parse_schema()
-            schema_embedding = schema_util.parsed_schema_to_json()
+        try:
+            raw_rules = self.data_source.read_asset("rules.yml")
+            self.rules = Rules(**raw_rules)
+            logger.info(f"Loaded {len(self.rules.rules)} rules.")
+        except (FileNotFoundError, Exception) as e:
+            logger.warning(f"Could not load or parse rules.yml: {e}")
 
-        schema_embedding_list = []
-        for se in schema_embedding:
-            schema_embedding_list.append(VectorSchema(**se))
-        schema_embedding_resource = Resource(
-            data=schema_embedding_list,
-            type=ResourceType.VectorSchema,
-            module_name="",
-            module_type="",
-            formatter="",
-        )
-        self.resources[
-            f"{schema_embedding_resource.type.value}:{schema_embedding_resource.module_name}"
-        ] = schema_embedding_resource
-        load_time = time.time() - start_time
-        print(f"Load schema embedding: {load_time}")
+        try:
+            raw_schema = self.data_source.read_asset("schema.yml")
+            self.schema = DatabaseSchema(**raw_schema)
+            logger.info(f"Loaded {len(self.schema.tables)} tables into schema.")
+        except (FileNotFoundError, Exception) as e:
+            logger.warning(f"Could not load or parse schema.yml: {e}")
+
+        try:
+            raw_examples = self.data_source.read_asset("examples.yml")
+            self.examples = Examples(**raw_examples)
+            logger.info(f"Loaded {len(self.examples.examples)} examples.")
+        except (FileNotFoundError, Exception) as e:
+            logger.warning(f"Could not load or parse examples.yml: {e}")
 
     def get_resource(
         self, resource_type: ResourceType, module_name: str
-    ) -> Optional[Resource]:
+    ) -> List[Union[Rule, Example, TableSchema]]:
         """
-        Retrieves a resource of the specified type and module name.
-        For schema, rule, and example resources, filters data by module_name if specified.
-
-        Parameters:
-           resource_type (ResourceType): The type of the resource to retrieve.
-           module_name (str): The name of the module to retrieve.
-
-        Returns:
-           Optional[Resource]: The retrieved resource, or None if no resource of the specified type and module name is found.
+        Retrieves a list of resources, handling module-specific and global assets.
         """
-        if resource_type.value in ["schema", "vector_schema", "rule", "example"]:
-            resource_name = f"{resource_type.value}:"
-        else:
-            resource_name = f"{resource_type.value}:{module_name}"
-            
-        if resource_name not in self.resources:
-            return None
-            
-        base_resource = self.resources[resource_name]
+        if resource_type == ResourceType.Rule:
+            if not self.rules:
+                return []
+            return [
+                rule for rule in self.rules.rules
+                if rule.module_name == module_name or not rule.module_name
+            ]
+        elif resource_type == ResourceType.Example:
+            if not self.examples:
+                return []
+            return [
+                example for example in self.examples.examples
+                if example.module_name == module_name or not example.module_name
+            ]
+        elif resource_type == ResourceType.Schema:
+            if not self.schema:
+                return []
+            return self.schema.tables
         
-        # For schema and vector_schema, return the full resource (no module filtering)
-        if resource_type.value in ["schema", "vector_schema"]:
-            return base_resource
-            
-        # For rule and example resources, filter by module_name if specified
-        if resource_type.value in ["rule", "example"] and module_name:
-            # Filter data items that match the requested module_name OR have no/empty module_name (global)
-            filtered_data = []
-            for item in base_resource.data:
-                item_module = getattr(item, 'module_name', '') if hasattr(item, 'module_name') else ''
-                # Include item if:
-                # 1. It matches the requested module_name exactly, OR
-                # 2. It has no module_name or empty module_name (making it global/available to all modules)
-                if item_module == module_name or not item_module:
-                    filtered_data.append(item)
-            
-            # If no matching items found, return None
-            if not filtered_data:
-                return None
-                
-            # Create a new Resource with filtered data
-            filtered_resource = Resource(
-                type=base_resource.type,
-                module_name=module_name,  # Set the specific module name
-                module_type=base_resource.module_type,
-                formatter=base_resource.formatter,
-                data=filtered_data
-            )
-            return filtered_resource
-        
-        # For other cases or when module_name is empty, return the full resource
-        return base_resource
-
-
-if __name__ == "__main__":
-    config = yaml.safe_load(
-        open("examples/ccb_risk/config/config_ccb_risk.yml", "r")
-    )
-    resource_manager = ResourceManager(
-        config["components"][4]["params"]["config"]
-    )
-    resource_manager.load_schema_embedding(
-        data_file_path="examples/ccb_risk/data/schema_embedding.pkl"
-    )
-    resource_to_retrieve = resource_manager.get_resource(
-       resource_type=ResourceType.Rule,
-       module_name="code_generator",
-    )
-    print("Resources loaded:")
-    print(resource_manager.resources.keys())
+        return []
 
 
 
@@ -6423,7 +6254,6 @@ File: components/retriever/base_retriever.py
 ================================================
 import itertools
 import logging
-import time
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any, Dict, List, Union
@@ -6435,16 +6265,17 @@ from dataqa.components.base_component import (
     ComponentConfig,
 )
 from dataqa.components.resource_manager.resource_manager import (
-    Resource,
     ResourceManager,
+)
+from dataqa.data_models.asset_models import (
+    Example,
     ResourceType,
+    RetrievedAsset,
+    Rule,
+    TableSchema,
 )
-from dataqa.data_models.asset_models import RetrievedAsset
+from dataqa.utils import asset_formatter
 from dataqa.utils.data_model_util import create_base_model
-from dataqa.utils.schema_util import (
-    convert_table_schema_to_sql_str,
-    reconstruct_table_schema,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -6461,34 +6292,26 @@ class RetrieverInput(BaseModel):
 
 
 class RetrieverConfig(ComponentConfig):
-    resource_type: List[ResourceType] = Field(
-        description="Resource type. Values: rule, schema, example"
+    resource_types: List[ResourceType] = Field(
+        description="List of resource types to retrieve: rule, schema, example"
     )
-    module_name: List[str] = Field(
-        description="retrieve resource for this module name"
+    module_names: List[str] = Field(
+        description="List of module names to retrieve resources for."
     )
-    retrieval_method: RetrievalMethod = Field(
-        description="Retrieval algorithm or method"
-    )
+    retrieval_method: RetrievalMethod
     parameters: Dict[str, Any] = Field(
-        description="parameters of retriever component"
+        default_factory=dict, description="Parameters for the retriever component."
     )
-    # top_k: int = Field(default=5, description="Default number of top assets to retrieve")
 
 
 class RetrieverOutput(BaseModel):
     output_data: List[RetrievedAsset] = Field(
         description="list of retrieved assets"
     )
-    # output_text: str = Field(description="Text string to be inserted to the prompt")
-    # retrieval_details: Dict[str, Any] = Field(default_factory=dict, description="Could contain retrieval details")
-    # component_type: str = Field(description="Retriever Component Type")
 
 
 class Retriever(Component, ABC):
     config: RetrieverConfig
-    retrieval_method: RetrievalMethod
-    parameters: Dict[str, Any]
 
     def __init__(self, config: RetrieverConfig):
         super().__init__(config)
@@ -6497,7 +6320,7 @@ class Retriever(Component, ABC):
 
     @abstractmethod
     def retrieve_assets(
-        self, query: Any, resource: Resource
+        self, query: Any, resources: List[Union[Rule, Example, TableSchema]], resource_type: ResourceType
     ) -> List[RetrievedAsset]:
         pass
 
@@ -6508,54 +6331,31 @@ class Retriever(Component, ABC):
 
     @staticmethod
     def prepare_output_string(
-        retrieved_asset: List[RetrievedAsset], resource: Resource
+        retrieved_assets: List[RetrievedAsset], resource_type: ResourceType
     ) -> str:
-        output_str_list = []
-        if resource.type.value == "vector_schema":
-            reconstructed_table = reconstruct_table_schema(
-                retrieved_asset, resource
-            )
-            schema_str = "\n".join(
-                [
-                    convert_table_schema_to_sql_str(t.dict())
-                    for t in reconstructed_table.data
-                ]
-            )
-            output_str_list.append(schema_str)
-        else:
-            for r in retrieved_asset:
-                if resource.type.value == "rule":
-                    output_str_list.append(
-                        resource.formatter.format(**r.content.dict())
-                    )
-                elif resource.type.value == "example":
-                    if isinstance(r.content.example, dict):
-                        output_str_list.append(
-                            resource.formatter.format(**r.content.example)
-                        )
-                    elif isinstance(r.content.example, str):
-                        output_str_list.append(r.content.example)
-                elif resource.type.value == "schema":
-                    schema_str = convert_table_schema_to_sql_str(
-                        r.content.dict()
-                    )
-                    output_str_list.append(schema_str)
-        output_str = "\n".join(output_str_list)
-        return output_str
+        """
+        Delegates formatting to the central AssetFormatter utility.
+        """
+        content_list = [asset.content for asset in retrieved_assets]
+
+        if resource_type == ResourceType.Rule:
+            return asset_formatter.format_rules_for_prompt(content_list)
+        elif resource_type == ResourceType.Example:
+            return asset_formatter.format_examples_for_prompt(content_list)
+        elif resource_type == ResourceType.Schema:
+            return asset_formatter.format_schema_for_prompt(content_list)
+        
+        return ""
 
     @staticmethod
     def create_output_config(
         resource_type_list: List[ResourceType],
         module_name_list: List[str],
-        resource_manager: ResourceManager,
     ) -> List[Dict]:
         output_config = []
         for resource_type, module_name in list(
             itertools.product(resource_type_list, module_name_list)
         ):
-            resource = resource_manager.get_resource(resource_type, module_name)
-            if resource is None:
-                continue
             output_config.append(
                 {
                     "name": Retriever.get_state_name(
@@ -6583,17 +6383,17 @@ class AllRetriever(Retriever):
         config: Union[Dict, RetrieverConfig],
         resource_manager: ResourceManager,
     ):
-        retriever_config = config
-        if isinstance(retriever_config, Dict):
+        if isinstance(config, Dict):
             retriever_config = RetrieverConfig.model_validate(config)
+        else:
+            retriever_config = config
         super().__init__(retriever_config)
         self.resource_manager = resource_manager
-        
+
         output_base_model_name = f"{self.config.name}_output"
         output_config = self.create_output_config(
-            self.config.resource_type,
-            self.config.module_name,
-            self.resource_manager,
+            self.config.resource_types,
+            self.config.module_names,
         )
         self.output_base_model = create_base_model(
             output_base_model_name, output_config, RetrieverOutput
@@ -6608,131 +6408,59 @@ class AllRetriever(Retriever):
         logger.info(f"Component Type: {self.component_type}")
         logger.info(f"Input BaseModel: {self.input_base_model.model_fields}")
         logger.info(f"Output BaseModel: {self.output_base_model.model_fields}")
-    
-    def prepare_input(self, state: Dict[str, Any]):
-        """
-        temporary, to be replaced by generic component input preparation function
-        :param state:
-        :return:
-        """
-        input_data = self.input_base_model.model_validate(state)
-        return input_data
 
     def retrieve_assets(
-        self, query: RetrieverInput, resource: Resource
+        self, query: RetrieverInput, resources: List[Union[Rule, Example, TableSchema]], resource_type: ResourceType
     ) -> List[RetrievedAsset]:
         """
-        :param query: RetrieverInput for tag retrieval method
-        :return: list of retrieved record
+        For AllRetriever, simply wrap all provided resources into RetrievedAsset objects.
         """
-        
         all_retrieved = []
-        for record in resource.data:
+        for record in resources:
             retrieved_record = {
-                "asset_type": resource.type,
+                "asset_type": resource_type.value,
                 "content": record,
-                "relevance_score": 1,
+                "relevance_score": 1.0,
             }
             retrieved_asset = RetrievedAsset.model_validate(retrieved_record)
             all_retrieved.append(retrieved_asset)
-        logger.info(
-            f"With input {query}, retrieved {len(all_retrieved)} records of {resource.type}."
-        )
         return all_retrieved
 
     async def run(
             self, input_data: RetrieverInput = None, config: Dict = {}
     ) -> RetrieverOutput:
         """
-        TODO: filter fields of retrieved asset to base model of component output
-        :param query: RetrieverInput for tag retrieval method
-        :return: output base model for retriever component
+        Iterates through configured resource types and modules, retrieves all assets,
+        and formats them into strings for the pipeline state.
         """
         resource_type_module_combinations = list(
             itertools.product(
-                self.config.resource_type, self.config.module_name
+                self.config.resource_types, self.config.module_names
             )
         )
-        component_output = {
-            "component_name": self.config.name,
-            "component_type": self.component_type,
-        }
+        component_output = {}
         retrieved_asset_all = []
-        start_time = time.time()
+
         for resource_type, module_name in resource_type_module_combinations:
-            resource = self.resource_manager.get_resource(
+            resources = self.resource_manager.get_resource(
                 resource_type, module_name
             )
-            if resource is None:
+            
+            state_name = self.get_state_name(resource_type, module_name)
+            if not resources:
+                component_output[state_name] = ""
                 continue
-            retrieved_asset = self.retrieve_assets(input_data, resource)
 
-            retrieved_asset_all.extend(retrieved_asset)
-            output_str = self.prepare_output_string(retrieved_asset, resource)
-            if (
-                "token_limit" in self.config.parameters
-                and len(output_str.split())
-                > self.config.parameters["token_limit"]
-            ): # TODO: implement token counting
-                logger.warning(
-                    f"Output of {self.config.name} component is too long; trigger vector based retrieval"
-                )
-            # TODO: trigger vector retrieval
-            component_output[
-                self.get_state_name(resource_type, module_name)
-            ] = output_str
-        retrieve_time = time.time() - start_time
+            retrieved_assets = self.retrieve_assets(input_data, resources, resource_type)
+            retrieved_asset_all.extend(retrieved_assets)
 
-        component_output["metadata"] = {"time": retrieve_time}
+            output_str = self.prepare_output_string(retrieved_assets, resource_type)
+
+            component_output[state_name] = output_str
+
         component_output["output_data"] = retrieved_asset_all
-
+        
         return self.output_base_model.model_validate(component_output)
-
-
-def test_all_retriever(use_case: str = "cdao_dia"):
-    if use_case == "cdao_dia":
-        config = yaml.safe_load(
-            open("examples/cdao_dia/agent/config_graph_building.yml", "r")
-        )
-        my_resource_manager = ResourceManager(
-            config["components"][3]["params"]["config"]
-        )
-        mock_state = {"rewritten_query": ""}
-        component_config = config["components"][7]
-    elif use_case == "ccb_risk":
-        config = yaml.safe_load(
-            open("examples/ccb_risk/config/config_ccb_risk.yml", "r")
-        )
-        my_resource_manager = ResourceManager(
-            config["components"][4]["params"]["config"]
-        )
-        my_resource_manager.load_schema_embedding(
-            data_file_path="examples/ccb_risk/data/schema_embedding.pkl"
-        )
-        mock_state = {
-            "rewritten_query": "How have median cash buffers trended for Chase deposit customers since 2019?"
-        }
-        component_config = config["components"][7]
-    retriever_node_config = component_config["params"]
-    r_config = {"name": component_config["name"]}
-    r_config.update(retriever_node_config["config"])
-    r_input = retriever_node_config["input_config"]
-    r_output = retriever_node_config["output_config"]
-
-    all_retriever = AllRetriever(r_config, my_resource_manager, r_input, r_output)
-    retriever_input = all_retriever.prepare_input(mock_state)
-    my_retrieved_asset = asyncio.run(all_retriever.run(retriever_input))
-    print("*" * 50)
-    print(f"Component {all_retriever.config.name} of type {all_retriever.component_type} created.")
-    print(f"Retrieved {len(my_retrieved_asset.output_data)} records in {my_retrieved_asset.metadata['time']:.2f} seconds")
-    print("*"*50 + "\n" + my_retrieved_asset.dict()[r_output[0]]["name"])
-
-
-if __name__ == "__main__":
-    import asyncio
-    import yaml
-    test_all_retriever(use_case="ccb_risk")
-    test_all_retriever(use_case="cdao_dia")
 
 
 ================================================
@@ -7229,7 +6957,7 @@ File: data_models/__init__.py
 File: data_models/asset_models.py
 ================================================
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -7262,8 +6990,8 @@ class ColumnSchema(BaseModel):
     name: str
     type: str
     description: Optional[str] = None
-    values: Optional[List[CategoricalValue]] = None
-    example_values: Optional[List[Any]] = None
+    values: List[CategoricalValue] = Field(default_factory=list)
+    example_values: List[Any] = Field(default_factory=list)
     distinct_count: Optional[int] = None
     null_count: Optional[int] = None
     is_primary_key: Optional[bool] = None
@@ -7275,9 +7003,9 @@ class TableSchema(BaseModel):
     description: Optional[str] = None
     columns: List[ColumnSchema]
     row_count: Optional[int] = None
-    tags: Optional[List[str]] = None
-    primary_keys: Optional[List[str]] = None
-    foreign_keys: Optional[List[ForeignKey]] = None
+    tags: List[str] = Field(default_factory=list)
+    primary_keys: List[str] = Field(default_factory=list)
+    foreign_keys: List[ForeignKey] = Field(default_factory=list)
 
 
 class DatabaseSchema(BaseModel):
@@ -7288,7 +7016,7 @@ class Rule(BaseModel):
     rule_name: str
     module_name: Optional[str] = None
     instructions: str
-    tags: Optional[List[str]] = None
+    tags: List[str] = Field(default_factory=list)
     search_content: Optional[str] = None
 
 
@@ -7306,7 +7034,7 @@ class Example(BaseModel):
     query: str
     module_name: Optional[str] = None
     example: ExampleContent
-    tags: Optional[List[str]] = None
+    tags: List[str] = Field(default_factory=list)
     search_content: Optional[str] = None
 
 
@@ -7314,15 +7042,9 @@ class Examples(BaseModel):
     examples: List[Example]
 
 
-class KnowledgeAssets(BaseModel):
-    rules: Optional[Rules] = None
-    schema: Optional[DatabaseSchema] = None
-    examples: Optional[Examples] = None
-
-
 class VectorSchema(BaseModel):
     embedding_vector: List[float]
-    search_content: str 
+    search_content: str
     table_description: str
     table_name: str
     tags: List[Any]
@@ -7334,14 +7056,6 @@ class VectorSchema(BaseModel):
     value_description: str
 
 
-class Resource(BaseModel):
-    data: List[Union[Rule, Example, TableSchema, VectorSchema]]
-    type: ResourceType
-    module_name: str
-    module_type: str
-    formatter: str
-
-
 class RetrievedAsset(BaseModel):
     """
     Data model for a retrieved knowledge asset at record level.
@@ -7351,7 +7065,7 @@ class RetrievedAsset(BaseModel):
         description="Type of the asset (e.g., 'schema', 'rule', 'example')"
     )
     content: Any = Field(
-        description="Content of the retrieved asset (e.g., schema definition, rule text)"
+        description="Content of the retrieved asset (e.g., a Rule, Example, or TableSchema object)"
     )
     metadata: Dict[str, Any] = Field(
         default_factory=dict,
@@ -7367,829 +7081,207 @@ class RetrievedAsset(BaseModel):
 
 
 
-
 ================================================
 File: dbc/__init__.py
 ================================================
-"""
-DBC Service Integration Package
 
-This package provides integration with the DatabaseConnect (DBC) service,
-enabling the DataQA library to work through DBC's callable functions
-instead of direct client connections.
-"""
-
-from dataqa.dbc.client import DBCClient
-from dataqa.dbc.models import (
-    ConversationTurn,
-    DBCRequest,
-    DBCResponse,
-    StepResponse,
-    DBCClientConfig,
-)
-from dataqa.dbc.errors import DBCCallableError, DBCClientError
-from dataqa.dbc.resource_manager import DBCResourceManager
-from dataqa.dbc.sql_executor import DBCSQLExecutor, DBCSQLExecutorConfig
-
-__all__ = [
-    "DBCClient",
-    "ConversationTurn",
-    "DBCRequest", 
-    "DBCResponse",
-    "StepResponse",
-    "DBCClientConfig",
-    "DBCCallableError",
-    "DBCClientError",
-    "DBCResourceManager",
-    "DBCSQLExecutor",
-    "DBCSQLExecutorConfig",
-]
 
 
 ================================================
 File: dbc/client.py
 ================================================
-"""
-DBC Client Implementation
-
-Main client interface for DBC service integration with DataQA library.
-Provides a simple process_query interface that encapsulates all DBC-specific logic.
-"""
-
 import asyncio
-import logging
-import pickle
-from typing import Callable, Dict, List, Optional, Union
-
+import uuid
+from typing import Callable, Dict
 import pandas as pd
-from langchain_core.runnables.config import RunnableConfig
+import yaml
 
-from dataqa.agent.cwd_agent.config import CwdAgentDefinitionConfig
-from dataqa.agent.cwd_agent.cwd_agent import CWDAgent, CWDState
-from dataqa.dbc.errors import DBCCallableError, DBCClientError
-from dataqa.dbc.llm import DBCLLM, DBCLLMConfig
-from dataqa.dbc.models import (
-    ConversationTurn,
-    DBCClientConfig,
-    DBCRequest,
-    DBCResponse,
-    StepResponse,
-)
-from dataqa.dbc.resource_manager import DBCResourceManager
-from dataqa.dbc.sql_executor import DBCSQLExecutor, DBCSQLExecutorConfig
+from dataqa.agent.cwd_agent.cwd_agent import CWDAgent, CWDState, CwdAgentDefinitionConfig
+from dataqa.dbc.llm import DBCLLMAdapter
+from dataqa.dbc.models import DBCRequest, DBCResponse, StepResponse
+from dataqa.dbc.sql_executor import DBCSQLExecutor
+from dataqa.dbc.storage import DBCDataSource
 from dataqa.memory import Memory
+from dataqa.utils.agent_util import AgentResponseParser
 from dataqa.utils.langgraph_utils import CONFIGURABLE, THREAD_ID
-
-logger = logging.getLogger(__name__)
+from dataqa.components.resource_manager.resource_manager import ResourceManager
 
 
 class DBCClient:
     """
     Main client interface for DBC service integration.
-    
-    This class provides a simple process_query interface that encapsulates all
-    DBC-specific logic and coordinates between DataQA components and DBC callable functions.
     """
-    
     def __init__(
         self,
-        config_id: str,
-        tenant_id: str,
         llm_callable: Callable,
         s3_callable: Callable,
         sql_callable: Callable,
-        agent_config_path: str = "default_cwd_agent_config.yml",
-        **kwargs
+        agent_config: Dict,
+        asset_s3_prefix: str,
+        data_s3_prefix: str,
     ):
-        """
-        Initialize DBC Client with callable functions and configuration.
-        
-        Args:
-            config_id: Configuration identifier for the DBC service
-            tenant_id: Tenant identifier for multi-tenant support
-            llm_callable: Callable function for LLM operations
-            s3_callable: Callable function for S3 operations
-            sql_callable: Callable function for SQL execution
-            agent_config_path: Path to CWDAgent configuration file
-            **kwargs: Additional configuration parameters
-        """
-        self.config_id = config_id
-        self.tenant_id = tenant_id
         self.llm_callable = llm_callable
         self.s3_callable = s3_callable
         self.sql_callable = sql_callable
-        self.agent_config_path = agent_config_path
-        
-        # Initialize DBC components
-        self._initialize_dbc_components()
-        
-        # Initialize CWDAgent (will be done lazily)
-        self._cwd_agent = None
-        self._memory = None
-        
-        logger.info(f"DBCClient initialized for config_id={config_id}, tenant_id={tenant_id}")
+        self.agent_config_dict = agent_config
+        self.asset_s3_prefix = asset_s3_prefix
+        self.data_s3_prefix = data_s3_prefix
 
-    def _initialize_dbc_components(self):
-        """Initialize DBC-specific components with callable functions."""
-        try:
-            # Initialize DBC Resource Manager
-            self.resource_manager = DBCResourceManager(
-                s3_callable=self.s3_callable,
-                config_id=self.config_id,
-                tenant_id=self.tenant_id
-            )
-            
-            # Initialize DBC LLM
-            llm_config = DBCLLMConfig(
-                model=None,  # DBC callable handles model selection
-                with_structured_output=False,
-                timeout=300.0
-            )
-            self.llm = DBCLLM(
-                llm_callable=self.llm_callable,
-                config=llm_config
-            )
-            
-            # Initialize DBC SQL Executor
-            sql_executor_config = DBCSQLExecutorConfig(
-                name="dbc_sql_executor",
-                sql_callable=self.sql_callable
-            )
-            self.sql_executor = DBCSQLExecutor(
-                config=sql_executor_config,
-                sql_callable=self.sql_callable
-            )
-            
-            logger.info("DBC components initialized successfully")
-            
-        except Exception as e:
-            error_msg = f"Failed to initialize DBC components: {str(e)}"
-            logger.error(error_msg)
-            raise DBCClientError("initialization", error_msg) from e
-
-    def _get_memory(self) -> Memory:
-        """Get or create Memory instance."""
-        if self._memory is None:
-            self._memory = Memory()
-        return self._memory
-
-    def _initialize_cwd_agent(self) -> CWDAgent:
-        """Initialize CWDAgent with DBC components."""
-        if self._cwd_agent is not None:
-            return self._cwd_agent
-            
-        try:
-            memory = self._get_memory()
-            
-            # Create a minimal CWDAgent configuration for DBC integration
-            # This is a simplified config - in production, this should be loaded from a file
-            from dataqa.agent.cwd_agent.config import (
-                CwdAgentLLMReferences,
-                CwdAgentWorkersModulesConfig,
-                RetrievalWorkerConfig,
-                InMemorySqlExecutorConfig,
-                LLMSelectionConfig,
-                ResourceManagerConfig,
-                RetrieverSelectionConfig
-            )
-            
-            agent_config = CwdAgentDefinitionConfig(
-                agent_name="DBC_CWDAgent",
-                use_case_name="DBC Integration",
-                use_case_description="DataQA integration through DBC service",
-                llm_configs={
-                    "default": LLMSelectionConfig(
-                        type="dataqa.dbc.llm.DBCLLM",
-                        config={
-                            "model": None,
-                            "with_structured_output": False,
-                            "timeout": 300.0
-                        }
-                    )
-                },
-                llm=CwdAgentLLMReferences(
-                    default="default"
-                ),
-                resource_manager_config=ResourceManagerConfig(
-                    type="dataqa.dbc.resource_manager.DBCResourceManager",
-                    config={
-                        "config_id": self.config_id,
-                        "tenant_id": self.tenant_id
-                    }
-                ),
-                retriever_config=RetrieverSelectionConfig(
-                    type="dataqa.components.retriever.base_retriever.AllRetriever",
-                    config={
-                        "name": "all_retriever",
-                        "retriever_method": "all",
-                        "resource_types": ["rule", "schema", "example"],
-                        "module_name": ["planner", "replanner", "retrieval_worker", "analytics_worker", "plot_worker"],
-                        "parameters": {"k": 10}
-                    }
-                ),
-                workers=CwdAgentWorkersModulesConfig(
-                    retrieval_worker=RetrievalWorkerConfig(
-                        sql_execution_config=InMemorySqlExecutorConfig(
-                            data_files=[],
-                            backend="duckdb"
-                        )
-                    )
-                ),
-                max_tasks=10,
-                timeout=300
-            )
-            
-            # Create CWDAgent instance
-            self._cwd_agent = CWDAgent(memory=memory, config=agent_config)
-            
-            # Override the agent's components with our DBC implementations
-            self._cwd_agent.llms["default"] = self.llm
-            self._cwd_agent.resource_manager = self.resource_manager
-            
-            # Update the retriever to use our DBC resource manager
-            if hasattr(self._cwd_agent, 'retriever'):
-                self._cwd_agent.retriever.resource_manager = self.resource_manager
-            
-            logger.info("CWDAgent initialized with DBC components")
-            return self._cwd_agent
-            
-        except Exception as e:
-            error_msg = f"Failed to initialize CWDAgent: {str(e)}"
-            logger.error(error_msg)
-            raise DBCClientError("cwd_agent_initialization", error_msg) from e
-
-    async def _reconstruct_conversation_history(
-        self, 
-        conversation_history: List[ConversationTurn],
-        config: RunnableConfig
-    ) -> None:
+    async def process_query(self, request: DBCRequest) -> DBCResponse:
         """
-        Reconstruct conversation history by loading dataframes from S3.
-        
-        Args:
-            conversation_history: List of previous conversation turns
-            config: LangGraph configuration for memory management
+        Main entry point to process a query from the DBC service.
         """
-        try:
-            memory = self._get_memory()
-            
-            for turn in conversation_history:
-                # Load dataframes from S3 paths and add to memory
-                for df_s3_path in turn.output_df_names:
-                    try:
-                        # Extract dataframe name from S3 path (last part without extension)
-                        df_name = df_s3_path.split('/')[-1].replace('.pkl', '').replace('.parquet', '')
-                        
-                        # Load dataframe from S3
-                        df_data = self.resource_manager.load_dataframe_from_s3(df_s3_path)
-                        
-                        # Deserialize dataframe (assuming pickle format)
-                        if df_s3_path.endswith('.pkl'):
-                            df = pickle.loads(df_data)
-                        else:
-                            # For other formats, try to read as parquet
-                            import io
-                            df = pd.read_parquet(io.BytesIO(df_data))
-                        
-                        # Add to memory
-                        memory.put_dataframe(df_name, df, config)
-                        
-                        logger.debug(f"Loaded dataframe {df_name} from S3 path {df_s3_path}")
-                        
-                    except Exception as e:
-                        logger.warning(f"Failed to load dataframe from {df_s3_path}: {str(e)}")
-                        continue
-                        
-            logger.info(f"Reconstructed conversation history with {len(conversation_history)} turns")
-            
-        except Exception as e:
-            error_msg = f"Failed to reconstruct conversation history: {str(e)}"
-            logger.error(error_msg)
-            raise DBCClientError("conversation_reconstruction", error_msg) from e
+        memory = Memory()
+        config = {CONFIGURABLE: {THREAD_ID: request.conversation_id}}
 
-    async def _save_dataframes_to_s3(
-        self, 
-        config: RunnableConfig
-    ) -> List[str]:
-        """
-        Save generated dataframes to S3 and return S3 paths.
-        
-        Args:
-            config: LangGraph configuration for memory access
-            
-        Returns:
-            List[str]: List of S3 paths to saved dataframes
-        """
-        try:
-            memory = self._get_memory()
-            dataframes = memory.get_dataframes(config)
-            s3_paths = []
-            
-            for df_name, df in dataframes.items():
+        # Load historical data into memory
+        for turn in request.conversation_history:
+            for i, df_path in enumerate(turn.output_df_names):
                 try:
-                    # Serialize dataframe to pickle
-                    df_data = pickle.dumps(df)
-                    
-                    # Generate S3 path
-                    s3_path = f"dataframes/{self.config_id}/{self.tenant_id}/{df_name}.pkl"
-                    
-                    # Save to S3
-                    saved_path = self.resource_manager.save_dataframe_to_s3(df_data, s3_path)
-                    s3_paths.append(saved_path)
-                    
-                    logger.debug(f"Saved dataframe {df_name} to S3 path {saved_path}")
-                    
+                    df_bytes = self.s3_callable(df_path, mode='r')
+                    df = pd.read_parquet(df_bytes)
+                    logical_name = f"history_df_{turn.query[:10]}_{i}"
+                    memory.put_dataframe(logical_name, df, config)
                 except Exception as e:
-                    logger.warning(f"Failed to save dataframe {df_name} to S3: {str(e)}")
-                    continue
-                    
-            return s3_paths
-            
-        except Exception as e:
-            error_msg = f"Failed to save dataframes to S3: {str(e)}"
-            logger.error(error_msg)
-            raise DBCClientError("dataframe_save", error_msg) from e
+                    print(f"Warning: Could not load dataframe from {df_path}. Error: {e}")
+        
+        # Instantiate and configure the agent with DBC adapters
+        agent = self._create_agent_with_dbc_services(memory)
 
-    async def _save_images_to_s3(
-        self, 
-        config: RunnableConfig
-    ) -> List[str]:
-        """
-        Save generated images to S3 and return S3 paths.
+        # Run the agent
+        initial_state = CWDState(query=request.user_query)
+        final_state, events = await agent(initial_state, config=config)
         
-        Args:
-            config: LangGraph configuration for memory access
-            
-        Returns:
-            List[str]: List of S3 paths to saved images
-        """
-        try:
-            memory = self._get_memory()
-            images = memory.get_images(config)
-            s3_paths = []
-            
-            for img_name, img_data in images.items():
-                try:
-                    # img_data is a list [image_path, dataframe] from plot worker
-                    if len(img_data) > 0:
-                        image_content = img_data[0]  # Get the image content
-                        
-                        # Generate S3 path
-                        s3_path = f"images/{self.config_id}/{self.tenant_id}/{img_name}.png"
-                        
-                        # Save to S3 (assuming image_content is bytes or can be converted)
-                        if isinstance(image_content, str):
-                            # If it's a file path, read the file
-                            with open(image_content, 'rb') as f:
-                                image_bytes = f.read()
-                        else:
-                            image_bytes = image_content
-                            
-                        saved_path = self.resource_manager._call_s3_callable(
-                            "put_object",
-                            s3_path=s3_path,
-                            content=image_bytes,
-                            content_type="image/png"
-                        )["s3_path"]
-                        
-                        s3_paths.append(saved_path)
-                        
-                        logger.debug(f"Saved image {img_name} to S3 path {saved_path}")
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to save image {img_name} to S3: {str(e)}")
-                    continue
-                    
-            return s3_paths
-            
-        except Exception as e:
-            error_msg = f"Failed to save images to S3: {str(e)}"
-            logger.error(error_msg)
-            raise DBCClientError("image_save", error_msg) from e
+        # Process and persist final outputs
+        final_response_obj = final_state.get("final_response")
+        df_s3_paths, img_s3_paths = [], []
+        text_response = "An error occurred, and no final response was generated."
 
-    def _extract_steps_from_events(self, events: List[Dict]) -> List[StepResponse]:
-        """
-        Extract processing steps from CWDAgent execution events.
-        
-        Args:
-            events: List of execution events from CWDAgent
+        if final_response_obj:
+            text_response = final_response_obj.response
             
-        Returns:
-            List[StepResponse]: List of processing steps
-        """
-        steps = []
-        
-        try:
-            for event in events:
-                # Extract step information from event structure
-                # This is a simplified implementation - in production, this would be more sophisticated
-                if isinstance(event, tuple) and len(event) >= 2:
-                    event_data = event[1]
-                    if isinstance(event_data, dict):
-                        for node_name, node_data in event_data.items():
-                            step = StepResponse(
-                                name=node_name,
-                                content=str(node_data)[:500]  # Truncate content
-                            )
-                            steps.append(step)
-                            
-        except Exception as e:
-            logger.warning(f"Failed to extract steps from events: {str(e)}")
-            # Return a basic step if extraction fails
-            steps = [StepResponse(name="processing", content="Query processed successfully")]
-            
-        return steps
+            for name in final_response_obj.output_df_name:
+                df = memory.get_dataframe(name, config)
+                if df is not None:
+                    s3_path = f"{self.data_s3_prefix.rstrip('/')}/dataframes/{name}-{uuid.uuid4()}.parquet"
+                    df_bytes = df.to_parquet(index=False)
+                    self.s3_callable(s3_path, mode='w', content=df_bytes)
+                    df_s3_paths.append(s3_path)
 
-    async def process_query(
-        self,
-        user_query: str,
-        conversation_id: str,
-        question_id: str,
-        conversation_history: List[ConversationTurn]
-    ) -> DBCResponse:
-        """
-        Main processing interface for DBC service queries.
-        
-        Args:
-            user_query: The natural language query from the user
-            conversation_id: Unique identifier for the conversation
-            question_id: Unique identifier for this specific question
-            conversation_history: Previous conversation turns for context
-            
-        Returns:
-            DBCResponse: Structured response with text, dataframe paths, image paths, and steps
-        """
-        try:
-            logger.info(f"Processing query for conversation_id={conversation_id}, question_id={question_id}")
-            
-            # Initialize CWDAgent if not already done
-            cwd_agent = self._initialize_cwd_agent()
-            
-            # Set up LangGraph configuration
-            config = RunnableConfig(
-                configurable={
-                    THREAD_ID: conversation_id
-                }
-            )
-            
-            # Reconstruct conversation history
-            await self._reconstruct_conversation_history(conversation_history, config)
-            
-            # Create initial state for CWDAgent
-            initial_state = CWDState(
-                query=user_query,
-                history="",  # Could be populated from conversation history if needed
-                final_response=None
-            )
-            
-            # Execute CWDAgent workflow
-            final_state, events = await cwd_agent(initial_state, config)
-            
-            # Extract response text
-            response_text = ""
-            if final_state.final_response:
-                response_text = getattr(final_state.final_response, 'response', str(final_state.final_response))
-            
-            # Save dataframes to S3 and get paths
-            output_df_names = await self._save_dataframes_to_s3(config)
-            
-            # Save images to S3 and get paths
-            output_image_names = await self._save_images_to_s3(config)
-            
-            # Extract processing steps
-            steps = self._extract_steps_from_events(events)
-            
-            # Create response
-            response = DBCResponse(
-                text=response_text,
-                output_df_names=output_df_names,
-                output_image_names=output_image_names,
-                steps=steps
-            )
-            
-            logger.info(f"Successfully processed query for conversation_id={conversation_id}")
-            return response
-            
-        except Exception as e:
-            error_msg = f"Failed to process query: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            
-            # Return error response
-            return DBCResponse(
-                text=f"Error processing query: {error_msg}",
-                output_df_names=[],
-                output_image_names=[],
-                steps=[StepResponse(name="error", content=error_msg)]
-            )
+            for name in final_response_obj.output_img_name:
+                image_bytes = memory.get_image(name, config)
+                if image_bytes:
+                    s3_path = f"{self.data_s3_prefix.rstrip('/')}/images/{name}-{uuid.uuid4()}.png"
+                    self.s3_callable(s3_path, mode='w', content=image_bytes)
+                    img_s3_paths.append(s3_path)
 
-    @classmethod
-    def from_config(cls, config: DBCClientConfig) -> "DBCClient":
-        """
-        Create DBCClient from configuration object.
-        
-        Args:
-            config: DBCClientConfig with all necessary parameters
-            
-        Returns:
-            DBCClient: Initialized client instance
-        """
-        return cls(
-            config_id=config.config_id,
-            tenant_id=config.tenant_id,
-            llm_callable=config.llm_callable,
-            s3_callable=config.s3_callable,
-            sql_callable=config.sql_callable,
-            agent_config_path=config.agent_config_path
+        # Format the final DBCResponse
+        parser = AgentResponseParser(events, memory, config)
+        steps = [StepResponse(name=f"Step {i+1}", content=s) for i, s in enumerate(parser.formatted_events)]
+
+        return DBCResponse(
+            text=text_response,
+            output_df_names=df_s3_paths,
+            output_image_names=img_s3_paths,
+            steps=steps
         )
-
-    @classmethod
-    def create_simple(
-        cls,
-        config_id: str,
-        tenant_id: str,
-        llm_callable: Callable,
-        s3_callable: Callable,
-        sql_callable: Callable
-    ) -> "DBCClient":
-        """
-        Create DBCClient with minimal required parameters.
         
-        Args:
-            config_id: Configuration identifier for the DBC service
-            tenant_id: Tenant identifier for multi-tenant support
-            llm_callable: Callable function for LLM operations
-            s3_callable: Callable function for S3 operations
-            sql_callable: Callable function for SQL execution
-            
-        Returns:
-            DBCClient: Initialized client instance
+    def _create_agent_with_dbc_services(self, memory: Memory) -> CWDAgent:
         """
-        return cls(
-            config_id=config_id,
-            tenant_id=tenant_id,
-            llm_callable=llm_callable,
-            s3_callable=s3_callable,
-            sql_callable=sql_callable
+        Factory method to assemble the CWDAgent with DBC-specific components.
+        """
+        agent_def_config = CwdAgentDefinitionConfig(**self.agent_config_dict)
+
+        # 1. Create LLM Adapters
+        dbc_llm_adapter = DBCLLMAdapter(self.llm_callable)
+        llm_adapters = {name: dbc_llm_adapter for name in CWDAgent.components}
+
+        # 2. Create Data Source and Resource Manager
+        data_source = DBCDataSource(self.s3_callable, self.asset_s3_prefix)
+        resource_manager = ResourceManager(data_source=data_source)
+        
+        # 3. Create SQL Executor Adapter
+        sql_executor = DBCSQLExecutor(self.sql_callable, config={})
+        
+        # 4. Instantiate CWDAgent, injecting all DBC components
+        agent = CWDAgent(
+            memory=memory, 
+            config=agent_def_config, 
+            llms=llm_adapters,
+            resource_manager=resource_manager,
+            sql_executor=sql_executor
         )
+        
+        return agent
 
 
 ================================================
 File: dbc/errors.py
 ================================================
-"""
-DBC Service Integration Error Classes
 
-Simple exception classes for DBC-specific errors.
-"""
-
-
-class DBCCallableError(Exception):
-    """Exception raised when a DBC callable function fails."""
-    pass
-
-
-class DBCClientError(Exception):
-    """Exception raised for client-level errors in DBC operations."""
-    pass
 
 
 ================================================
 File: dbc/llm.py
 ================================================
-"""
-DBC LLM Integration
-
-LLM implementation that routes calls through DBC service callable functions.
-"""
-
-import logging
-import time
-from typing import Any, Callable, Dict, List, Optional, Union
-
+from typing import Any, Callable, List
 from langchain_core.messages.utils import AnyMessage
-from langchain_core.runnables import RunnableConfig
-from pydantic import BaseModel, Field
 
-from dataqa.dbc.errors import DBCCallableError
-from dataqa.llm.base_llm import BaseLLM, LLMConfig, LLMError, LLMOutput, LLMMetaData
+from dataqa.llm.base_llm import BaseLLM, LLMConfig, LLMOutput
 from dataqa.utils.prompt_utils import messages_to_serializable
 
-logger = logging.getLogger(__name__)
+class DBCLLMAdapter(BaseLLM):
+    config_base_model = LLMConfig
 
-
-class DBCLLMConfig(LLMConfig):
-    """Configuration for DBC LLM implementation."""
-    
-    # Override model field to be optional since DBC callable handles model selection
-    model: Optional[str] = Field(
-        default=None,
-        description="Model name (optional - DBC callable may handle model selection)"
-    )
-    
-    # DBC-specific configuration
-    timeout: float = Field(
-        default=300.0,
-        description="Timeout in seconds for DBC LLM callable"
-    )
-
-
-class DBCLLM(BaseLLM):
-    """
-    DBC LLM implementation that routes calls through DBC service callable functions.
-    
-    This class extends BaseLLM to integrate with the DBC service by using
-    a provided callable function instead of direct LLM client connections.
-    """
-    
-    config_base_model = DBCLLMConfig
-    config: DBCLLMConfig
-    
-    def __init__(self, llm_callable: Callable, config: Union[DBCLLMConfig, Dict] = None, **kwargs):
+    def __init__(self, llm_callable: Callable, model_name: str = "dbc_model"):
         """
-        Initialize DBC LLM with callable function.
+        An adapter to make the DBC-provided LLM callable conform to the BaseLLM interface.
         
         Args:
-            llm_callable: Callable function provided by DBC service for LLM operations
-            config: Configuration for the DBC LLM
-            **kwargs: Additional configuration parameters
+            llm_callable: A function that takes `messages` and returns a response.
+            model_name: An identifier for the model being used.
         """
+        super().__init__(config=LLMConfig(model=model_name))
         self.llm_callable = llm_callable
-        super().__init__(config=config, **kwargs)
-    
+
     async def ainvoke(self, messages: List[AnyMessage], **kwargs) -> LLMOutput:
         """
-        Asynchronously invoke the LLM through DBC callable function.
-        
-        Args:
-            messages: List of messages to send to the LLM
-            **kwargs: Additional parameters including from_component, with_structured_output
-            
-        Returns:
-            LLMOutput: Structured response with generation, metadata, and error information
+        Invokes the DBC callable and wraps the result in an LLMOutput object.
         """
-        start_time = time.time()
-        from_component = kwargs.get("from_component", "")
-        with_structured_output = kwargs.get("with_structured_output", self.config.with_structured_output)
-        
-        generation = ""
-        metadata = None
-        error = None
-        
+        # Note: This assumes the llm_callable is async. If not, it needs to be wrapped.
+        # It also assumes the callable handles its own retries, timeouts, etc.
         try:
-            logger.info("Invoking DBC LLM callable...")
+            # We assume the callable takes a list of message-like objects or dicts
+            serialized_messages = messages_to_serializable(messages)
+            response_content = await self.llm_callable(messages=serialized_messages)
             
-            # Prepare request for DBC callable
-            dbc_request = {
-                "messages": messages_to_serializable(messages),
-                "model": self.config.model,
-                "with_structured_output": with_structured_output,
-                "timeout": self.config.timeout,
-                **kwargs
-            }
-            
-            # Call DBC LLM callable function
-            dbc_response = await self.llm_callable(dbc_request)
-            
-            # Process DBC response
-            if isinstance(dbc_response, dict):
-                generation = dbc_response.get("generation", "")
-                
-                # Extract metadata if available
-                if "metadata" in dbc_response:
-                    raw_metadata = dbc_response["metadata"]
-                    metadata = LLMMetaData(
-                        request_id=raw_metadata.get("request_id", ""),
-                        model=raw_metadata.get("model", self.config.model or "unknown"),
-                        num_generations=raw_metadata.get("num_generations", 1),
-                        num_retries=raw_metadata.get("num_retries", 0),
-                        start_timestamp=raw_metadata.get("start_timestamp"),
-                        end_timestamp=raw_metadata.get("end_timestamp"),
-                        latency=raw_metadata.get("latency", (time.time() - start_time) * 1000),
-                        input_token=raw_metadata.get("input_tokens", 0),
-                        output_token=raw_metadata.get("output_tokens", 0),
-                        reasoning_token=raw_metadata.get("reasoning_tokens", 0),
-                        cost=raw_metadata.get("cost"),
-                        ratelimit_tokens=raw_metadata.get("ratelimit_tokens"),
-                        ratelimit_requests=raw_metadata.get("ratelimit_requests"),
-                        ratelimit_remaining_tokens=raw_metadata.get("ratelimit_remaining_tokens"),
-                        ratelimit_remaining_requests=raw_metadata.get("ratelimit_remaining_requests")
-                    )
-                
-                # Check for errors in response
-                if "error" in dbc_response and dbc_response["error"]:
-                    error_info = dbc_response["error"]
-                    error = LLMError(
-                        error_code=error_info.get("error_code", 0),
-                        error_type=error_info.get("error_type", "DBC LLM Error"),
-                        error_message=error_info.get("error_message", "Unknown error from DBC LLM callable")
-                    )
-            else:
-                # Handle simple string response
-                generation = str(dbc_response)
-                
-            # Create default metadata if not provided
-            if metadata is None:
-                metadata = LLMMetaData(
-                    request_id="",
-                    model=self.config.model or "unknown",
-                    num_generations=1,
-                    num_retries=0,
-                    latency=(time.time() - start_time) * 1000,
-                    input_token=0,
-                    output_token=0
-                )
-                
+            # Here, we assume the response is the raw string content.
+            # This part may need adjustment based on the actual return type of the callable.
+            generation = response_content
+
+            return LLMOutput(
+                prompt=serialized_messages,
+                generation=generation
+                # Metadata would be harder to get unless the callable returns it.
+            )
         except Exception as e:
-            logger.exception("Error calling DBC LLM callable", exc_info=e)
-            
-            # Wrap the exception in DBC-specific error
-            dbc_error = DBCCallableError(f"DBC LLM callable failed: {str(e)}")
-            
-            error = LLMError(
-                error_code=500,
-                error_type="DBCCallableError",
-                error_message=str(dbc_error)
+            # Package any exception into the LLMOutput error field
+            return LLMOutput(
+                prompt=messages_to_serializable(messages),
+                error={"error_code": 500, "error_type": type(e).__name__, "error_message": str(e)}
             )
-            
-            # Create minimal metadata for error case
-            metadata = LLMMetaData(
-                request_id="",
-                model=self.config.model or "unknown",
-                num_generations=0,
-                num_retries=0,
-                latency=(time.time() - start_time) * 1000,
-                input_token=0,
-                output_token=0
-            )
-        
-        return LLMOutput(
-            prompt=messages_to_serializable(messages),
-            generation=generation,
-            from_component=from_component,
-            metadata=metadata,
-            error=error
-        )
-    
-    def invoke(self, messages: List[AnyMessage], **kwargs) -> LLMOutput:
-        """
-        Synchronous invoke method (not implemented for DBC integration).
-        
-        DBC integration is designed to be async-only to match the service architecture.
-        """
-        raise NotImplementedError("DBC LLM integration only supports async operations. Use ainvoke() instead.")
-    
-    def stream(self, messages: List[AnyMessage], **kwargs):
-        """Streaming not supported in DBC integration."""
-        raise NotImplementedError("Streaming not supported in DBC LLM integration")
-    
-    async def astream(self, messages: List[AnyMessage], **kwargs):
-        """Async streaming not supported in DBC integration."""
-        raise NotImplementedError("Async streaming not supported in DBC LLM integration")
-    
-    def _func(self, input: Union[List[AnyMessage], dict[str, Any]], config: RunnableConfig) -> Any:
-        """Synchronous function interface (not implemented for DBC integration)."""
-        raise NotImplementedError("DBC LLM integration only supports async operations")
-    
-    async def _afunc(self, input: Union[List[AnyMessage], dict[str, Any]], config: RunnableConfig) -> Any:
-        """
-        Async function interface for LangGraph integration.
-        
-        This method is called by the LangGraph framework and routes to ainvoke.
-        """
-        if isinstance(input, list):
-            messages = input
-        elif isinstance(input, dict) and "messages" in input:
-            messages = input["messages"]
-        else:
-            raise ValueError(f"Invalid input format for DBC LLM: {type(input)}")
-        
-        # Extract additional parameters from config if available
-        kwargs = {}
-        if config and hasattr(config, "configurable"):
-            kwargs.update(config.configurable or {})
-        
-        result = await self.ainvoke(messages, **kwargs)
-        return result.generation
 
 
 ================================================
 File: dbc/models.py
 ================================================
-"""
-DBC Service Integration Models
-
-Request/response models and configuration classes for DBC service integration.
-"""
-
-from typing import List, Callable
+from typing import List
 from pydantic import BaseModel, Field
 
 
 class ConversationTurn(BaseModel):
     """
     Represents a single conversation turn in the history.
-    
-    Used to reconstruct context for the CWDAgent when processing queries.
     """
     query: str = Field(..., description="The user query from this conversation turn")
     output_text: str = Field(..., description="The text response generated")
@@ -8202,9 +7294,6 @@ class ConversationTurn(BaseModel):
 class DBCRequest(BaseModel):
     """
     Standardized request format from DBC service to DataQA library.
-    
-    This model defines the interface that the DBC service uses to send
-    queries to the DataQA library through the DBCClient.
     """
     user_query: str = Field(..., description="The natural language query from the user")
     conversation_id: str = Field(..., description="Unique identifier for the conversation")
@@ -8218,8 +7307,6 @@ class DBCRequest(BaseModel):
 class StepResponse(BaseModel):
     """
     Represents an intermediate processing step in the query execution.
-    
-    Used to provide visibility into the agent's reasoning and execution process.
     """
     name: str = Field(..., description="Name or identifier of the processing step")
     content: str = Field(default="", description="Content or details of the step")
@@ -8228,9 +7315,6 @@ class StepResponse(BaseModel):
 class DBCResponse(BaseModel):
     """
     Standardized response format from DataQA library to DBC service.
-    
-    This model defines the structured response that the DBC service expects
-    to receive from the DataQA library after processing a query.
     """
     text: str = Field(..., description="The main text response to the user query")
     output_df_names: List[str] = Field(
@@ -8245,27 +7329,6 @@ class DBCResponse(BaseModel):
         default_factory=list,
         description="List of intermediate processing steps for transparency"
     )
-
-
-class DBCClientConfig(BaseModel):
-    """
-    Configuration parameters for DBC client initialization.
-    
-    Contains service-specific configuration and callable functions that the DBC service provides
-    when creating a DBCClient instance.
-    """
-    config_id: str = Field(..., description="Configuration identifier for the DBC service")
-    tenant_id: str = Field(..., description="Tenant identifier for multi-tenant support")
-    agent_config_path: str = Field(
-        default="default_cwd_agent_config.yml",
-        description="Path to the CWDAgent configuration file"
-    )
-    llm_callable: Callable = Field(..., description="Callable function for LLM operations")
-    s3_callable: Callable = Field(..., description="Callable function for S3 operations")
-    sql_callable: Callable = Field(..., description="Callable function for SQL execution")
-    
-    class Config:
-        arbitrary_types_allowed = True
 
 
 ================================================
@@ -8520,203 +7583,67 @@ class DBCResourceManager(ResourceManager):
 ================================================
 File: dbc/sql_executor.py
 ================================================
-"""
-DBC SQL Executor
-
-SQL execution component that uses DBC SQL callable function instead of direct database connections.
-Integrates with existing code executor components while routing SQL operations through DBC service.
-"""
-
-import logging
-from typing import Any, Callable, Dict, Union
-
+from typing import Callable, Dict
 import pandas as pd
-from pydantic import BaseModel, Field
 
-from dataqa.components.code_executor.base_code_executor import (
-    CodeExecutor,
-    CodeExecutorConfig,
-    CodeExecutorOutput,
-)
-from dataqa.dbc.errors import DBCCallableError
+from dataqa.components.code_executor.base_code_executor import CodeExecutorOutput
+from dataqa.components.code_executor.in_memory_code_executor import InMemoryCodeExecutor, InMemoryCodeExecutorConfig
 
-logger = logging.getLogger(__name__)
-
-
-class DBCSQLExecutorConfig(CodeExecutorConfig):
-    """Configuration for DBC SQL Executor."""
-    sql_callable: Callable = Field(..., description="DBC SQL callable function")
-    
-    class Config:
-        arbitrary_types_allowed = True
-
-
-class DBCSQLExecutorInput(BaseModel):
-    """Input model for DBC SQL Executor."""
-    code: str = Field(..., description="SQL query to execute")
-
-
-class DBCSQLExecutor(CodeExecutor):
+class DBCSQLExecutor(InMemoryCodeExecutor):
     """
-    SQL executor that uses DBC SQL callable function for query execution.
-    
-    This component replaces direct database connections with DBC service integration,
-    allowing SQL execution through the provided callable function with built-in
-    retry mechanisms and error handling.
+    An adapter for the DBC-provided SQL callable. It inherits from InMemoryCodeExecutor
+    to match the expected interface but overrides the execution logic.
     """
-    
-    component_type = "DBCSQLExecutor"
-    config_base_model = DBCSQLExecutorConfig
-    input_base_model = DBCSQLExecutorInput
-    output_base_model = CodeExecutorOutput
-    config: DBCSQLExecutorConfig
+    def __init__(self, sql_callable: Callable, config: Dict):
+        # We still call super().__init__ to set up the component's name and type,
+        # but we don't need the backend or data loading.
+        dummy_config = InMemoryCodeExecutorConfig(name="dbc_sql_executor", **config)
+        super(InMemoryCodeExecutor, self).__init__(dummy_config)
+        self.sql_callable = sql_callable
 
-    def __init__(
-        self, 
-        config: Union[DBCSQLExecutorConfig, Dict], 
-        sql_callable: Callable = None,
-        **kwargs
-    ):
+    async def run(self, input_data, config={}) -> CodeExecutorOutput:
         """
-        Initialize DBC SQL Executor.
-        
-        Args:
-            config: Configuration object or dictionary
-            sql_callable: DBC SQL callable function (can be provided here or in config)
-            **kwargs: Additional arguments
-        """
-        super().__init__(config=config, **kwargs)
-        
-        # Allow sql_callable to be provided either in config or as parameter
-        if sql_callable:
-            self.sql_callable = sql_callable
-        elif hasattr(self.config, 'sql_callable') and self.config.sql_callable:
-            self.sql_callable = self.config.sql_callable
-        else:
-            raise ValueError("sql_callable must be provided either in config or as parameter")
-
-    def display(self):
-        """Display component information."""
-        logger.info(f"Component Name: {self.config.name}")
-        logger.info(f"Component Type: {self.component_type}")
-        logger.info(f"Input BaseModel: {self.input_base_model.model_fields}")
-        logger.info(f"Output BaseModel: {self.output_base_model.model_fields}")
-
-    async def execute(self, sql_query: str) -> Any:
-        """
-        Execute SQL query using DBC SQL callable function.
-        
-        Args:
-            sql_query: SQL query string to execute
-            
-        Returns:
-            Query result from DBC SQL callable
-            
-        Raises:
-            DBCCallableError: If SQL callable function fails
+        Overrides the local execution logic to use the DBC callable.
         """
         try:
-            result = await self.sql_callable(sql_query)
-            return result
-        except Exception as e:
-            error_msg = f"DBC SQL callable failed: {str(e)}"
-            logger.error(error_msg)
-            raise DBCCallableError(error_msg) from e
-
-    async def run(self, input_data: DBCSQLExecutorInput, config: Dict = None) -> CodeExecutorOutput:
-        """
-        Execute SQL query and return formatted response.
-        
-        Args:
-            input_data: Input containing SQL code to execute
-            config: Optional configuration dictionary
+            # Assumes the sql_callable is async and returns a pandas DataFrame
+            result_df = await self.sql_callable(sql=input_data.code)
             
-        Returns:
-            CodeExecutorOutput with query results or error information
-        """
-        try:
-            # Execute SQL using DBC callable
-            result = await self.execute(input_data.code)
-            
-            # Format response based on result type
-            if isinstance(result, pd.DataFrame):
-                # If result is already a DataFrame, convert to JSON
-                response = CodeExecutorOutput(
-                    code=input_data.code,
-                    dataframe=[result.to_json(index=False)],
-                )
-            elif isinstance(result, dict) and 'dataframe' in result:
-                # If result contains dataframe data
-                df_data = result['dataframe']
-                if isinstance(df_data, pd.DataFrame):
-                    response = CodeExecutorOutput(
-                        code=input_data.code,
-                        dataframe=[df_data.to_json(index=False)],
-                    )
-                else:
-                    # Assume df_data is already JSON string
-                    response = CodeExecutorOutput(
-                        code=input_data.code,
-                        dataframe=[df_data],
-                    )
-            elif isinstance(result, list):
-                # If result is a list of records, convert to DataFrame
-                df = pd.DataFrame(result)
-                response = CodeExecutorOutput(
-                    code=input_data.code,
-                    dataframe=[df.to_json(index=False)],
-                )
-            else:
-                # For other result types, try to convert to string
-                response = CodeExecutorOutput(
-                    code=input_data.code,
-                    markdown=str(result),
-                )
-                
-            logger.info(f"Successfully executed SQL query via DBC callable")
-            return response
-            
-        except DBCCallableError:
-            # Re-raise DBC-specific errors
-            raise
-        except Exception as e:
-            # Handle any other unexpected errors
-            error_msg = f"Unexpected error in DBC SQL execution: {str(e)}"
-            logger.error(error_msg)
-            response = CodeExecutorOutput(
-                code=input_data.code, 
-                error=error_msg
+            # The InMemoryCodeExecutor expects the dataframe to be serialized to JSON in the output
+            return CodeExecutorOutput(
+                code=input_data.code,
+                dataframe=[result_df.to_json(index=False)],
             )
-            return response
+        except Exception as e:
+            return CodeExecutorOutput(code=input_data.code, error=repr(e))
 
-    def run_sync(self, input_data: DBCSQLExecutorInput, config: Dict = None) -> CodeExecutorOutput:
+
+================================================
+File: dbc/storage.py
+================================================
+from typing import Callable, Dict
+import yaml
+
+from dataqa.services.storage import BaseDataSource
+
+class DBCDataSource(BaseDataSource):
+    def __init__(self, s3_callable: Callable, asset_s3_prefix: str):
         """
-        Synchronous wrapper for run method.
+        A DataSource that reads assets from S3 using a provided callable.
         
         Args:
-            input_data: Input containing SQL code to execute
-            config: Optional configuration dictionary
-            
-        Returns:
-            CodeExecutorOutput with query results or error information
+            s3_callable: A function with a signature like `s3_callable(s3_path: str, mode: str) -> bytes`.
+                         It is only used for reading ('r') in this context.
+            asset_s3_prefix: The base S3 prefix where assets like 'rules.yml' are stored.
         """
-        import asyncio
-        
-        try:
-            # Run the async method in a new event loop if needed
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If we're already in an event loop, we can't use run()
-                # This is a limitation - in production, this should be handled differently
-                raise RuntimeError("Cannot run sync method from within async context")
-            else:
-                return loop.run_until_complete(self.run(input_data, config))
-        except RuntimeError:
-            # Fallback for when we're in an async context
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(asyncio.run, self.run(input_data, config))
-                return future.result()
+        self.s3_callable = s3_callable
+        self.asset_s3_prefix = asset_s3_prefix
+
+    def read_asset(self, asset_name: str) -> Dict:
+        s3_path = f"{self.asset_s3_prefix.rstrip('/')}/{asset_name}"
+        # Assumes s3_callable reads and returns the raw byte content of the file
+        raw_content = self.s3_callable(s3_path, mode='r')
+        return yaml.safe_load(raw_content)
 
 
 
@@ -10358,6 +9285,49 @@ File: scripts/__init__.py
 File: scripts/azure_token.py
 ================================================
 
+
+
+================================================
+File: services/__init__.py
+================================================
+
+
+
+================================================
+File: services/storage.py
+================================================
+from abc import ABC, abstractmethod
+from typing import Dict
+import os
+import yaml
+
+
+class BaseDataSource(ABC):
+    @abstractmethod
+    def read_asset(self, asset_name: str) -> Dict:
+        """Reads a structured asset (like rules.yml) and returns its raw dictionary content."""
+        raise NotImplementedError
+
+class LocalFileDataSource(BaseDataSource):
+    def __init__(self, asset_directory: str):
+        self.asset_directory = asset_directory
+
+    def read_asset(self, asset_name: str) -> Dict:
+        """
+        Reads a YAML asset file from the local filesystem.
+        
+        Args:
+            asset_name: The name of the file, e.g., "rules.yml".
+        
+        Returns:
+            The parsed dictionary content of the YAML file.
+        """
+        file_path = os.path.join(self.asset_directory, asset_name)
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Asset file not found at: {file_path}")
+            
+        with open(file_path, 'r') as f:
+            return yaml.safe_load(f)
 
 
 ================================================
@@ -13050,6 +12020,67 @@ class AgentResponseParser:
 
 
 ================================================
+File: utils/asset_formatter.py
+================================================
+from typing import List
+
+from dataqa.data_models.asset_models import Example, Rule, TableSchema
+from dataqa.utils.schema_util import convert_table_schema_to_sql_str
+
+
+def format_rules_for_prompt(rules: List[Rule]) -> str:
+    """
+    Takes a list of Rule objects and formats them into a single string
+    by joining their instructions.
+    """
+    if not rules:
+        return ""
+    instructions_list = [rule.instructions for rule in rules]
+    return "\n\n".join(instructions_list)
+
+
+def format_examples_for_prompt(examples: List[Example]) -> str:
+    """
+    Takes a list of Example objects and formats them into a Q&A string
+    suitable for few-shot prompting.
+    """
+    if not examples:
+        return ""
+
+    example_str_list = []
+    for example in examples:
+        content = example.example
+        reasoning_str = (
+            f"<reasoning>\n{content.reasoning}\n</reasoning>\n"
+            if content.reasoning
+            else ""
+        )
+        example_str = (
+            f"Q: {content.question}\n"
+            f"A: \n"
+            f"{reasoning_str}"
+            f"<sql>\n{content.code}\n</sql>"
+        )
+        example_str_list.append(example_str)
+
+    return "\n\n".join(example_str_list)
+
+
+def format_schema_for_prompt(tables: List[TableSchema]) -> str:
+    """
+    Takes a list of TableSchema objects and formats them into a single
+    SQL DDL string.
+    """
+    if not tables:
+        return ""
+
+    schema_str_list = [
+        convert_table_schema_to_sql_str(t.model_dump()) for t in tables
+    ]
+    return "\n".join(schema_str_list)
+
+
+================================================
 File: utils/component_utils.py
 ================================================
 from typing import List, Optional, Type
@@ -13270,56 +12301,24 @@ File: utils/ingestion.py
 ================================================
 import logging
 import os.path
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 from pydantic import BaseModel, Field
 from tqdm import tqdm
 
+from dataqa.data_models.asset_models import (
+    ColumnSchema,
+    DatabaseSchema,
+    TableSchema,
+)
 from dataqa.llm.openai import OpenAIEmbedding
 
-SCHEMA_REF_INFO = "Please see here for accepted format of schema. https://bitbucketdc-cluster07.jpmchase.net/projects/LLMCS/repos/dataqa-lib/browse/examples/ccb_risk/data/ccb_risk_schema.yml?at=refs%2Fheads%2Ffeature%2Fprompt-template"
-
 DEFAULT_SEARCH_CONTENT_CONFIG = {
-    "tables": ["name", "description"],
+    "tables": ["table_name", "description"],
     "columns": ["name", "description"],
-    "values": ["name", "description"],
+    "values": ["value", "description"],
     "include_key": False,
-}
-
-ACCEPTED_FIELDS = {
-    "tables": [
-        "name",
-        "description",
-        "tags",
-        "primary_key",
-        "foreign_key",
-        "columns",
-    ],
-    "columns": [
-        "name",
-        "description",
-        "type",
-        "values",
-    ],
-    "values": [
-        "value",
-        "description",
-    ],
-}
-
-REQUIRED_FIELDS = {
-    "tables": [
-        "name",
-        "columns",
-    ],
-    "columns": [
-        "name",
-        "type",
-    ],
-    "values": [
-        "value",
-    ],
 }
 
 
@@ -13338,7 +12337,7 @@ class TableRecord(BaseModel):
         default_factory=dict,
         description="Table record value that will be retrieved and used in downstream processing and/or in the prompt.",
     )
-    embedding_vector: Optional[List[float]] = Field(
+    embedding_vector: List[float] = Field(
         default_factory=list,
         description="Embedding vector created from search content",
     )
@@ -13363,7 +12362,7 @@ class ColumnRecord(BaseModel):
         default_factory=dict,
         description="Table record value that will be retrieved and used in downstream processing and/or in the prompt.",
     )
-    embedding_vector: Optional[List[float]] = Field(
+    embedding_vector: List[float] = Field(
         default_factory=list,
         description="Embedding vector created from search content",
     )
@@ -13392,97 +12391,60 @@ class CategoricalValueRecord(BaseModel):
         default_factory=dict,
         description="Table record value that will be retrieved and used in downstream processing and/or in the prompt.",
     )
-    embedding_vector: Optional[List[float]] = Field(
+    embedding_vector: List[float] = Field(
         default_factory=list,
         description="Embedding vector created from search content",
     )
 
 
-def validate_fields(
-    record_type: str, found_fields: List[str]
-) -> Tuple[Union[bool, Set[str]]]:
-    """
-    validate fields of schema at different level tables, columns, and values
-    :param record_type: record type: "tables", "columns", "values"
-    :param found_fields: list of fields found in the schema definition
-    :return: boolean (True: pass validation; False: fail validation), not supported fields, missing fields
-    """
-    validation_passed = True
-    accepted_fields = ACCEPTED_FIELDS.get(record_type, None)
-    if accepted_fields is None:
-        raise ValueError(f"Record type {record_type} is not defined.")
-
-    required_fields = REQUIRED_FIELDS.get(record_type, None)
-    if required_fields is None:
-        raise ValueError(f"Record type {record_type} is not defined.")
-
-    accepted_fields = set(accepted_fields)
-    required_fields = set(required_fields)
-    found_fields = set(found_fields)
-
-    not_supported_fields = found_fields - accepted_fields
-    if len(not_supported_fields) > 0:
-        validation_passed = False
-
-    missing_fields = required_fields - found_fields
-    if len(missing_fields) > 0:
-        validation_passed = False
-
-    return (validation_passed, not_supported_fields, missing_fields)
-
-
 def record_value_to_string(
-    value: dict,
-    include_field: Optional[List[str]],
+    record_model: Union[BaseModel],
+    include_fields: Optional[List[str]],
     display_field_name: bool = False,
 ) -> str:
-    if display_field_name:
-        if include_field is None:
-            field_strings = [f"{k}: {v}" for k, v in value.items()]
-        else:
-            field_strings = [
-                f"{k}: {v}" for k, v in value.items() if k in include_field
-            ]
-    else:
-        if include_field is None:
-            field_strings = value.values()
-        else:
-            field_strings = [
-                f"{v}" for k, v in value.items() if k in include_field
-            ]
+    """Creates a concatenated string from specified fields of a Pydantic model."""
+    if not include_fields:
+        return ""
+
+    field_strings = []
+    record_dict = record_model.model_dump()
+    for field in include_fields:
+        value = record_dict.get(field)
+        if value:
+            if display_field_name:
+                field_strings.append(f"{field}: {value}")
+            else:
+                field_strings.append(str(value))
     return "\n".join(field_strings)
 
 
 class SchemaUtil:
     def __init__(self):
-        self.schema = None
+        self.schema: Optional[DatabaseSchema] = None
         self.parsed_schema = None
 
     def load_schema(
         self,
-        schema_dict: Optional[
-            Dict[str, Union[Dict[str, Any], List[Dict[str, Any]]]]
-        ],
+        schema_dict: Optional[Dict],
         schema_file_path: Optional[str],
     ) -> None:
         """
-        :param schema_dict: input schema definition
-        :param schema_file_path: input yaml file with path that contains the schema definition
+        Loads a schema from a dictionary or a YAML file into a Pydantic model.
         """
-        if schema_dict is not None:
-            pass
-        elif schema_file_path is not None:
-            if os.path.exists(schema_file_path):
-                schema_dict = yaml.safe_load(open(schema_file_path, "r"))
-            else:
-                raise ValueError(f"Schema file {schema_file_path} not found.")
+        if schema_dict:
+            self.schema = DatabaseSchema(**schema_dict)
+        elif schema_file_path and os.path.exists(schema_file_path):
+            with open(schema_file_path, "r") as f:
+                raw_schema = yaml.safe_load(f)
+            self.schema = DatabaseSchema(**raw_schema)
         else:
             raise ValueError(
-                "Please provide schema definition dictionary or the yaml file path that contains the schema definition."
+                "Please provide a schema dictionary or a valid YAML file path."
             )
-        self.schema = schema_dict
 
     def parsed_schema_to_json(self) -> Dict:
+        if not self.parsed_schema:
+            return {}
         all_records_dict = {
             k: [r.model_dump() for r in v]
             for k, v in self.parsed_schema.items()
@@ -13496,136 +12458,89 @@ class SchemaUtil:
         ] = None,
     ) -> None:
         """
-        Parse schema definition with nested structure into table, column, and categorical value records for OpenSearch indices
-        Expected format of schema definition: https://bitbucketdc-cluster07.jpmchase.net/projects/LLMCS/repos/dataqa-lib/browse/examples/ccb_risk/data/ccb_risk_schema.yml?at=refs%2Fheads%2Ffeature%2Fprompt-template
-
-        :param search_content_config: config
+        Parse schema definition from the loaded DatabaseSchema model into records
+        for vectorization.
         """
+        if not self.schema:
+            raise ValueError("Schema not loaded. Please call load_schema() first.")
+
         if search_content_config is None:
             search_content_config = DEFAULT_SEARCH_CONTENT_CONFIG
 
         table_records, column_records, value_records = [], [], []
 
-        tables = self.schema.get("tables", None)
-        if tables is None:
-            raise ValueError(f"Tables not found. {SCHEMA_REF_INFO}")
-        for table in tables:
-            validated, not_supported, missing = validate_fields(
-                "tables", list(table.keys())
+        for table in self.schema.tables:
+            table_search_content = record_value_to_string(
+                table,
+                search_content_config.get("tables"),
+                search_content_config.get("include_key", False),
             )
-            if not validated:
-                raise ValueError(
-                    f"Table field error. Not supported: {not_supported}; Missing required: {missing}. {SCHEMA_REF_INFO}"
+            table_values = table.model_dump(include={'table_name', 'description', 'primary_keys', 'foreign_keys'})
+            
+            table_records.append(
+                TableRecord(
+                    table_name=table.table_name,
+                    table_description=table.description or "",
+                    tags=table.tags,
+                    values=table_values,
+                    search_content=table_search_content,
                 )
-
-            include_key = search_content_config.get("include_key")
-            concat_fields = search_content_config.get("tables")
-            search_content = record_value_to_string(
-                table, concat_fields, include_key
             )
 
-            table_record_value = {
-                "table_name": table.get("name"),
-                "table_description": table.get("description", ""),
-                "primary_key": table.get("primary_key", None),
-                "foreign_key": table.get("foreign_key", []),
-            }
-            table_record = {
-                "table_name": table.get("name"),
-                "table_description": table.get("description", ""),
-                "tags": table.get("tags", []),
-                "values": table_record_value,
-                "search_content": search_content,
-            }
-
-            table_records.append(TableRecord(**table_record))
-
-            for column in table.get("columns"):
-                validated, not_supported, missing = validate_fields(
-                    "columns", list(column.keys())
+            for column in table.columns:
+                col_search_content = record_value_to_string(
+                    column,
+                    search_content_config.get("columns"),
+                    search_content_config.get("include_key", False),
                 )
-                if not validated:
-                    raise ValueError(
-                        f"Column field error. Not supported: {not_supported}; Missing required: {missing}. {SCHEMA_REF_INFO}"
+                column_values = column.model_dump(include={'name', 'type', 'description'})
+                
+                column_records.append(
+                    ColumnRecord(
+                        table_name=table.table_name,
+                        table_description=table.description or "",
+                        column_name=column.name,
+                        column_description=column.description or "",
+                        tags=table.tags,
+                        values=column_values,
+                        search_content=col_search_content,
                     )
-
-                include_key = search_content_config.get("include_key")
-                concat_fields = search_content_config.get("columns")
-                search_content = record_value_to_string(
-                    table, concat_fields, include_key
                 )
 
-                column_record_value = {
-                    "column_name": column.get("name"),
-                    "column_type": column.get("type"),
-                    "column_description": str(column.get("description", "")),
-                }
-                column_record_value.update(table_record_value)
-                column_record = {
-                    "table_name": table.get("name"),
-                    "table_description": table.get("description", ""),
-                    "column_name": column.get("name"),
-                    "column_description": str(column.get("description", "")),
-                    "tags": column.get("tags", []),
-                    "values": column_record_value,
-                    "search_content": search_content,
-                }
-
-                column_records.append(ColumnRecord(**column_record))
-
-                if "values" in column:
-                    for value in column.get("values"):
-                        validated, not_supported, missing = validate_fields(
-                            "values", list(value.keys())
+                if column.values:
+                    for value in column.values:
+                        val_search_content = record_value_to_string(
+                            value,
+                            search_content_config.get("values"),
+                            search_content_config.get("include_key", False),
                         )
-                        if not validated:
-                            raise ValueError(
-                                f"Value field error. Not supported: {not_supported}; Missing required: {missing}. {SCHEMA_REF_INFO}"
-                            )
+                        value_record_values = value.model_dump()
 
-                        include_key = search_content_config.get("include_key")
-                        concat_fields = search_content_config.get("values")
-                        search_content = record_value_to_string(
-                            table, concat_fields, include_key
-                        )
-
-                        categorical_value = str(value.get("value"))
-                        value_record_value = {
-                            "value": categorical_value,
-                            "value_description": value.get("description", ""),
-                        }
-                        value_record_value.update(column_record_value)
-                        value_record = {
-                            "table_name": table.get("name"),
-                            "table_description": table.get("description", ""),
-                            "column_name": column.get("name"),
-                            "column_description": str(
-                                column.get("description", "")
-                            ),
-                            "value": categorical_value,
-                            "value_description": value.get("description", ""),
-                            "tags": table.get("tags", []),
-                            "values": table_record_value,
-                            "search_content": search_content,
-                        }
                         value_records.append(
-                            CategoricalValueRecord(**value_record)
+                            CategoricalValueRecord(
+                                table_name=table.table_name,
+                                table_description=table.description or "",
+                                column_name=column.name,
+                                column_description=column.description or "",
+                                value=value.value,
+                                value_description=value.description or "",
+                                tags=table.tags,
+                                values=value_record_values,
+                                search_content=val_search_content,
+                            )
                         )
-            all_records = {
-                "tables": table_records,
-                "columns": column_records,
-                "values": value_records,
-            }
-        self.parsed_schema = all_records
+
+        self.parsed_schema = {
+            "tables": table_records,
+            "columns": column_records,
+            "values": value_records,
+        }
         msg = f"Schema parsing completed. {len(table_records)} tables, {len(column_records)} columns, {len(value_records)} categorical values."
         logging.info(msg)
-        print(msg)
 
     async def create_embedding(self, embedding_model_config: Dict) -> None:
         """
-        Create embedding for parsed schema
-        :param embedding_model_config: config file that contains api_key, api_version, azure_endpoint, model
-        :return: None
+        Create embedding for parsed schema. This is part of the local mode toolkit.
         """
         import time
 
@@ -13634,54 +12549,24 @@ class SchemaUtil:
             raise ValueError(
                 "Parsed schema not available. Please run parse_schema() function first."
             )
-        else:
-            embedding_model = OpenAIEmbedding()
-            for schema_type, records in self.parsed_schema.items():
-                for record in tqdm(
-                    records, desc=f"Create embedding for {schema_type} records."
-                ):
-                    search_content = record.search_content
-                    if search_content == "":
-                        raise ValueError(
-                            "Failed to create embedding. Empty search content."
-                        )
-                    embedding = await embedding_model(
-                        search_content, **embedding_model_config
+        
+        embedding_model = OpenAIEmbedding()
+        for schema_type, records in self.parsed_schema.items():
+            for record in tqdm(
+                records, desc=f"Create embedding for {schema_type} records."
+            ):
+                search_content = record.search_content
+                if not search_content:
+                    logger.warning(
+                        f"Skipping embedding for {schema_type} record due to empty search content: {record.model_dump()}"
                     )
-                    record.embedding_vector = embedding
-        msg = f"Embedding is created for all records. Time taken: {round(time.time() - start, 2)} seconds."
+                    continue
+                embedding = await embedding_model(
+                    search_content, **embedding_model_config
+                )
+                record.embedding_vector = embedding
+        msg = f"Embedding created for all records. Time taken: {round(time.time() - start, 2)} seconds."
         logging.info(msg)
-        print(msg)
-
-    def upload_schema_to_opensearch(self):
-        pass
-
-
-# if __name__ == "__main__":
-#     schema_file = r"H:\Projects\jpmc_bitbucket\dataqa-lib\examples\ccb_risk\data\ccb_risk_schema.yml"
-#     schema_util = SchemaUtil()
-#     schema_util.load_schema(None, schema_file)
-#     schema_util.parse_schema()
-
-#     model_config = {
-#         "azure_endpoint": "",
-#         "openai_api_version": "2024-02-15-preview",
-#         "openai_api_key": "",
-#         "embedding_model_name": "text-embedding-ada-002-2",
-#     }
-#     asyncio.run(schema_util.create_embedding(model_config))
-
-#     all_records = schema_util.parsed_schema_to_json()
-
-#     yaml.safe_dump(
-#         all_records,
-#         open(
-#             r"H:\Projects\jpmc_bitbucket\dataqa-lib\examples\ccb_risk\data\ccb_risk_schema_embedding.yml",
-#             "w",
-#         ),
-#     )
-
-
 
 
 ================================================
@@ -13777,7 +12662,6 @@ from typing import Dict, List, Optional, Union
 import yaml
 
 from dataqa.data_models.asset_models import (
-    Resource,
     ResourceType,
     RetrievedAsset,
     TableSchema,
@@ -13787,13 +12671,13 @@ from dataqa.data_models.asset_models import (
 
 
 def get_vector_schema_record(
-    resource: Resource,
+    resource_data: List[VectorSchema],
     record_type: VectorSchemaRecordType,
     table_name: str,
-    column_name: Optional[str],
-    value: Optional[str],
-) -> VectorSchema:
-    for record in resource.data:
+    column_name: Optional[str] = None,
+    value: Optional[str] = None,
+) -> Optional[VectorSchema]:
+    for record in resource_data:
         match = (record.table_name == table_name) and (
             record.record_type == record_type
         )
@@ -13803,238 +12687,101 @@ def get_vector_schema_record(
             match = match and (record.value == value)
         if match:
             return record
+    return None
 
 
 def reconstruct_table_schema(
-    retrieved_vector_schema: List[RetrievedAsset], full_vector_schema: Resource
-) -> Resource:
-    tables = {}
-    for record in retrieved_vector_schema:
-        table_name = record.content.table_name
-        table_description = record.content.table_description
-        record_type = record.content.record_type
-        if record_type == VectorSchemaRecordType.Table:
-            matched_table = get_vector_schema_record(
-                full_vector_schema, record_type, table_name, None, None
+    retrieved_vector_schema: List[RetrievedAsset], full_vector_schema_data: List[VectorSchema]
+) -> List[TableSchema]:
+    tables: Dict[str, TableSchema] = {}
+    for record_asset in retrieved_vector_schema:
+        record = record_asset.content
+        table_name = record.table_name
+        
+        if table_name not in tables:
+            matched_table_record = get_vector_schema_record(
+                full_vector_schema_data,
+                VectorSchemaRecordType.Table,
+                table_name,
             )
-            if table_name in tables:
-                pass
-            else:
-                table = {}
-                table["name"] = table_name
-                table["description"] = table_description
-                table["tags"] = []
-                table["primary_key"] = matched_table.values["primary_key"]
-                table["foreign_key"] = matched_table.values["foreign_key"]
-                table["columns"] = []
-                tables[table_name] = table
-        elif record_type == VectorSchemaRecordType.Column:
-            column_name = record.content.column_name
-            column_description = record.content.column_description
-            if table_name in tables:
-                table = tables[table_name]
-            else:
-                matched_table = get_vector_schema_record(
-                    full_vector_schema,
-                    VectorSchemaRecordType.Table,
-                    table_name,
-                    None,
-                    None,
-                )
-                table = {}
-                table["name"] = table_name
-                table["description"] = table_description
-                table["tags"] = []
-                table["primary_key"] = matched_table.values["primary_key"]
-                table["foreign_key"] = matched_table.values["foreign_key"]
-                table["columns"] = []
-                tables[table_name] = table
-            table["columns"].append(
-                {
-                    "name": column_name,
-                    "description": column_description,
-                    "type": record.content.values.get("column_type", ""),
-                }
+            tables[table_name] = TableSchema(
+                table_name=table_name,
+                description=record.table_description,
+                columns=[],
+                tags=matched_table_record.values.get("tags", []),
+                primary_keys=matched_table_record.values.get("primary_keys", []),
+                foreign_keys=matched_table_record.values.get("foreign_keys", []),
             )
-        elif record_type == VectorSchemaRecordType.Value:
-            column_name = record.content.column_name
-            column_description = record.content.column_description
-            value = record.content.value
-            value_description = record.content.value_description
-            if table_name in tables:
-                table = tables[table_name]
-            else:
-                matched_table = get_vector_schema_record(
-                    full_vector_schema,
-                    VectorSchemaRecordType.Table,
-                    table_name,
-                    None,
-                    None,
-                )
-                table = {}
-                table["name"] = table_name
-                table["description"] = table_description
-                table["tags"] = []
-                table["primary_key"] = matched_table.values["primary_key"]
-                table["foreign_key"] = matched_table.values["foreign_key"]
-                table["columns"] = []
-                tables[table_name] = table
-            if column_name in [c["name"] for c in table["columns"]]:
-                column = next(
-                   (c for c in table["columns"] if c["name"] == column_name),
-                    None,
-                )
-                if "values" in column:
-                    column["values"].append(
-                        {"value": value, "description": value_description}
-                    )
-                else:
-                    column["values"] = [
-                        {"value": value, "description": value_description}
-                    ]
-            else:
-                table["columns"].append(
-                    {
-                        "column_name": column_name,
-                        "column_description": column_description,
-                        "type": record.content.values.get("column_type", ""),
-                        "values": [
-                            {"value": value, "description": value_description}
-                        ],
-                    }
-                )
-        else:
-            raise NotImplementedError
-    data = []
-    for table in tables.values():
-        data.append(TableSchema(**table))
-    reconstructed_tables = Resource(
-        data=data,
-        type=ResourceType.Schema,
-        module_name="",
-        module_type="",
-        formatter="",
-    )
-    return reconstructed_tables
+
+        table = tables[table_name]
+        
+        # Find or create column
+        column = next(
+            (c for c in table.columns if c.name == record.column_name), None
+        )
+        if not column and record.record_type != VectorSchemaRecordType.Table:
+            column = {
+                "name": record.column_name,
+                "description": record.column_description,
+                "type": record.values.get("column_type", "UNKNOWN"),
+                "values": [],
+            }
+            table.columns.append(column)
+        
+        if record.record_type == VectorSchemaRecordType.Value:
+            column["values"].append(
+                {"value": record.value, "description": record.value_description}
+            )
+
+    return list(tables.values())
 
 
 def convert_table_schema_to_sql_str(
-        table_schema: Dict[str, Union[str, Dict]]
+        table_schema: Dict[str, Union[str, list]]
 ) -> str:
     """
-    Converts an SQL table schema provided as a dictionary to an SQL table creation command
-    For e.g. a table schema specified as below:
-    {
-        "name": "cpov_chase_deposit",
-        "description": "This table contains deposit balances, outflows, cash buffers, etc.",
-        "schema": [
-            {
-                "name": "ymonth",
-                "type": "Integer",
-                "description": "as of date"
-            },
-            {
-                "name": "xref_cl",
-                "type": "varchar",
-                "description": "Unique identifier key for every customers same as experian_consumer_key in other tables"
-            },
-            {`
-                "name": "cash_buffer",
-                "type": "Numeric",
-                "description": "cash buffer in months"
-            }
-        ],
-        "tag": [
-            "deposit"
-        ]
-    }
-    gets converted to:
-    -- This table contains deposit balances, outflows, cash buffers, etc.
-    CREATE TABLE cpov_chase_deposit (
-        /*
-        description: as of date
-        */
-        ymonth Integer;
-        /*
-        description: Unique identifier key for every customers same as experian_consumer_key in other tables
-        */
-        xref_cl varchar;
-        /*
-        description: cash buffer in months
-        */
-        cash_buffer Numeric;
-    )
-    :param table_schema: Schema of the table in dictionary format
-    :return: Table schema specified within the SQL table creation syntax
+    Converts a table schema dictionary (from TableSchema.model_dump()) to a 
+    descriptive SQL CREATE TABLE string for LLM prompts.
     """
-    sql_table_creation_command =(
-        "\n"
-        "-- {table_description}\n"
-        "\n"
-        "CREATE TABLE {table_name} (\n"
-        "{column_values}\n"
-        ");\n"
-    )
-    sql_column_creation_command = """
-    /*
-    description: {description}{col_value_descriptions}
-    */
-    {column_name} {type, \n"""
+    table_name = table_schema.get("table_name", "unknown_table")
+    table_description = table_schema.get("description", "")
+    columns_data = table_schema.get("columns", [])
 
-    sql_column_value_description_specification = """    {value} {description}"""
+    command_parts = []
+    if table_description:
+        command_parts.append(f"-- {table_description}")
+    
+    command_parts.append(f"CREATE TABLE {table_name} (")
 
-    sql_columns: List[str] = []
-    for column in table_schema["columns"]:
-        column_value_description_list: List[str] = []
-    for column_value in column.get("values", []):
-        column_value_description_list.append(
-            sql_column_value_description_specification.format(
-                **{
-                    "value": column_value["value"],
-                    "description": "/ "
-                    + column_value.get("description", "")
-                    if "description" in column_value
-                    and column_value["description"] != ""
-                    else "",
-                }
-            )
-        )
-        assembled_column_value_descriptions = ""
-        if column_value_description_list:
-            value_string = "\n ".join(column_value_description_list)
-            assembled_column_value_descriptions = (
-                f"\n    values:\n  {value_string}"
-            )        
-        sql_columns.append(
-            sql_column_creation_command.format(
-                **{
-                    "description": column["description"],
-                    "col_value_descriptions": assembled_column_value_descriptions,
-                    "column_name": column["name"],
-                    "type": column["type"],
-                }
-            )
-        )
-
-        table_creation_syntax = sql_table_creation_command.format(
-            **{
-                "table_name": table_schema["name"],
-                "table_description": table_schema["description"],
-                "column_values": "".join(sql_columns),
-            }
-        )
-
-        return table_creation_syntax
-
-
-if __name__ == "__main__":
-    schema_list = yaml.safe_load(
-        open("examples/ccb_risk/data/ccb_risk_schema.yml")
-    )
-    for schema_dict in schema_list["tables"]:
-        sql_schema = convert_table_schema_to_sql_str(schema_dict)
-        print(sql_schema)
+    column_definitions = []
+    for column in columns_data:
+        col_def_parts = []
         
+        # Add comment block with description and categorical values
+        col_desc = column.get("description")
+        col_values = column.get("values")
+        if col_desc or col_values:
+            col_def_parts.append("    /*")
+            if col_desc:
+                col_def_parts.append(f"    description: {col_desc}")
+            if col_values:
+                col_def_parts.append("    values:")
+                for val in col_values:
+                    val_desc_str = f" / {val['description']}" if val.get("description") else ""
+                    col_def_parts.append(f"      {val['value']}{val_desc_str}")
+            col_def_parts.append("    */")
+
+        # Add the column name and type
+        col_name = column.get("name", "unknown_col")
+        col_type = column.get("type", "UNKNOWN_TYPE")
+        col_def_parts.append(f"    {col_name} {col_type}")
+        
+        column_definitions.append("\n".join(col_def_parts))
+
+    command_parts.append(",\n".join(column_definitions))
+    command_parts.append(");")
+
+    return "\n".join(command_parts)
 
 
 ================================================
