@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -32,8 +32,8 @@ class ColumnSchema(BaseModel):
     name: str
     type: str
     description: Optional[str] = None
-    values: Optional[List[CategoricalValue]] = None
-    example_values: Optional[List[Any]] = None
+    values: List[CategoricalValue] = Field(default_factory=list)
+    example_values: List[Any] = Field(default_factory=list)
     distinct_count: Optional[int] = None
     null_count: Optional[int] = None
     is_primary_key: Optional[bool] = None
@@ -45,9 +45,9 @@ class TableSchema(BaseModel):
     description: Optional[str] = None
     columns: List[ColumnSchema]
     row_count: Optional[int] = None
-    tags: Optional[List[str]] = None
-    primary_keys: Optional[List[str]] = None
-    foreign_keys: Optional[List[ForeignKey]] = None
+    tags: List[str] = Field(default_factory=list)
+    primary_keys: List[str] = Field(default_factory=list)
+    foreign_keys: List[ForeignKey] = Field(default_factory=list)
 
 
 class DatabaseSchema(BaseModel):
@@ -58,7 +58,7 @@ class Rule(BaseModel):
     rule_name: str
     module_name: Optional[str] = None
     instructions: str
-    tags: Optional[List[str]] = None
+    tags: List[str] = Field(default_factory=list)
     search_content: Optional[str] = None
 
 
@@ -76,7 +76,7 @@ class Example(BaseModel):
     query: str
     module_name: Optional[str] = None
     example: ExampleContent
-    tags: Optional[List[str]] = None
+    tags: List[str] = Field(default_factory=list)
     search_content: Optional[str] = None
 
 
@@ -84,15 +84,9 @@ class Examples(BaseModel):
     examples: List[Example]
 
 
-class KnowledgeAssets(BaseModel):
-    rules: Optional[Rules] = None
-    schema: Optional[DatabaseSchema] = None
-    examples: Optional[Examples] = None
-
-
 class VectorSchema(BaseModel):
     embedding_vector: List[float]
-    search_content: str 
+    search_content: str
     table_description: str
     table_name: str
     tags: List[Any]
@@ -104,14 +98,6 @@ class VectorSchema(BaseModel):
     value_description: str
 
 
-class Resource(BaseModel):
-    data: List[Union[Rule, Example, TableSchema, VectorSchema]]
-    type: ResourceType
-    module_name: str
-    module_type: str
-    formatter: str
-
-
 class RetrievedAsset(BaseModel):
     """
     Data model for a retrieved knowledge asset at record level.
@@ -121,7 +107,7 @@ class RetrievedAsset(BaseModel):
         description="Type of the asset (e.g., 'schema', 'rule', 'example')"
     )
     content: Any = Field(
-        description="Content of the retrieved asset (e.g., schema definition, rule text)"
+        description="Content of the retrieved asset (e.g., a Rule, Example, or TableSchema object)"
     )
     metadata: Dict[str, Any] = Field(
         default_factory=dict,

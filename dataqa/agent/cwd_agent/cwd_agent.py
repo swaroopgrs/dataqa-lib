@@ -58,6 +58,8 @@ from dataqa.utils.agent_util import AgentResponseParser
 from dataqa.utils.langgraph_utils import CONFIGURABLE, DEBUG
 from dataqa.utils.prompt_utils import prompt_type
 from dataqa.utils.utils import cls_from_str
+from dataqa.components.resource_manager.resource_manager import ResourceManager
+from dataqa.services.storage import LocalFileDataSource
 
 
 class CWDState(PlanExecuteState):
@@ -123,34 +125,40 @@ class CWDAgent(Agent):
     ]
 
     def __init__(
-            self, 
-            memory: Memory, 
-            config: CwdAgentDefinitionConfig
+        self,
+        memory: Memory,
+        config: CwdAgentDefinitionConfig,
+        llms: Dict[str, BaseLLM] = None,
+        resource_manager: ResourceManager = None,
+        sql_executor: InMemoryCodeExecutor = None,
     ):
         self.config = config
-        self.llms = {}
 
-        if hasattr(config, "llm_configs") and config.llm_configs:
-            llm_configs_map = {}
-            for name, llm_config in config.llm_configs.items():
-                llm_cls = cls_from_str(llm_config.type)
-                llm_instance_config_model = llm_cls.config_base_model
-                llm_specific_config_obj = llm_instance_config_model(
-                    **llm_config.config
-                )
-                llm_configs_map[name] = llm_cls(config=llm_specific_config_obj)
+        # 1. Use injected components or create them locally (fallback)
+        if llms:
+            self.llms = llms
+        else:
+            # Fallback to creating LLMs from config (local mode)
+            self.llms = {}
+            if hasattr(config, "llm_configs") and config.llm_configs:
+                llm_configs_map = {}
+                for name, llm_config in config.llm_configs.items():
+                    llm_cls = cls_from_str(llm_config.type)
+                    llm_instance_config_model = llm_cls.config_base_model
+                    llm_specific_config_obj = llm_instance_config_model(**llm_config.config)
+                    llm_configs_map[name] = llm_cls(config=llm_specific_config_obj)
 
-            if isinstance(config.llm, CwdAgentLLMReferences):
-                for component in self.components:
-                    llm_name = config.llm.get_component_llm_name(component)
-                    if llm_name in llm_configs_map:
-                        self.llms[component] = llm_configs_map[llm_name]
-                    else:
-                        raise ValueError(
-                            f"LLM configuration '{llm_name}' referenced by '{component}' not found in llm_configs"
-                        )
+                if isinstance(config.llm, CwdAgentLLMReferences):
+                    for component in self.components:
+                        llm_name = config.llm.get_component_llm_name(component)
+                        if llm_name in llm_configs_map:
+                            self.llms[component] = llm_configs_map[llm_name]
+                        else:
+                            raise ValueError(f"LLM config '{llm_name}' not found")
+            else:
+                raise ValueError("No LLM configurations provided either in config or via injection.")
 
-        # load tools and descriptions
+        # 2. Load tools and descriptions (standard setup)
         (
             self.analytics_tools,
             self.analytics_worker_short_tool_description,
@@ -163,6 +171,7 @@ class CWDAgent(Agent):
             self.plot_worker_long_tool_description,
         ) = get_plot_tools_and_descriptions(memory)
 
+        # 3. Instantiate prompt templates (standard setup)
         self.processed_prompts = self._instantiate_prompt_template(
             analytics_worker_short_tool_description=self.analytics_worker_short_tool_description,
             analytics_worker_long_tool_description=self.analytics_worker_long_tool_description,
@@ -170,34 +179,37 @@ class CWDAgent(Agent):
             plot_worker_long_tool_description=self.plot_worker_long_tool_description,
         )
 
-        self.retrieval_sql_exec_config = InMemoryCodeExecutorConfig(
-            name=f"{config.agent_name}_in_memory",
-            component_type="in_memory_executor",
-            data_files=config.workers.retrieval_worker.sql_execution_config.data_files,
-            input=[dict(name="code", type="str")],
-            backend=config.workers.retrieval_worker.sql_execution_config.backend,
-        )
+        # 4. Use injected resource manager or create one locally
+        if resource_manager:
+            self.resource_manager = resource_manager
+        else:
+            # Fallback to creating ResourceManager from config (local mode)
+            resource_manager_cfg_dict = config.resource_manager_config.config
+            asset_dir = resource_manager_cfg_dict.get('asset_directory')
+            if not asset_dir:
+                raise ValueError("`asset_directory` not found in resource_manager_config.config for local mode.")
+            
+            local_data_source = LocalFileDataSource(asset_directory=asset_dir)
+            self.resource_manager = ResourceManager(data_source=local_data_source)
 
-        resource_manager_cls = cls_from_str(config.resource_manager_config.type)
-        self.resource_manager = resource_manager_cls(
-            config=config.resource_manager_config.config
-        )
+        # 5. Store the SQL executor (injected or None) to be passed to the worker
+        self.sql_executor = sql_executor
 
+        # 6. Instantiate the retriever (standard setup)
         self.retriever = cls_from_str(config.retriever_config.type)(
             config=config.retriever_config.config,
             resource_manager=self.resource_manager,
         )
-
         self.retriever.set_input_mapping(dict(query="query"))
         retriever_output = {}
         for field in self.retriever.output_base_model.__fields__:
-            if field.split("_")[-1] in ["rule", "example", "schema"]:
-                retriever_output[field] = field
+            retriever_output[field] = field
         self.retriever.output_mapping = retriever_output
 
+        # 7. Finalize initialization by calling the parent constructor
         super().__init__(
             memory=memory, llm=self.llms["default"]
-        )  # Use default LLM for the base agent
+        )
 
     def _process_prompts_from_config(
         self, prompts_config: CwdAgentPromptsConfig, schema: str
@@ -324,9 +336,14 @@ class CWDAgent(Agent):
         config = RetrievalWorkerConfig(
             name="retrieval_worker",
             sql_prompt=self.processed_prompts["sql_generator_prompt"],
-            sql_execution_config=self.retrieval_sql_exec_config,
+            sql_execution_config=self.config.workers.retrieval_worker.sql_execution_config,
         )
-        worker = RetrievalWorker(memory=memory, llm=llm, config=config)
+        worker = RetrievalWorker(
+            memory=memory, 
+            llm=llm, 
+            config=config, 
+            sql_executor=self.sql_executor
+        )
         worker.set_input_mapping(
             dict(
                 plan="plan",

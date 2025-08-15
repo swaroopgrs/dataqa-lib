@@ -4,49 +4,69 @@ todo:
  - knowledge_extraction
 
 
+This library will be used by a service called DatabaseConnect. The DBC service will provide the library the following
+* S3 callable function to read and write assets (rules, examples and schema). 
+* Opensearch callable function. all the rules examples and schemas will be indexed in opensearch as part of their ingestion. we can use this callable function whenever we want to do vector retrieval
+* if we want to do retrieve all (AllRetreiver), we will use s3. if we want to use vector embedding retrieval we will use opensearch. 
+* For now, lets put opensearch callable related usage into backlog. since for the initial release of the service we will just be retrieving all assets
+* we will also get a sql executor callable for the library to call and execute the sql 
+* we will also be getting a llm callable. currently the library expects base_url, api_key from the library user and we build the azureopenai client. but DBC folks, have thier own client which we should just call for LLM related calls. 
+
+I am thinking of wriring a dbc related inteface in the dataqa library. Here is what the service provides us roughly
+1. config_id
+2. tenant_id
+3. user_query
+4. conversaion_id, 
+5. question_id
+6. callable function for LLM call with inbuilt retry mechanisms..we dont need to do retry on the libarary side. # takes in messages and returns messages 
+7. ConversationHistory
+8. Embedding related callable function..this is the opensearch callable # backlog item
+9. callable for sql executor 
+10. s3 callable that can handle both read and write. we will use this to retrieve all assets and also to save and load dataframes and images
 
 
-# Modify the schema, rules and examples yaml files and support the new structure
-for now only focus on all retriever
-
-# DBC Inference Interface
+every request we get might look like the below
 
 ## Request Response Structure 
 Request:
     query: str
-    conversation history: ConversationHistory (List[Dict[str, Any]]) -> contains (prev query, text response, final_df_names, final_img_names)
-
-Response:
-    question_id: str
-    conversation_id: str
+    conversation history: ConversationHistory  {query, output_text, output_df_names} # we can ignore output_image_names since we are not going to consume It
+    # output_df_names will have s3 paths and we will be loading the df from there to construct the history to answer the query
+        
+Response BaseModel:
     text: str # final output text
-    final_df_names: List # names of dfs saved in s3
-    final_image_names: List  # names of images saved in s3
-    steps: List[Dict]
-        name: str # component name (e.g. planner)
-        content: str # plan response or worker response
-        df_names: [] # name of the dataframe 
-        img_names: [] # names of the images
+    output_df_names: List[str] # names of dfs saved in s3
+    output_image_names: List[str]  # names of images saved in s3
+    steps: List[StepResponse] # intermediate steps
 
-## DBC Client
-    config_id
-    tenant_id
-    llm_callable # takes in messages and returns messages 
-    s3_callable # both read and write supported here
-    sql_executor_callable # to execute sql
+StepResponse BaseModel
+    name: str # name of the intermediate step
+    content: str = "" # output of the intermediate step
 
-    method: process_query(user_query: str, conversation_history: ConversationHistory, conversation_id: str, question_id: str) -> Response
+DBCService will be using CWDAgent to answer the questions..
 
-## LLM Callable 
+At the end dataqa library should support local yaml loading (may be a local interface idk) and dbc interface which will load from s3 and stuff. 
 
-## SQL execute callable
+dbcclient could be something like this 
 
-
-
-
-
-
-
+class DBCClient:
+    """
+    Main client interface for DBC service integration.
+    
+    This class provides a simple process_query interface that encapsulates all
+    DBC-specific logic and coordinates between DataQA components and DBC callable functions.
+    """
+    
+    def __init__(
+        self,
+        config_id: str,
+        tenant_id: str,
+        llm_callable: Callable,
+        s3_callable: Callable,
+        sql_callable: Callable,
+        agent_config_path: str = "default_cwd_agent_config.yml",
+        **kwargs
+    ):
 ==================
 
 This is all the code you need to see that is relevant for that context. There may be few references to other code but you can ignore it. 
@@ -56,4 +76,267 @@ You wont be able to run the code since this can only run on a server with the ri
 Do not write unit tests or any kind of tests. i absolutely do not need them now.
 
 Task:
-I want to change the schema.yml, example.yml and rules.yml files to a new format. 
+I want to change the schema.yml, examples.yml and rules.yml files to a new format. Below are the new formats
+
+```schema.yml
+tables:
+  - table_name: PROD_BD_TH_FLAT_V3
+    description: This table contains information about customer transaction details.
+    row_count: 4500 # optional
+    tags:  # list
+      - deposit
+    primary_keys:  # list
+      - ACCT_COUNTRY_CD
+    foreign_keys: # list
+      - column: ACCT_COUNTRY_CD
+        reference_table: EIS_D_CUST_PORTFOLIO
+        reference_column: CUST_COUNTRY_CD
+    columns:
+      - name: ACCT_COUNTRY_CD
+        type: TEXT
+        description: Party Address Country Code - The portion of a party's address that is the encoded representation of a geographic area representing a country.
+        example_values: ["1", "2", "3"] # optional
+        distinct_count: 4500 # optional
+        null_count: 0 # optional
+        is_primary_key: true # optional
+        foreign_key: null # optional
+      - name: COUNTRY
+        type: TEXT
+        description: Party Address Country Code - The portion of a party's address that is the encoded representation of a geographic area representing a country.
+        example_values: ["1", "2", "3"]
+        distinct_count: 4500 # optional
+        null_count: 0 # optional
+        is_primary_key: false # optional
+        foreign_key: null # optional
+      - name: MOP_CD
+        type: TEXT
+        description: Payment method code - Codifies the method used to pay for the exchange of money, goods or services between a merchant and their customer.
+      - name: TXN_TYPE
+        type: TEXT
+        description: Transaction Type Code - Codifies a grouping of payment transactions with similar processing characteristics such as retails transactions, mail order transactions, etc.
+      - name: SUBM_DT_YYYYMM
+        type: NUMBER
+        description: Settlement File Submission Timestamp - Designates the hour (hh), minute (mm), seconds (ss) and date (if timestamp) or year (YYYY), month (MM), and day (DD) (if date) when a file of transactions were submitted for a merchant regarding monetary/non-monetary credit or debit transactions for billing and reporting purposes. The file can be submitted by the merchant or an internal system of the Firm.
+      - name: CO_ID
+        type: TEXT
+        description: Company Identifier - Identifier for a company where there are multiple accounts related to the customer. This is the ability to link them together.
+      - name: CURRENCY_CD
+        type: TEXT
+        description: Settlement Currency Code - Codifies the monetary unit that is used to resolve the outstanding transaction between two parties. (such as Merchant Accounts, Company, Cardholder Accounts, etc.)
+      - name: MBR_ENT
+        type: TEXT
+        description: Merchant Acquirer Reporting Identifier - A unique identifier for a merchant or group of merchants at a company, transaction division, or reporting group level used for transaction reporting purposes for the merchant.
+      - name: OUR_AUTH_RESPONSE
+        type: TEXT
+        description: Firm Authorization Response Code - Codifies the Firm's representation of the authorization response code being sent back to the merchant during credit card authorization.
+      - name: SUBM_DT
+        type: TEXT
+        description: Settlement File Submission Timestamp - Designates the hour (hh), minute (mm), seconds (ss) and date (if timestamp) or year (YYYY), month (MM), and day (DD) (if date) when a file of transactions were submitted for a merchant regarding monetary/non-monetary credit or debit transactions for billing and reporting purposes. The file can be submitted by the merchant or an internal system of the Firm.
+      - name: TXN_DETAIL_ID
+        type: TEXT
+        description: Transaction Identifier - Identifies a unique occurrence of a transaction.
+      - name: PTENDPOINT
+        type: TEXT
+        description: Payment Endpoint Code - Codifies the payment source responsible for funding the transaction that was processed on behalf of the merchant.
+      - name: GROSS_SALES_UNITS
+        type: NUMBER
+        description: Transaction Count - Enumerates the occurrences of any transaction within a given period.
+      - name: GROSS_SALES_USD
+        type: NUMBER
+        description: Finance Profitability Gross Sales Amount - Specifies the monetary value of the sum of merchandise purchase amounts posted to the account during a given period.
+      - name: SETTLED_CURRENCY_CD
+        type: TEXT
+        description: Settlement Currency Code - Codifies the monetary unit that is used to resolve the outstanding transaction between two parties. (such as Merchant Accounts, Company, Cardholder Accounts, etc.)
+
+  - table_name: EIS_D_CUST_PORTFOLIO
+    description: This table contains details about customer hierarchy.
+    tags: []
+    primary_keys: []
+    foreign_keys: []
+    columns:
+      - name: CUST_KEY
+        type: NUMBER
+        description: Surrogate Key Identifier - Identifies a unique occurrence of a system generated alternate key based on the natural key. Used to join across various tables as this is faster than joining on natural keys and is not the customer facing account number.
+      - name: CUST_ID
+        type: TEXT
+        description: Merchant Identifier - Identifies a merchant acquiring account that processes transactions on one of the Firm's payment processing systems. This identifier can be from any of the Firm's payment processing systems. The identifier can be at varying levels of the account hierarchy such as the company, business unit, transaction division, etc. When necessary, the hierarchy level should be defined by corresponding attribute merchant hierarchy level code.
+      - name: BANK_ENTERPRISE_CUST_ID
+        type: TEXT
+        description: Enterprise Party Identifier, ECID, Enterprise ID - The Firm-declared authoritative unique identifier assigned to an external party involved in some manner with the Firm. This is a system-generated element that uses party name, address, and Tax Government Issued Identifier to define a unique individual or non-individual. The identifier is used for operational purposes. This critical data element is commonly referred to as the ECI (Enterprise Customer ID) or ECID and was formerly called the Enterprise Customer Identifier.
+      - name: CUST_NAME
+        type: TEXT
+        description: Merchant Doing Business As Name, TD Name - The moniker given to an alias name for a Merchant labeled as D.B.A. that is different from the legal name.
+      - name: CUST_TYPE_CD
+        type: TEXT
+        description: Merchant Hierarchy Level Code - Codifies the level of the merchant relationship as it relates to the acquiring account.
+        values:
+          - value: BU
+            description: Business Unit
+          - value: TD
+            description: Transaction Division
+          - value: CO
+            description: Company Highest Level
+          - value: OU
+            description: First Data Merchant Services Outlet Number
+          - value: CH
+            description: First Data Merchant Services North Chain Number
+      - name: CUST_STATE_CD
+        type: TEXT
+        description: Party Address State Province Code - Classifies a geographic area that represents a first level, legal and political subdivision of a country; for example, Virginia, Bavaria.
+      - name: CUST_COUNTRY_CD
+        type: TEXT
+        description: Party Address Country Code - A code that identifies the Country, a Geographic Area, that is recognized as an independent political unit in world affairs. Note: This data element is a child of the Country Code CDE and valid values are based on ISO standards. The physical country code of the merchant.
+      - name: CUST_EXTL_ID
+        type: TEXT
+        description: Merchant Acquirer Reporting Identifier, TD_ID, TD_Number - Identifies a unique occurrence of reporting identifier used for transaction reporting that identifies a merchant or group of merchants at a company, transaction division, or reporting group level. This may be the same level as one of the hierarchy levels. This is commonly referred to as PTMBRENT.
+      - name: CUST_STAT
+        type: TEXT
+        description: Merchant Acquirer Account Status Code - Codifies the status of a Merchant card processing account number as set up for the merchant.
+      - name: MCC_CD
+        type: TEXT
+        description: Merchant Category Code - Codifies a merchant's primary goods or services sold, this is a four-digit number associated with a business by a credit/debit card merchant acquirer or merchant transaction processor.
+      - name: MCC_DESC
+        type: TEXT
+        description: Merchant Category Description - Codifies a merchant's primary goods or services sold, description of a business by a credit/debit card merchant acquirer or merchant transaction processor.
+      - name: MKTSEG_CD
+        type: TEXT
+        description: Account Management Segment Code - Codifies the relationship management team responsible for the Special Markets, Regional or National accounts by account executive profile.
+      - name: OWNRSHP_COMP_LVL_1_NAME
+        type: TEXT
+        description: Merchant Acquirer Company Name, Company Name, Co Name - The label given to a unique entity which represents a relationship at the highest of the three levels of the account hierarchy of the back-end proprietary merchant acquiring processing platform. Complex organizations may be represented by grouping multiple company identifiers. The full hierarchy consists of company identifier, business unit identifier, and transaction division identifier.
+      - name: OWNRSHP_COMP_LVL_1_EXTL_ID
+        type: TEXT
+        description: Merchant Acquirer Reporting Identifier, Company ID, Co_ID, Company Number, Co Number - Identifies a unique occurrence of reporting identifier used for transaction reporting that identifies a merchant or group of merchants at a company, transaction division, or reporting group level. This may be the same level as one of the hierarchy levels. This is commonly referred to as PTMBRENT.
+```
+
+```examples.yml
+examples:
+  - query: "What is the total sales amount for Visa in 2023?"
+    module_name: code_generator
+    example:
+      code: |
+        SELECT SUM(SALES_AMT) AS total_sales
+        FROM sales_data
+        WHERE TD IN ('VI', 'VR', 'CR', 'CZ')
+          AND SALES_DATE >= '2023-01-01' AND SALES_DATE <= '2023-12-31';
+      question: What is the total sales amount for Visa in 2023?
+      reasoning: To calculate the total sales amount for Visa in 2023, we need to sum the SALES_AMT for all transactions where the TD (Transaction Descriptor) is one of the Visa codes ('VI', 'VR', 'CR', 'CZ') and the SALES_DATE falls within the year 2023.
+    tags: []
+    search_content: ""
+
+  - query: "What is the total sales amount for Visa in 2023?"
+    module_name: code_generator # if module_name not given we use this example in all modules wherever required
+    example:
+      code: |
+        SELECT SUM(SALES_AMT) AS total_sales
+        FROM sales_data
+        WHERE TD IN ('VI', 'VR', 'CR', 'CZ')
+          AND SALES_DATE >= '2023-01-01' AND SALES_DATE <= '2023-12-31';
+      question: What is the total sales amount for Visa in 2023?
+      reasoning: To calculate the total sales amount for Visa in 2023, we need to sum the SALES_AMT for all transactions where the TD (Transaction Descriptor) is one of the Visa codes ('VI', 'VR', 'CR', 'CZ') and the SALES_DATE falls within the year 2023.
+    tags: []
+    search_content: ""
+```
+
+```rules.yml
+rules:
+  - rule_name: "general_guidelines_1"
+    module_name: planner
+    instructions: |
+        Please do not use analytics worker. Try to complete analytics in retrieval_worker through SQL
+    tags: []
+    search_content: ""
+
+  - rule_name: "general_guidelines_1"
+    module_name: replanner
+    instructions: |
+        Please do not use analytics worker. Try to complete analytics in retrieval_worker through SQL
+        - To get sales volume for Visa, sum over the values in ('VI', 'VR', 'CR', 'CZ')
+        - For question asking TD, which is one code of customer type, use column CUST_TYPE_CD
+    tags: []
+    search_content: ""
+
+  - rule_name: "general_guidelines_2"
+    module_name: retrieval_worker
+    instructions: |
+        - To get sales volume for Visa, sum over the values in ('VI', 'VR', 'CR', 'CZ')
+    tags: []
+    search_content: ""
+
+  - rule_name: "general_guidelines_2"
+    module_name: "" # if module_name not given, we use these rules in all modules wherever required
+    instructions: |
+        - For question asking TD, which is one code of customer type, use column CUST_TYPE_CD
+    tags: []
+    search_content: ""
+```
+
+Giving some rough pydantic models for you to work with. We already have similar things in resource_manager.py. Make a judgement on how better to consolidate
+
+class FileTypes(StrEnum):
+    RULES = auto()
+    SCHEMA = auto()
+    EXAMPLES = auto()
+
+class CategoricalValue(BaseModel):
+    value: str
+    description: Optional[str] = None
+
+class ForeignKey(BaseModel):
+    column: str
+    reference_table: str
+    reference_column: str
+
+class ColumnSchema(BaseModel):
+    name: str
+    type: str
+    description: Optional[str] = None
+    values: Optional[List[CategoricalValue]] = None
+    example_values: Optional[List[Any]] = None
+    distinct_count: Optional[int] = None
+    null_count: Optional[int] = None
+    is_primary_key: Optional[bool] = None
+    foreign_key: Optional[str] = None
+
+class TableSchema(BaseModel):
+    table_name: struv sync --link-mode=copy
+    description: Optional[str] = None
+    columns: List[ColumnSchema]
+    row_count: Optional[int] = None
+    tags: Optional[List[str]] = None
+    primary_keys: Optional[List[str]] = None
+    foreign_keys: Optional[List[ForeignKey]] = None
+
+class DatabaseSchema(BaseModel):
+    tables: List[TableSchema]
+
+class Rule(BaseModel):
+    rule_name: str
+    module_name: Optional[str] = None
+    instructions: str
+    tags: Optional[List[str]] = None
+    search_content: Optional[str] = None
+
+class Rules(BaseModel):
+    rules: List[Rule]
+
+
+class ExampleContent(BaseModel):
+    question: str
+    code: str
+    reasoning: Optional[str] = None
+
+class Example(BaseModel):
+    query: str
+    module_name: Optional[str] = None
+    example: ExampleContent
+    tags: Optional[List[str]] = None
+    search_content: Optional[str] = None
+
+class Examples(BaseModel):
+    examples: List[Example]
+
+class KnowledgeAssets(BaseModel):
+    rules: Optional[Rules] = None
+    schema: Optional[DatabaseSchema] = None
+    examples: Optional[Examples] = None

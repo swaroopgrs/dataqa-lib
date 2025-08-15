@@ -1,16 +1,9 @@
-metadata:
-  version: v1.0
-  updated_at: 2025/05/01
-  data_source: snowflake
-  query_language: SQL 
-  database_name: merchant_payments
-
 tables:
-  - name: PROD_BD_TH_FLAT_V3
+  - table_name: PROD_BD_TH_FLAT_V3
     description: This table contains information about customer transaction details.
     tags: []
-    primary_key: ''
-    foreign_key: []
+    primary_keys: []
+    foreign_keys: []
     columns:
       - name: ACCT_COUNTRY_CD
         type: TEXT
@@ -26,7 +19,7 @@ tables:
         description: Transaction Type Code - Codifies a grouping of payment transactions with similar processing characteristics such as retails transactions, mail order transactions, etc.
       - name: SUBM_DT_YYYYMM
         type: NUMBER
-        description: Settlement File Submission Timestamp - Designates the hour (hh), minute (mm), seconds (ss) and date (if timestamp) or year (YYYY), month (MM), and day (DD) (if date) when a file of transactions were submitted for a merchant regarding monetary/non-monetary credit or debit transactions for billing and reporting purposes. The file can be submitted by the merchant or an internal system of the Firm.
+        description: "Settlement File Submission Timestamp - Designates the hour (hh), minute (mm), seconds (ss) and date (if timestamp) or year (YYYY), month (MM), and day (DD) (if date) when a file of transactions were submitted for a merchant regarding monetary/non-monetary credit or debit transactions for billing and reporting purposes. The file can be submitted by the merchant or an internal system of the Firm."
       - name: CO_ID
         type: TEXT
         description: Company Identifier - Identifier for a company where there are multiple accounts related to the customer. This is the ability to link them together.
@@ -41,7 +34,7 @@ tables:
         description: Firm Authorization Response Code - Codifies the Firm's representation of the authorization response code being sent back to the merchant during credit card authorization.
       - name: SUBM_DT
         type: TEXT
-        description: Settlement File Submission Timestamp - Designates the hour (hh), minute (mm), seconds (ss) and date (if timestamp) or year (YYYY), month (MM), and day (DD) (if date) when a file of transactions were submitted for a merchant regarding monetary/non-monetary credit or debit transactions for billing and reporting purposes. The file can be submitted by the merchant or an internal system of the Firm.
+        description: "Settlement File Submission Timestamp - Designates the hour (hh), minute (mm), seconds (ss) and date (if timestamp) or year (YYYY), month (MM), and day (DD) (if date) when a file of transactions were submitted for a merchant regarding monetary/non-monetary credit or debit transactions for billing and reporting purposes. The file can be submitted by the merchant or an internal system of the Firm."
       - name: TXN_DETAIL_ID
         type: TEXT
         description: Transaction Identifier - Identifies a unique occurrence of a transaction.
@@ -58,21 +51,21 @@ tables:
         type: TEXT
         description: Settlement Currency Code - Codifies the monetary unit that is used to resolve the outstanding transaction between two parties. (such as Merchant Accounts, Company, Cardholder Accounts, etc.)
 
-  - name: EIS_D_CUST_PORTFOLIO
+  - table_name: EIS_D_CUST_PORTFOLIO
     description: This table contains details about customer hierarchy.
     tags: []
-    primary_key: ''
-    foreign_key: []
+    primary_keys: []
+    foreign_keys: []
     columns:
       - name: CUST_KEY
         type: NUMBER
-        description: Surrogate Key Identifier - Identifies a unique occurrence of a system generated alternate key based on the natural key. Used to join across various tables as this is faster than joining on natural keys and is not the customer facing account number.
+        description: "Surrogate Key Identifier - Identifies a unique occurrence of a system generated alternate key based on the natural key. Used to join across various tables as this is faster than joining on natural keys and is not the customer facing account number."
       - name: CUST_ID
         type: TEXT
-        description: Merchant Identifier - Identifies a merchant acquiring account that processes transactions on one of the Firm's payment processing systems. This identifier can be from any of the Firm's payment processing systems. The identifier can be at varying levels of the account hierarchy such as the company, business unit, transaction division, etc. When necessary, the hierarchy level should be defined by corresponding attribute merchant hierarchy level code.
+        description: "Merchant Identifier - Identifies a merchant acquiring account that processes transactions on one of the Firm's payment processing systems. This identifier can be from any of the Firm's payment processing systems. The identifier can be at varying levels of the account hierarchy such as the company, business unit, transaction division, etc. When necessary, the hierarchy level should be defined by corresponding attribute merchant hierarchy level code."
       - name: BANK_ENTERPRISE_CUST_ID
         type: TEXT
-        description: Enterprise Party Identifier, ECID, Enterprise ID - The Firm-declared authoritative unique identifier assigned to an external party involved in some manner with the Firm. This is a system-generated element that uses party name, address, and Tax Government Issued Identifier to define a unique individual or non-individual. The identifier is used for operational purposes. This critical data element is commonly referred to as the ECI (Enterprise Customer ID) or ECID and was formerly called the Enterprise Customer Identifier.
+        description: "Enterprise Party Identifier, ECID, Enterprise ID - The Firm-declared authoritative unique identifier assigned to an external party involved in some manner with the Firm. This is a system-generated element that uses party name, address, and Tax Government Issued Identifier to define a unique individual or non-individual. The identifier is used for operational purposes. This critical data element is commonly referred to as the ECI (Enterprise Customer ID) or ECID and was formerly called the Enterprise Customer Identifier."
       - name: CUST_NAME
         type: TEXT
         description: Merchant Doing Business As Name, TD Name - The moniker given to an alias name for a Merchant labeled as D.B.A. that is different from the legal name.
@@ -95,10 +88,10 @@ tables:
         description: Party Address State Province Code - Classifies a geographic area that represents a first level, legal and political subdivision of a country; for example, Virginia, Bavaria.
       - name: CUST_COUNTRY_CD
         type: TEXT
-        description: Party Address Country Code - A code that identifies the Country, a Geographic Area, that is recognized as an independent political unit in world affairs. Note: This data element is a child of the Country Code CDE and valid values are based on ISO standards. The physical country code of the merchant.
+        description: "Party Address Country Code - A code that identifies the Country, a Geographic Area, that is recognized as an independent political unit in world affairs. Note: This data element is a child of the Country Code CDE and valid values are based on ISO standards. The physical country code of the merchant."
       - name: CUST_EXTL_ID
         type: TEXT
-        description: Merchant Acquirer Reporting Identifier, TD_ID, TD_Number - Identifies a unique occurrence of reporting identifier used for transaction reporting that identifies a merchant or group of merchants at a company, transaction division, or reporting group level. This may be the same level as one of the hierarchy levels. This is commonly referred to as PTMBRENT.
+        description: "Merchant Acquirer Reporting Identifier, TD_ID, TD_Number - Identifies a unique occurrence of reporting identifier used for transaction reporting that identifies a merchant or group of merchants at a company, transaction division, or reporting group level. This may be the same level as one of the hierarchy levels. This is commonly referred to as PTMBRENT."
       - name: CUST_STAT
         type: TEXT
         description: Merchant Acquirer Account Status Code - Codifies the status of a Merchant card processing account number as set up for the merchant.
@@ -113,7 +106,7 @@ tables:
         description: Account Management Segment Code - Codifies the relationship management team responsible for the Special Markets, Regional or National accounts by account executive profile.
       - name: OWNRSHP_COMP_LVL_1_NAME
         type: TEXT
-        description: Merchant Acquirer Company Name, Company Name, Co Name - The label given to a unique entity which represents a relationship at the highest of the three levels of the account hierarchy of the back-end proprietary merchant acquiring processing platform. Complex organizations may be represented by grouping multiple company identifiers. The full hierarchy consists of company identifier, business unit identifier, and transaction division identifier.
+        description: "Merchant Acquirer Company Name, Company Name, Co Name - The label given to a unique entity which represents a relationship at the highest of the three levels of the account hierarchy of the back-end proprietary merchant acquiring processing platform. Complex organizations may be represented by grouping multiple company identifiers. The full hierarchy consists of company identifier, business unit identifier, and transaction division identifier."
       - name: OWNRSHP_COMP_LVL_1_EXTL_ID
         type: TEXT
-        description: Merchant Acquirer Reporting Identifier, Company ID, Co_ID, Company Number, Co Number - Identifies a unique occurrence of reporting identifier used for transaction reporting that identifies a merchant or group of merchants at a company, transaction division, or reporting group level. This may be the same level as one of the hierarchy levels. This is commonly referred to as PTMBRENT.
+        description: "Merchant Acquirer Reporting Identifier, Company ID, Co_ID, Company Number, Co Number - Identifies a unique occurrence of reporting identifier used for transaction reporting that identifies a merchant or group of merchants at a company, transaction division, or reporting group level. This may be the same level as one of the hierarchy levels. This is commonly referred to as PTMBRENT."

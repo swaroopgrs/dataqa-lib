@@ -1,59 +1,46 @@
-metadata:
-  version: v1.0
-  updated_at: 2025/05/01
-
-data:
-  - module_name: planner
-    module_type: dataqa.components.llm.base_llm_component.BaseLLMComponent
-    formatter: |-
-      {instructions}
-    data:
-      - name: general_guidelines
-        search_content: ''
-        tags: []
-        instructions: |
-          Please do not use analytics worker. Try to complete analytics in retrieval_worker through SQL
-          - To get sales volume for Visa, sum over the values in ('VI', 'VR', 'CR', 'CZ')
-          - For question asking TD, which is one code of customer type, use column CUST_TYPE_CD
-      - name: code_format
-        search_content: ''
-        tags: []
-        instructions: |
-          - For questions about sales volume, include the relevant date range in the query.
-          - If the query involves multiple TDs, consider using a subquery to aggregate results.
-  - module_name: replanner
-    module_type: dataqa.components.llm.base_llm_component.BaseLLMComponent
-    formatter: |-
-      {instructions}
-    data:
-      - name: general_guidelines
-        search_content: ''
-        tags: []
-        instructions: |
-          Please do not use analytics worker. Try to complete analytics in retrieval_worker through SQL
-          - To get sales volume for Visa, sum over the values in ('VI', 'VR', 'CR', 'CZ')
-          - For question asking TD, which is one code of customer type, use column CUST_TYPE_CD
-      - name: code_format
-        search_content: ''
-        tags: []
-        instructions: |
-          - For questions about sales volume, include the relevant date range in the query.
-          - If the query involves multiple TDs, consider using a subquery to aggregate results.
-  - module_name: retrieval_worker
-    module_type: dataqa.components.llm.base_llm_component.BaseLLMComponent
-    formatter: |-
-      {instructions}
-    data:
-      - name: general_guidelines
-        search_content: ''
-        tags: []
-        instructions: |
-          Please do not use analytics worker. Try to complete analytics in planner through SQL
-          - To get sales volume for Visa, sum over the values in ('VI', 'VR', 'CR', 'CZ')
-          - For question asking TD, which is one code of customer type, use column CUST_TYPE_CD
-      - name: code_format
-        search_content: ''
-        tags: []
-        instructions: |
-          - For questions about sales volume, include the relevant date range in the query.
-          - If the query involves multiple TDs, consider using a subquery to aggregate results.
+rules:
+  - rule_name: planner_general_guidelines
+    module_name: planner
+    instructions: |
+      Please do not use analytics worker. Try to complete analytics in retrieval_worker through SQL
+      - To get sales volume for Visa, sum over the values in ('VI', 'VR', 'CR', 'CZ')
+      - For question asking TD, which is one code of customer type, use column CUST_TYPE_CD
+    tags: []
+    search_content: ''
+  - rule_name: planner_code_format
+    module_name: planner
+    instructions: |
+      - For questions about sales volume, include the relevant date range in the query.
+      - If the query involves multiple TDs, consider using a subquery to aggregate results.
+    tags: []
+    search_content: ''
+  - rule_name: replanner_general_guidelines
+    module_name: replanner
+    instructions: |
+      Please do not use analytics worker. Try to complete analytics in retrieval_worker through SQL
+      - To get sales volume for Visa, sum over the values in ('VI', 'VR', 'CR', 'CZ')
+      - For question asking TD, which is one code of customer type, use column CUST_TYPE_CD
+    tags: []
+    search_content: ''
+  - rule_name: replanner_code_format
+    module_name: replanner
+    instructions: |
+      - For questions about sales volume, include the relevant date range in the query.
+      - If the query involves multiple TDs, consider using a subquery to aggregate results.
+    tags: []
+    search_content: ''
+  - rule_name: retrieval_worker_general_guidelines
+    module_name: retrieval_worker
+    instructions: |
+      Please do not use analytics worker. Try to complete analytics in planner through SQL
+      - To get sales volume for Visa, sum over the values in ('VI', 'VR', 'CR', 'CZ')
+      - For question asking TD, which is one code of customer type, use column CUST_TYPE_CD
+    tags: []
+    search_content: ''
+  - rule_name: retrieval_worker_code_format
+    module_name: retrieval_worker
+    instructions: |
+      - For questions about sales volume, include the relevant date range in the query.
+      - If the query involves multiple TDs, consider using a subquery to aggregate results.
+    tags: []
+    search_content: ''
