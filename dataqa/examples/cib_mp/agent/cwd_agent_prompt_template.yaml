@@ -41,45 +41,33 @@ llm:
   plot_worker: gpt-4.1
 
 resource_manager_config:
-  type: dataqa.components.resource_manager.resource_manager.resource_manager
+  type: dataqa.components.resource_manager.resource_manager.ResourceManager
   config:
-    source: yaml
-    resources:
-      - type: rule
-        file_path: "<CONFIG_DIR/../data/rules.yml"
-        api_url: ""
-      - type: schema
-        file_path: "<CONFIG_DIR/../data/schema.yml"
-        api_url: ""
-      - type: example
-        file_path: "<CONFIG_DIR/../data/examples.yml"
-        api_url: ""
+    asset_directory: "<CONFIG_DIR>/../data/"
 
 retriever_config:
   type: dataqa.components.retriever.base_retriever.AllRetriever
   config:
     name: all_retriever
-    retriever_method: "all"
+    retrieval_method: "all"
     resource_types:
       - rule
       - schema
       - example
-    module_name: 
+    module_names:
       - planner
       - replanner
       - retrieval_worker
       - analytics_worker
       - plot_worker
-    parameters:
-      k: 10
 
 workers:
   retrieval_worker:
     sql_execution_config:
       data_files:
-        - path: "<CONFIG_DIR>/../data/fake_PROD_BD_TH_FLAT_V3.csv"
+        - path: "<CONFIG_DIR>/../data/FAKE_PROD_BD_TH_FLAT_V3.csv"
           table_name: "PROD_BD_TH_FLAT_V3"
-        - path: "<CONFIG_DIR>/../data/fake_EIS_D_CUST_PORTFOLIO.csv"
+        - path: "<CONFIG_DIR>/../data/FAKE_EIS_D_CUST_PORTFOLIO.csv"
           table_name: "EIS_D_CUST_PORTFOLIO"
 
 prompts:
