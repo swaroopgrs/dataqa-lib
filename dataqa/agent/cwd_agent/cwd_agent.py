@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from operator import add
 from typing import Annotated, Coroutine, Dict, List, Tuple
@@ -21,6 +22,7 @@ from dataqa.agent.cwd_agent.prompt import (
     instantiate_sql_generator_prompt_by_use_case,
 )
 from dataqa.components.code_executor.in_memory_code_executor import (
+    InMemoryCodeExecutor,
     InMemoryCodeExecutorConfig,
 )
 from dataqa.components.plan_execute.analytics_worker import (
@@ -29,8 +31,8 @@ from dataqa.components.plan_execute.analytics_worker import (
     AnalyticsWorkerState,
 )
 from dataqa.components.plan_execute.condition import (
-    PlanConditionEdge, 
-    PlanConditionEdgeConfig,
+    PlanConditionalEdge, 
+    PlanConditionalEdgeConfig,
 )
 from dataqa.components.plan_execute.planner import Planner, PlannerConfig
 from dataqa.components.plan_execute.plot_worker import (
@@ -398,8 +400,8 @@ class CWDAgent(Agent):
         return worker
 
     def build_plan_condition_function(self) -> Coroutine:
-        config = PlanConditionEdgeConfig(name="plan_condition")
-        plan_condition = PlanConditionEdge(config=config)
+        config = PlanConditionalEdgeConfig(name="plan_condition")
+        plan_condition = PlanConditionalEdge(config=config)
         plan_condition.set_input_mapping(
             dict(final_response="final_response", plan="plan")
         )
@@ -455,13 +457,15 @@ class CWDAgent(Agent):
         config_dir = config_path.parent
 
         with open(config_path, "r") as f:
-            config_str = f.read().replace("<CONFIG_DIR>", str(config_dir))
+            config_str_template = f.read()
+            config_str = os.path.expandvars(config_str_template)
+            config_str = config_str.replace("<CONFIG_DIR>", str(config_dir))
             raw_config_dict = yaml.safe_load(config_str)
 
         # Resolve paths for data files relative to the config file's location
         worker_config = raw_config_dict.get("workers", {})
         if worker_config:
-            retrieval_config = worker_config.get("retrieval", {})
+            retrieval_config = worker_config.get("retrieval_worker", {})
             if retrieval_config:
                 sql_execution_config = retrieval_config.get(
                     "sql_execution_config", {}
