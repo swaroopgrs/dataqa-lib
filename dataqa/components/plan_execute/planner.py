@@ -50,7 +50,7 @@ class PlannerOutput(BaseModel):
 
 class Planner(Component):
     """
-    Planner CComponent
+    Planner Component
 
     Input: 
         query: str
@@ -60,9 +60,9 @@ class Planner(Component):
     """
 
     component_type = "Planner"
-    config_base_model: PlannerConfig
-    input_base_model: PlannerInput
-    output_base_model: PlannerOutput
+    config_base_model = PlannerConfig
+    input_base_model = PlannerInput
+    output_base_model = PlannerOutput
     config: PlannerConfig
 
     def __init__(

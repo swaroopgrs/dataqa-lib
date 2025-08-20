@@ -124,10 +124,10 @@ class Component(ABC):
                 raise ValueError(
                     f"Field '{field}' is not defined in the input of {self.component_type}"
                 )
-        for field_name, field in field.items():
-            if field.is_required() and field_name not in mapping:
+        for field_name, field_info in fields.items():
+            if field_info.is_required() and field_name not in mapping:
                 raise ValueError(
-                    f"Field '{field_name}' is required in the input of {self.component_type}, but not provided in {INPUT_FROM_STATE}."
+                    f"Field '{field_name}' is required by the input model of {self.component_type}, but it was not provided in the input mapping."
                 )
             
         self.input_mapping = mapping

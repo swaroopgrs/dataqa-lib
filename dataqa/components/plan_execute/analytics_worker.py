@@ -39,7 +39,7 @@ class AnalyticsWorkerState(BaseModel):
 
 
 class AnalyticsWorkerConfig(ComponentConfig):
-    prompt: prompt_type,
+    prompt: prompt_type
     tools: List[str] = Field(
         description="Tool names. Default to None for using all analytics tools",
         default=None,
@@ -64,9 +64,9 @@ class AnalyticsWorkerOutput(BaseModel):
 
 class AnalyticsWorker(Component):
     component_type = "AnalyticsWorker"
-    config_base_model: AnalyticsWorkerConfig
-    input_base_model: AnalyticsWorkerInput
-    output_base_model: AnalyticsWorkerOutput
+    config_base_model = AnalyticsWorkerConfig
+    input_base_model = AnalyticsWorkerInput
+    output_base_model = AnalyticsWorkerOutput
     config: AnalyticsWorkerConfig
 
     def __init__(
