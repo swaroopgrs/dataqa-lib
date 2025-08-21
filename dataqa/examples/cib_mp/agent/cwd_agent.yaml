@@ -1,0 +1,85 @@
+# examples/cib_mp/agent/agent.yml
+# This file is the single source of truth for the local agent configuration.
+# It defines the agent's structure, local data sources, and descriptive content.
+
+agent_name: "cib_mp"
+
+# --- Content Section ---
+# High-level descriptions for prompt construction.
+use_case_name: Merchant Payments
+use_case_description: |
+  In this use case, you work as a AI assistant to answer users' queries about two data tables, PROD_BD_TH_FLAT_V3 and EIS_D_CUST_PORTFOLIO.
+  Users may ask you to extract data from these two tables, with follow-up steps for data analytics and data visualization.
+
+# --- LLM Configuration Section ---
+# Defines the available LLM configurations.
+llm_configs:
+  gpt-4.1:
+    type: "dataqa.core.llm.openai.AzureOpenAI"
+    config:
+      model: "gpt-4.1-2025-04-14"
+      api_version: "2024-08-01-preview"
+      api_type: "azure_ad"
+      temperature: 0
+  gpt-4o:
+    type: "dataqa.core.llm.openai.AzureOpenAI"
+    config:
+      model: "gpt-4o-2024-08-06"
+      api_version: "2024-08-01-preview"
+      api_type: "azure_ad"
+      temperature: 0
+  o3-mini:
+    type: "dataqa.core.llm.openai.AzureOpenAI"
+    config:
+      model: "o3-mini-2025-01-31"
+      api_version: "2025-03-01-preview"
+      api_type: "azure_ad"
+      temperature: 1
+
+# Assigns the defined LLMs to different agent components.
+llm:
+  default: gpt-4.1
+  planner: o3-mini
+  replanner: o3-mini
+  retrieval_worker: gpt-4.1
+  analytics_worker: gpt-4.1
+  plot_worker: gpt-4.1
+
+# --- Asset and Data Source Configuration ---
+# Points to the directory containing asset files (rules.yml, schema.yml, etc.)
+resource_manager_config:
+  type: "dataqa.core.components.resource_manager.resource_manager.ResourceManager"
+  config:
+    asset_directory: "<CONFIG_DIR>/../data/"
+
+# Defines the retriever's structural strategy.
+retriever_config:
+  type: dataqa.core.components.retriever.base_retriever.AllRetriever
+  config:
+    name: all_retriever
+    retrieval_method: "all"
+    resource_types:
+      - rule
+      - schema
+      - example
+    module_names:
+      - planner
+      - replanner
+      - retrieval_worker
+      - analytics_worker
+      - plot_worker
+
+# Defines worker-specific configurations, including the local data source mapping.
+workers:
+  retrieval_worker:
+    sql_execution_config:
+      # This is the correct place for environment-specific file mappings.
+      # The paths are relative to the <CONFIG_DIR> placeholder.
+      name: "sql_executor"
+      data_files:
+        - path: "<CONFIG_DIR>/../data/FAKE_PROD_BD_TH_FLAT_V3.csv"
+          table_name: "PROD_BD_TH_FLAT_V3"
+        - path: "<CONFIG_DIR>/../data/FAKE_ETS_D_CUST_PORTFOLIO.csv"
+          table_name: "EIS_D_CUST_PORTFOLIO"
+  analytics_worker: {}
+  plot_worker: {}

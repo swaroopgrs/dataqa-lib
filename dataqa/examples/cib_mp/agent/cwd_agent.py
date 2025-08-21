@@ -2,82 +2,76 @@ import asyncio
 import os
 from pathlib import Path
 
-from dataqa.agent.cwd_agent.cwd_agent import CWDAgent, CWDState
-from dataqa.memory import Memory
-from dataqa.utils.agent_util import AgentResponseParser
-from dataqa.utils.langgraph_utils import (
-    API_KEY,
-    BASE_URL,
-    CONFIGURABLE,
-    DEFAULT_THREAD,
-    THREAD_ID,
-)
+from dataqa import LocalClient, CoreRequest, CoreResponse
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-
-def run_agent(query):
-    memory = Memory()
-
-    base_url = os.environ.get("OPENAI_API_BASE", "")
-    api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
-
-    if not api_key:
-        raise ValueError("API key is missing")
-    if not base_url:
-        raise ValueError("Base URL is missing")
+async def main():
+    """
+    Main function to initialize the client, send a query, and print the results.
+    """
+    print("🚀 Initializing DataQA LocalClient...")
     
-    config_path = SCRIPT_DIR / "cwd_agent_prompt_template.yaml"
+    # 1. Define the path to the agent's configuration file.
+    #    The LocalClient will use this to build the entire agent and its dependencies.
+    SCRIPT_DIR = Path(__file__).resolve().parent
+    config_path = SCRIPT_DIR / "cwd_agent.yaml"
 
-    agent = CWDAgent.from_config_path(str(config_path), memory)
+    # 2. Instantiate the client.
+    client = LocalClient(config_path=str(config_path))
 
-    state = CWDState(query=query)
-    config = {
-        CONFIGURABLE: {
-            THREAD_ID: DEFAULT_THREAD,
-            API_KEY: api_key,
-            BASE_URL: base_url,
-        }
-    }
+    # 3. Define the query and create a request object.
+    #    The conversation_id is used to maintain state between turns if needed.
+    query = "What is the total gross sales volume by MOP code for co_id 1001 for Q12025 for Visa?"
+    request = CoreRequest(
+        user_query=query,
+        conversation_id="local_test_session_01"  # A unique ID for this conversation.
+    )
 
-    # run agent
-    state, all_events = asyncio.run(agent(state, config))
-    agent_response_parser = AgentResponseParser(all_events, memory, config)
-    agent_response_parser.pretty_print_output()
-    return state, all_events, agent_response_parser
+    print(f"\n▶️  Sending query: '{query}'")
+    
+    # 4. Process the query and await the response.
+    #    This single call orchestrates the entire agentic workflow.
+    response: CoreResponse = await client.process_query(request)
+
+    # 5. Print the structured results from the CoreResponse object.
+    print("\n" + "="*20 + " AGENT RESPONSE " + "="*20)
+    print("\n📝 Final Text Response:")
+    print(response.text)
+
+    if response.output_dataframes:
+        print("\n📊 Output DataFrames:")
+        for i, df in enumerate(response.output_dataframes):
+            print(f"\n--- DataFrame {i+1} ---")
+            # Using to_markdown for clean console output
+            print(df.to_markdown(index=False))
+
+    if response.output_images:
+        print(f"\n🖼️  Generated {len(response.output_images)} image(s).")
+        # For this script, we'll save the images to an 'output' directory.
+        output_dir = SCRIPT_DIR / "output"
+        output_dir.mkdir(exist_ok=True)
+        for i, img_bytes in enumerate(response.output_images):
+            img_path = output_dir / f"output_image_{i+1}.png"
+            with open(img_path, "wb") as f:
+                f.write(img_bytes)
+            print(f"   - Saved image to: {img_path}")
+
+    # The CoreResponse also includes detailed steps for debugging.
+    print("\n" + "="*20 + " DEBUG INFO " + "="*20)
+    print("\n⚙️ Agent Execution Steps:")
+    for step in response.steps:
+        print(f"\n--- {step.name} ---")
+        print(step.content)
+
+    print("\n✅ Script finished.")
 
 
 if __name__ == "__main__":
-    example_questions = [
-        "what is the co_id for td id 881",
-        "what is the market segment for co_id 1003",
-        "what is the company name for td 666",
-        "what is the mcc code associated with td 448",
-        "which country does the td 100 belong?",
-        "which state does the TD 666 belong to?",
-        "what is the name of the TD 881",
-        "what is the cust id for TD 881",
-        "what is the cust key for TD 568",
-        "what is the ecid associated with TD 619",
-        "what companies are associated with ecid 3219824?",
-        "what is the list of active tds in co_id 1005",
-        "what unique mcc are covered under co id 1002?",
-        "give me a count of tds which are having different status in co_id 1004",
-        "are multiple cust keys associated with the td_id?",
-        "what is the list of cust_key and td_id associated with the co_id 1001? along with td name and td region",
-        "what is the list of cust_key and td_id associated with the co_id 1001? along with td name and td region is us",
-        "What is the total gross sales volume and units for 1004 co_id for the date of 18th March 2025?",
-        "What is the total gross sales volume and units for 718 td_id for the date of 20th Feb 2025?",
-        "What is the sales volume for 1005 co_id for the second week of April 2025?",
-        "What is the sales volume for 121 td_id for the second week of April 2025?",
-        "What is the total gross sales volume and units for 1003 co_id for the month of April 2025?",
-        "What is the total gross sales volume and units for 121 td_id for the month of September 2024?",
-        "What is the total gross sales volume and units for 1001 co_id for the Q1 of 2025?",
-        "What is the total gross sales volume and units for 121 td_id for the Q1 of 2025?",
-        "What is the total gross sales volume by MOP code for co_id 1003 for the month of Jan 2025?",
-        "What is the total gross sales volume by MOP code for co_id 1001 for Q12025 for Visa?",
-        "What is the trend of gross sales volume for co_id 1003 over the past quarter?",
-        "Plot the daily gross sales volume for co_id 1005 during the second week of April 2025",
-    ]
-    query = "What is the total gross sales volume by MOP code for co_id 1001 for Q12025 for Visa?"
-    state, all_events, agent_response_parser = run_agent(query)
-
+    # Ensure necessary environment variables are set before running.
+    # The LocalClient relies on these for its LLM components.
+    if not os.environ.get("AZURE_OPENAI_API_KEY"):
+        raise ValueError("Please set the AZURE_OPENAI_API_KEY environment variable.")
+    if not os.environ.get("OPENAI_API_BASE"):
+        raise ValueError("Please set the OPENAI_API_BASE environment variable.")
+    
+    # Run the asynchronous main function.
+    asyncio.run(main())

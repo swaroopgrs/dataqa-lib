@@ -1,0 +1,76 @@
+# dataqa/integrations/dbc/agent_template.yml
+# This file defines the generic STRUCTURE of a CWD Agent for the DBC integration.
+# It is loaded exclusively by the DBC_CWDAgentFactory and lives within the dbc module.
+
+agent_name: "CwdAgentDBC"
+
+# --- LLM Configuration ---
+# This section defines logical placeholders for LLMs. The actual LLM implementation
+# (the DBCLLMAdapter) will be injected by the factory.
+llm_configs:
+  default_llm:
+    type: "dataqa.integrations.dbc.llm.DBCLLMAdapter"
+    config: {}
+  planner_llm:
+    type: "dataqa.integrations.dbc.llm.DBCLLMAdapter"
+    config: {}
+  replanner_llm:
+    type: "dataqa.integrations.dbc.llm.DBCLLMAdapter"
+    config: {}
+  retrieval_worker_llm:
+    type: "dataqa.integrations.dbc.llm.DBCLLMAdapter"
+    config: {}
+  analytics_worker_llm:
+    type: "dataqa.integrations.dbc.llm.DBCLLMAdapter"
+    config: {}
+  plot_worker_llm:
+    type: "dataqa.integrations.dbc.llm.DBCLLMAdapter"
+    config: {}
+
+# This mapping is a core part of the agent's structure.
+llm:
+  default: default_llm
+  planner: planner_llm
+  replanner: replanner_llm
+  retrieval_worker: retrieval_worker_llm
+  analytics_worker: analytics_worker_llm
+  plot_worker: plot_worker_llm
+
+# --- Component Configuration ---
+# Placeholders to satisfy the Pydantic model validation.
+resource_manager_config:
+  type: "dataqa.core.components.resource_manager.resource_manager.ResourceManager"
+  config: {}
+
+retriever_config:
+  type: dataqa.core.components.retriever.base_retriever.AllRetriever
+  config:
+    name: all_retriever
+    retrieval_method: "all"
+    resource_types:
+      - rule
+      - schema
+      - example
+    module_names:
+      - planner
+      - replanner
+      - retrieval_worker
+      - analytics_worker
+      - plot_worker
+
+workers:
+  retrieval_worker:
+    sql_execution_config:
+      name: "sql_executor"
+      data_files: []
+  analytics_worker: {}
+  plot_worker: {}
+
+# --- Runtime Parameters ---
+max_tasks: 10
+timeout: 300
+
+# --- Content Placeholders ---
+# These values will be dynamically overridden at runtime by the factory.
+use_case_name: "placeholder_name"
+use_case_description: "placeholder_description"
