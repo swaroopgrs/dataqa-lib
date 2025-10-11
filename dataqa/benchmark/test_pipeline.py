@@ -7,17 +7,16 @@ from collections import Counter
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Tuple, Union
+from typing import Callable, Dict, List, Literal, Tuple, Union
 
 import numpy as np
 import pandas as pd
 import yaml
-from langchain_core.runnables import RunnableConfig
 
-from benchmark.amap import amap
-from benchmark.llm_judge_prompt import LLM_JUDGE_PROMPT
-from benchmark.log import get_logger
-from benchmark.schema import (
+from dataqa.benchmark.amap import amap
+from dataqa.benchmark.llm_judge_prompt import LLM_JUDGE_PROMPT
+from dataqa.benchmark.log import get_logger
+from dataqa.benchmark.schema import (
     COMPLETE_EVAL_RESULT,
     COMPLETE_TEST_RESULT,
     TEST_RESULT_DATAFRAME,
@@ -33,31 +32,27 @@ from benchmark.schema import (
     TestResultItem,
     UseCaseTestData,
 )
-from benchmark.utils import out_yaml
-from dataqa.agent.cwd_agent.cwd_agent import CWDAgent
-from state import CWDState
-from dataqa.components.plan_execute.schema import Response
-from dataqa.llm.openai import AzureOpenAI,
-    AzureOpenAIConfig
-from dataqa.memory import Memory
-from dataqa.pipelines.pipeline import build_graph_from_config
-from dataqa.pipelines.schema import PipelineConfig
-from dataqa.state import PipelineInput, PipelineOutput
-from dataqa.utils.agent_util import (
-    AgentResponseParser,
+from dataqa.benchmark.utils import out_yaml
+from dataqa.core.client import CoreRequest, CoreResponse 
+from dataqa.core.llm.openai import AzureOpenAI, AzureOpenAIConfig
+from dataqa.core.pipelines.pipeline import build_graph_from_config
+from dataqa.core.pipelines.schema import PipelineConfig
+from dataqa.core.state import PipelineInput
+from dataqa.core.utils.agent_util import (
     dataframe_to_llm_judge_string,
     image_to_llm_judge_string,
 )
-from dataqa.utils.dataframe_utils import df_to_markdown
-from dataqa.utils.langgraph_utils import (
+from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
-    CONFIGURABLE,
-    DEFAULT_THREAD,
-    THREAD_ID,
+    # CONFIGURABLE,
+    # DEFAULT_THREAD,
+    # THREAD_ID,
+    TOKEN,
 )
-from dataqa.utils.prompt_utils import build_prompt
-from scripts.azure_token import get_az_token_using_cert
+from dataqa.core.utils.prompt_utils import build_prompt
+from dataqa.integrations.local.client import LocalClient
+from dataqa.scripts.azure_token import get_az_token_using_cert
 
 
 def convert_enum_to_str(data):
@@ -151,11 +146,24 @@ class TestPipeline:
 
     def load_one_test_result(self, path: Path) -> Union[TestResultItem, None]:
         if os.path.isfile(path):
-            data = yaml.safe_load(open(path))
+            try:
+                with open(path, "r") as file:
+                    data = yaml.safe_load(file)
+            except Exception:
+                try:
+                    with open(path, "r", encoding="utf-8") as file:
+                        data = yaml.safe_load(file)
+                except Exception as e:
+                    self.logger.warning(
+                        f"Failed to load test resul;t from {path}: {e}"
+                    )
+                    return None
             try:
                 test_result_item = TestResultItem(**data)
             except Exception as e:
-                self.logger.warning(f"Failed to load test result from {path}")
+                self.logger.warning(
+                    f"Failed to load test result from {path}: {e}"
+                )
                 return None
             return test_result_item
         else:
@@ -201,91 +209,82 @@ class TestPipeline:
         path = Path(test_result.local_path)
         path.mkdir(parents=True, exist_ok=True)
         with open(path / TEST_RESULT_FILE, "w") as f:
-            out_yaml.dump(convert_enum_to_str(test_result.model_dump()), f)
+            try:
+                out_yaml.dump(convert_enum_to_str(test_result.model_dump()), f)
+            except Exception:
+                self.logger.warning(
+                    f"Failed to dump test result: {test_result.model_dump()}"
+                )
 
-    def save_raw_prediction(
+    def save_row_prediction(
         self,
         path: Union[str, Path],
         run_id: int,
-        memory: Memory,
-        full_state: CWDState,
-        events: List[Dict[str, Any]],
-        runnable_config: RunnableConfig,
+        response: CoreResponse,
         solution_type: Literal["agent", "pipeline"] = "agent",
     ):
         if isinstance(path, str):
             path = Path(path)
         path = path / str(run_id)
         path.mkdir(parents=True, exist_ok=True)
-        if solution_type == "agent":
-            # save state and events
-            with open(path / TEST_RESULT_FULL_STATE, "wb") as f:
-                pickle.dump(dict(state=full_state, events=events), f)
-        # save dataframes
+
+        # Save the CoreResponse text
+        with open(path / TEST_RESULT_FULL_STATE, "w", encoding="utf-8") as f:
+            f.write(response.text)
+
+        # Save dataframes
         df_path = path / TEST_RESULT_DATAFRAME
         df_path.mkdir(parents=True, exist_ok=True)
-        if solution_type == "agent":
-            for name, df in memory.get_dataframes(
-                config=runnable_config
-            ).items():
-                self.save_dataframe(df, name, df_path)
-        else:
-            if full_state.return_output.execution_output:
-                exec_res = full_state.return_output.execution_output
-                if exec_res.dataframe:
-                    df_count = 1
-                    for s in exec_res.dataframe:
-                        df = pd.read_json(s)
-                        name = f"dataframe_{df_count}.csv"
-                        self.save_dataframe(df, name, path)
-                        df_count += 1
-        if solution_type == "agent":
-            # save image
-            img_path = path / TEST_RESULT_IMAGE
-            img_path.mkdir(parents=True, exist_ok=True)
-            for name, (binary, df) in memory.get_images(
-                config=runnable_config
-            ).items():
-                self.save_image(binary, df, name, img_path)
+        for i, df in enumerate(response.output_dataframes):
+            df_name = f"dataframe_{i + 1}"
+            self.save_dataframe(df, df_name, df_path)
+        
+        # Save images
+        img_path = path / TEST_RESULT_IMAGE
+        img_path.mkdir(parents=True, exist_ok=True)
+        for i, img in enumerate(response.output_images):
+            img_name = f"output_image_{i + 1}.png"
+            with open(img_path / f"{img_name}", "wb") as f:
+                f.write(img.bytes)
 
     def combine_final_response(
-        self, path: Union[str, Path], run_id: int, response: Response
-    ) -> str:
-        if not isinstance(response, Response):
+        self, path: Union[str, Path], run_id: int, response: CoreResponse
+    ):
+        if not isinstance(response, CoreResponse):
             return "no response"
-        if isinstance(path, str):
+        if not isinstance(path, Path):
             path = Path(path)
         run_path = path / str(run_id)
-        text = f"{response.response.strip()}\n"
-        # load dataframes
-        for name in response.output_df_name:
-            fn = run_path / TEST_RESULT_DATAFRAME / f"{name}.csv"
-            if not os.path.isfile(fn):
-                self.logger.warning(f"Dataframe {name} is not found.")
+        text = f"{response.text.strip()}\n"
+
+        # Load dataframes
+        for i, df in enumerate(response.output_dataframes):
+            df_name = f"dataframe_{i + 1}.csv"
+            fn = run_path / TEST_RESULT_DATAFRAME / df_name
+            if not fn.is_file():
+                self.logger.warning(f"Dataframe {df_name} is not found.")
                 continue
             try:
                 df = pd.read_csv(fn)
-                text += f"\n{dataframe_to_llm_judge_string(name, df)}"
+                text += f"\n{dataframe_to_llm_judge_string(df_name, df)}"
             except Exception as e:
-                self.logger.warning(f"Failed to load dataframe from {fn}")
-                text += f"\ndataframe: {name}\nFailed to load data"
-        # load images
-        for name in response.output_img_name:
-            fn_df = run_path / TEST_RESULT_IMAGE / f"{name}.csv"
-            # fn_img = local_path / TEST_RESULT_IMAGE / f"{name}.png"
-            if not os.path.isfile(fn_df):  # or not os.path.isfile(fn_img):
-                self.logger.warning(f"Data for image {name} is not found.")
+                self.logger.warning(f"Failed to load dataframe from {fn}: {e}")
+                text += f"\dataframe: {df_name}\nFailed to load data"
+        
+        # Load images
+        for i, _ in enumerate(response.output_images):
+            img_name = f"output_image_{i + 1}.jpg"
+            fn_image = run_path / TEST_RESULT_IMAGE / img_name
+            if not fn_image.is_file():
+                self.logger.warning(f"Image {img_name} is not found.")
                 continue
             try:
-                df = pd.read_csv(fn_df)
-                text += f"\n{image_to_llm_judge_string(name, df)}"
+                with open(fn_image, "rb") as f:
+                    img_data = f.read()
+                text += f"\n{image_to_llm_judge_string(img_name, img_data)}"
             except Exception as e:
-                self.logger.warning(f"Failed to load dataframe from {fn}")
-                text += f"\nimage: {name}\nFailed to load data"
-            # with open(fn_img, 'rb') as file:
-            #     # Read the binary data
-            #     img = file.read()
-
+                self.logger.warning(f"Failed to load image from {fn_image}: {e}")
+                text += f"\nimage: {img_name}\nFailed to load data"
         return text
 
     async def run_prediction_for_one_test_data(
@@ -297,193 +296,129 @@ class TestPipeline:
         local_path = str(self.get_test_result_path(config=config, data=data))
 
         self.logger.debug(f"Test question ({idx}): {data.question}")
-        for run_id in range(self.config.num_run):
+        for run_id in range(self.config.run_id):
             # build agent, start state, LG config
             if self.config.solution_type == "agent":
-                agent: CWDAgent = CWDAgent.from_config_path(
-                    config.cwd_config, Memory()
+                client = LocalClient(config_path=str(config.cwd_config))
+                
+                request = CoreRequest(
+                    user_query=data.question,
+                    question_id=data.id,
+                    conversation_id=f"test_session_{idx}_{run_id}",
                 )
-                state = CWDState(query=data.question)
-                runnable_config = {
-                    CONFIGURABLE: {
-                        THREAD_ID: DEFAULT_THREAD,
-                        API_KEY: get_az_token_using_cert()[0],
-                        BASE_URL: os.environ["OPENAI_API_BASE"],
-                    }
-                }
                 start_time = time.time()
                 try:
-                    response, events = await agent(
-                        state=state, config=runnable_config
-                    )
-
-                    self.logger.debug(
-                        f"Test question ({idx}) run {run_id} response: {repr(response.final_response)}"
-                    )
-
-                except Exception as e:
-                    response = CWDState(
-                        query=data.question,
-                        error=f"CWD Agent run failed: {traceback.format_exc()}",
-                    )
-                    events = []
-                    self.logger.warning(
-                        f"CWD Agent run failed for test example {data.id} use case {config.name}: {repr(e)}"
-                    )
-                    self.logger.debug(response.error)
-
-                summary = ""
-                try:
-                    agent_response_parser = AgentResponseParser(
-                        events, agent.memory, runnable_config
-                    )
-                    agent_response_parser.process_events(output="text")
-                    summary = agent_response_parser.get_text_output()
-                except Exception as e:
-                    self.logger.warning(f"Response parser failed: {repr(e)}")
-                self.save_raw_prediction(
-                    path=local_path,
-                    run_id=run_id,
-                    memory=agent.memory,
-                    full_state=response,
-                    events=events,
-                    runnable_config=runnable_config,
-                )
-
-                predictions.append(
-                    Prediction(
-                        run_id=run_id,
-                        dataframes=list(
-                            agent.memory.get_dataframes(
-                                config=runnable_config
-                            ).keys()
-                        ),
-                        images=list(
-                            agent.memory.get_images(
-                                config=runnable_config
-                            ).keys()
-                        ),
-                        final_response=response.final_response,
-                        combined_response=self.combine_final_response(
-                            path=local_path,
-                            run_id=run_id,
-                            response=response.final_response,
-                        ),
-                        summary=summary,
-                        datetime=str(datetime.now()),
-                        latency=time.time() - start_time,
-                    )
-                )
-
-            elif self.config.solution_type == "pipeline":
-                base_dir = os.environ.get("BASE_DIR", ".")
-                config_path = os.path.join(base_dir, config.cwd_config)
-                pipeline_config = (
-                    open(config_path).read().format(BASE_DIR=base_dir)
-                )
-                pipeline_config = yaml.safe_load(pipeline_config)
-                pipeline_schema = PipelineConfig(**pipeline_config)
-
-                workflow, state_base_model = build_graph_from_config(
-                    pipeline_schema=pipeline_schema
-                )
-
-                previous_rewritten_query = ""
-
-                state = state_base_model(
-                    input=PipelineInput(
-                        query=data.question,
-                        previous_rewritten_query=previous_rewritten_query,
-                    )
-                )
-                runnable_config = {
-                    CONFIGURABLE: {
-                        THREAD_ID: DEFAULT_THREAD,
-                        API_KEY: get_az_token_using_cert()[0],
-                        BASE_URL: os.environ["OPENAI_API_BASE"],
-                    }
-                }
-                events_all = []
-                start_time = time.time()
-
-                try:
-                    async for event in workflow.astream(
-                        state,
-                        runnable_config,
-                        stream_mode="updates",
+                    # run the question workflow in batch mode
+                    response: CoreResponse = None
+                    async for chunk in client.process_query(
+                        request,
+                        stream=False,
+                        summarize=False,
+                        prompt_back=False,
                     ):
-                        events_all.append(event)
-                        for event_name, event_output in event.items():
-                            for k, v in event_output.items():
-                                setattr(state, k, v)
-                                if k == "error":
-                                    raise Exception(
-                                        v.error_message
-                                    )  # TODO error handling
-                    state.total_time = time.time() - start_time
-                    dataframes = []
-                    if state.return_output.execution_output:
-                        exec_res = state.return_output.execution_output
-                        if exec_res.dataframe:
-                            for s in exec_res.dataframe:
-                                df = pd.read_json(s)
-                                dataframes.append(df_to_markdown(df))
-                    dataframes_str = "\n".join(dataframes)
-                    pipeline_response = ""
-                    if state.return_output.execution_output:
-                        exec_res = state.return_output.execution_output
-                        if exec_res.dataframe:
-                            pipeline_response += f"After running the code snippet, here's the result I obtained\n\n{dataframes_str}\n\n"
-                        elif exec_res.markdown:
-                            pipeline_response += exec_res.markdown
-                        else:
-                            pipeline_response += "There is runtime error during execution of SQL."
-                    summary = pipeline_response
+                        if isinstance(chunk, CoreResponse):
+                            response = chunk
+
+                    # parse the final response and summary
+                    final_response = response.text
+                    if response.output_dataframes:
+                        final_response += f"\n📊 Output DataFrames:"
+                        for i, df in enumerate(response.output_dataframes):
+                            final_response += f"\n--- Dataframe {i + 1} ---"
+                            # Using to_markdown for clean console output
+                            final_response += df.to_markdown(index=False)
+
+                    self.logger.debug(f"final_response: {final_response}")
+                    self.logger.debug(
+                        f"Test question {idx} run {run_id} response: {repr(response.text)}"
+                    )
+                    summary = ""
+                    for step in response.steps:
+                        summary += f"\n--- {step.name} ---\n"
+                        summary += step.content
                 except Exception as e:
                     summary = (
-                        f"CWD Pipeline run failed: {traceback.format_exc()}"
+                        f"LocalClient run failed: {traceback.format_exc()}"
                     )
-                    self.logger.warning(
-                        f"CWD Pipeline run failed for test example {data.id} use case {config.name}: {repr(e)}"
+                    self.logger.error(
+                        f"LocalClient run failed for test example {data.id} use case {config.name}: {repr(e)}"
                     )
-                    dataframes = []
-                    dataframes_str = ""
                 self.save_raw_prediction(
                     path=local_path,
                     run_id=run_id,
-                    memory=None,
-                    full_state=state,
-                    events=events_all,
-                    runnable_config=runnable_config,
-                    solution_type="pipeline",
+                    response=response,
+                    solution_type="agent",
                 )
-
                 predictions.append(
                     Prediction(
                         run_id=run_id,
-                        dataframes=dataframes,
-                        images=list(),
-                        final_response=summary,
-                        combined_response=dataframes_str,
+                        dataframes=[
+                            f"dataframe_{i + 1}"
+                            for i in range(len(response.output_dataframes))
+                        ],
+                        images=[
+                            f"output_image_{i + 1}"
+                            for i in range(len(response.output_images))
+                        ],
+                        final_response=final_response,
+                        combined_response=self.combine_final_response(
+                            path=local_path, run_id=run_id, response=response
+                        ),
                         summary=summary,
                         datetime=str(datetime.now()),
                         latency=time.time() - start_time,
                     )
                 )
-
-        test_result_item = TestResultItem(
-            use_case_config=config,
-            local_path=local_path,
-            input_data=data,
-            predictions=predictions,
-        )
-
-        self.save_test_result(test_result=test_result_item)
-
-        if idx % self.config.batch_size == 0:
-            self.logger.info(
-                f"Complete prediction job ({idx} / {total}) in use case {config.name}."
-            )
+            elif self.config.solution_type == "pipeline":
+                base_dir = os.environ.get("BASE_DIR", config.cwd_config)
+                pipeline_config = yaml.safe_load(
+                    open(config.path).read().format(BASE_DIR=base_dir)
+                )
+                pipeline_config = PipelineConfig(**pipeline_config)
+                workflow, state_base_model = build_graph_from_config(
+                    pipeline_schema=pipeline_config
+                )
+                # previous_rewritten_query = ""
+                # TODO: FIX pipeline benchmarking
+                # state = state_base_model(
+                #   input=PipelineInput(
+                #     query=data.question,
+                #     previous_rewritten_query=previous_rewritten_query,
+                #   )
+                # )
+                # 
+                # if os.environ.get('CERT_PATH'):
+                #     token = get_az_token_using_cert()
+                #     runnable_config = {
+                #       CONFIGURABLE: {
+                #         THREAD_ID: DEFAULT_THREAD,
+                #         API_KEY: os.environ.get("AZURE_OPENAI_API_KEY", ""),
+                #         BASE_URL: os.environ.get("AZURE_ENDPOINT", ""),
+                #         TOKEN: os.environ.get("AZURE_OPENAI_API_TOKEN", token),
+                #       }
+                #   }
+                # else:
+                #   runnable_config = {
+                #     CONFIGURABLE: {
+                #         THREAD_ID: DEFAULT_THREAD,
+                #         API_KEY: os.environ.get("AZURE_OPENAI_API_KEY", ""),
+                #         BASE_URL: os.environ.get("AZURE_ENDPOINT", ""),
+                #         TOKEN: os.environ.get("AZURE_OPENAI_API_TOKEN", ""),
+                #     }
+                #   }
+                start_time = time.time()
+                test_result_item = TestResultItem(
+                    use_case_config=config,
+                    local_path=local_path,
+                    input_data=data,
+                    predictions=predictions,
+                )
+                self.save_test_result(test_result_item=test_result_item)
+                if idx % self.config.batch_size == 0:
+                    self.logger.info(
+                        f"Complete prediction job {idx} / {total} in use case {config.name}."
+                    )
+    
 
     async def run_prediction_for_one_use_case(
         self,

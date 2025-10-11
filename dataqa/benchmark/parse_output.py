@@ -7,11 +7,15 @@ import yaml
 
 def extract_test_results(base_dir):
     results = []
-    for root, dirs, files in os.walk(base_dir):
+    for root, _, files in os.walk(base_dir):
         if "test_result.yml" in files:
             test_result_path = os.path.join(root, "test_result.yml")
             with open(test_result_path, "r") as file:
-                test_result = yaml.safe_load(file)
+                try:
+                    test_result = yaml.safe_load(file)
+                except Exception:
+                    print(f"Failed to load test result from {test_result_path}")
+                    continue
                 use_case = test_result["use_case_config"]["name"]
                 example_id = test_result["input_data"]["id"]
                 question = test_result["input_data"]["question"]
@@ -28,7 +32,7 @@ def extract_test_results(base_dir):
                     combined_response = prediction["combined_response"]
                     summary = prediction["summary"]
                     final_response = (
-                        prediction["final_response"]["response"]
+                        prediction["final_response"]
                         if prediction["final_response"]
                         else None
                     )

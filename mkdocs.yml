@@ -1,0 +1,89 @@
+site_name: DataQA Library
+site_description: Library for data question answering with agents.
+site_author: DataQA Team
+
+repo_url: https://bitbucketdc.jpmchase.net/scm/aicoelin/dataqa-lib.git
+repo_name: dataqa
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Dark mode
+    - scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.section
+    - navigation.top
+    - navigation.path
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.code.mermaid # Enable Mermaid diagrams
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          options:
+            paths: [dataqa]
+            docstring_style: google
+            show_source: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Installation: installation.md
+  - User Guide:
+      - Introduction: guide/introduction.md
+      - Running Examples: guide/running_examples.md
+      - Building Your First Agent: guide/building_your_first_agent.md
+      - Customizing Agents: guide/customizing_agents.md
+      - Configuration Deep Dive: guide/configuration.md
+      - Extending DataQA: guide/extending.md
+      - Benchmarking & Evaluation: guide/benchmarking.md
+      - Deployment Guide: guide/deployment.md
+      - Troubleshooting: guide/troubleshooting.md
+      - FAQ: guide/faq.md
+  - API Reference:
+      - Agent: reference/agent.md
+      - Components: reference/components.md
+      - Pipelines: reference/pipelines.md
+      - Tools: reference/tools.md
+      - Benchmarking: reference/benchmark.md
+      - Assets: reference/assets.md
+  - Contributing: contributing.md
+  - Changelog: changelog.md
