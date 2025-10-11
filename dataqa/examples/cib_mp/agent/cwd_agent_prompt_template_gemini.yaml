@@ -1,0 +1,54 @@
+agent_name: "cib_mp"
+
+llm_configs:
+  gemini-flash:
+    type: "dataqa.llm.gemini.GeminiLLM"
+    config:
+      model: "gemini-2.5-flash"
+      api_key: "${GEMINI_API_KEY}"
+      temperature: 0
+  gemini-pro:
+    type: "dataqa.llm.gemini.GeminiLLM"
+    config:
+      model: "gemini-2.5-pro"
+      api_key: "${GEMINI_API_KEY}"
+      temperature: 0
+
+llm:
+  default: gemini-flash
+
+resource_manager_config:
+  type: dataqa.components.resource_manager.resource_manager.ResourceManager
+  config:
+    asset_directory: "<CONFIG_DIR>/../data/"
+
+retriever_config:
+  type: dataqa.components.retriever.base_retriever.AllRetriever
+  config:
+    name: all_retriever
+    retrieval_method: "all"
+    resource_types:
+      - rule
+      - schema
+      - example
+    module_names:
+      - planner
+      - replanner
+      - retrieval_worker
+      - analytics_worker
+      - plot_worker
+
+workers:
+  retrieval_worker:
+    sql_execution_config:
+      backend: "duckdb"
+      data_files:
+        - path: "<CONFIG_DIR>/../data/FAKE_ETS_D_CUST_PORTFOLIO.csv"
+          table_name: "EIS_D_CUST_PORTFOLIO"
+        - path: "<CONFIG_DIR>/../data/FAKE_PROD_BD_TH_FLAT_V3.csv"
+          table_name: "PROD_BD_TH_FLAT_V3"
+
+use_case_name: Merchant Payments
+use_case_description: |
+  In this use case, you work as a AI assistant to answer users' queries about two data tables, PROD_BD_TH_FLAT_V3 and EIS_D_CUST_PORTFOLIO.
+  Users may ask you to extract data from these two tables, with follow-up steps for data analytics and data visualization.
