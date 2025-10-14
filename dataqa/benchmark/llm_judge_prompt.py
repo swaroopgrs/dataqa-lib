@@ -131,7 +131,7 @@ EXPECTED_ANSWER:
 GENERATED_ANSWER:
 RESULT:
 RESULT: {{
-"REASON": "The question \"which day is the best day\" is ambiguous. Could you please clarify what criteria or context you are referring to when asking for the \"best day\"? Are you looking for a specific metric or event to determine the best day?",
+"REASON": "The question "which day is the best day" is ambiguous. Could you please clarify what criteria or context you are referring to when asking for the "best day"? Are you looking for a specific metric or event to determine the best day?",
 "SCORE": "-1"
 }}
 # Example 8:

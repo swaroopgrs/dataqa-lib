@@ -4,9 +4,8 @@ import os
 
 import yaml
 
-from benchmark.schema import BenchmarkConfig
-from benchmark.test_pipeline import TestPipeline
-
+from dataqa.benchmark.schema import BenchmarkConfig
+from dataqa.benchmark.test_pipeline import TestPipeline
 
 def get_args():
     parser = argparse.ArgumentParser(description="CWD Benchmark")
@@ -15,23 +14,22 @@ def get_args():
     )
     return parser.parse_args()
 
-
 if __name__ == "__main__":
     args = get_args()
 
     if not os.environ.get("CERT_PATH"):
-        os.environ["CERT_PATH"] = input("Path to PEM=")
-    if not os.environ.get("OPENAI_API_BASE"):
-        os.environ["OPENAI_API_BASE"] = input("OPENAI API BASE=")
+        if not os.environ.get("AZURE_OPENAI_API_KEY"):
+            os.environ["AZURE_OPENAI_API_KEY"] = input("AZURE_OPENAI_API_KEY=")
+        if not os.environ.get("AZURE_ENDPOINT", ""):
+            os.environ["AZURE_ENDPOINT"] = input("OPENAI_API_BASE=")
 
     if os.path.isfile(args.config):
         test_config_data = yaml.safe_load(open(args.config))
     else:
-        raise f"Config file {args.config} doesn't exist."
-
+        raise f"Config file {args.config} does not exist."
+    
     test_config = BenchmarkConfig(**test_config_data)
 
     test_pipeline = TestPipeline(config=test_config)
-
+    
     asyncio.run(test_pipeline.run())
-

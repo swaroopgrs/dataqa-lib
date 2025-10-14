@@ -26,3 +26,20 @@ docker run -it --rm --pull=always \
     --add-host host.docker.internal:host-gateway \
     --name openhands-app \
     docker.all-hands.dev/all-hands-ai/openhands:0.38
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+uv run gitingest dataqa-lib/ -i "dataqa/" -i "docs/" -e "**/__pycache__" -e "**/.DS_Store" -e "**/*.csv" -e "**/output" -e "**/log" -e "**/core" -e "**/examples" -e "**/integrations" -e "**/templates" -e "**/scripts" -o dataqa-ui-docs.txt
+

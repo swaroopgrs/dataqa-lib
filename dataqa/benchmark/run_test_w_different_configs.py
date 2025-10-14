@@ -7,8 +7,8 @@ import tempfile
 
 import yaml
 
-from benchmark.schema import BenchmarkConfig
-from benchmark.test_pipeline import TestPipeline
+from dataqa.benchmark.schema import BenchmarkConfig
+from dataqa.benchmark.test_pipeline import TestPipeline
 
 # Define the predefined LLM configurations with names
 predefined_configs = {
@@ -124,8 +124,8 @@ def main():
     # Check for environment variables
     if not os.environ.get("CERT_PATH"):
         os.environ["CERT_PATH"] = input("Path to PEM=")
-    if not os.environ.get("OPENAI_API_BASE"):
-        os.environ["OPENAI_API_BASE"] = input("OPENAI API BASE=")
+    if not os.environ.get("AZURE_ENDPOINT", ""):
+        os.environ["AZURE_ENDPOINT"] = input("AZURE_ENDPOINT=")
 
     # Iterate over each predefined LLM configuration
     for config_name, llm_config in predefined_configs.items():
@@ -136,10 +136,10 @@ def main():
 
         # Modify output and log paths to include the configuration name and current date
         modified_main_config["output"] = (
-            f"benchmark/output/{config_name}_agent_{current_date}_run_{main_config['run_id']}"
+            f"dataqa/benchmark/output/{config_name}_agent_{current_date}_run_{main_config['run_id']}"
         )
         modified_main_config["log"] = (
-            f"benchmark/log/{config_name}_agent_{current_date}_run_{main_config['run_id']}.log"
+            f"dataqa/benchmark/log/{config_name}_agent_{current_date}_run_{main_config['run_id']}.log"
         )
 
         # Create directories if they don't exist
