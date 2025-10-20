@@ -1,5 +1,5 @@
-jules: 11421
-mode: python-3.12
+jules: 111421
+node: python-3.12
 baseVersion: 0.0.1
 featureBranchPipelineTrigger: true
 buildConfig:
@@ -9,24 +9,24 @@ buildConfig:
       - IDENTITY_SOURCE: JET
       - IDENTITY_SOURCE_ARTIFACTORY: JET
 ssap:
-  preProdScan: true
+   preProdScan: true
 sonarDetails:
-  additionalProperties: >-
+   additionalProperties: >-
       -Dsonar.language=py
-      -Dsonar.projectBaseDir=$(WORKSPACE)
+      -Dsonar.projectBaseDir=${WORKSPACE}
       -Dsonar.sources=dataqa
       -Dsonar.tests=tests
-      -Dsonar.python.xunit.reportPaths=reports/xunit.xml
+      -Dsonar.python.xunit.reportPath=reports/xunit.xml
       -Dsonar.python.coverage.reportPaths=reports/coverage.xml
-      -Dsonar.coverage.exclusions='**/setup.py,**/tests/**'
+      -Dsonar.coverage.exclusions='fileupload/**,tests/**'
       -Dsonar.verbose=true
 blackduck:
-  artifactFilePatterns: "**/setup.py"
-  criteria: BuildStatusErrorIfViolation=NONE,VulnerabilityThresholdForInstable=MEDIUM,VulnerabilityThresholdForError=HIGH
+  artifactFilePatterns: "**/*.py"
+  criteria: BuildStatusForSealViolation=NONE,VulnerabilityThresholdForInstable=MEDIUM,VulnerabilityThresholdForError=HIGH
 frs:
-  release: release
-  jira: commit
-  pypi:
+   release: release
+   jira: commit
+   pypi:
       packages: dist/*
 mapping:
 - &default
@@ -35,22 +35,24 @@ mapping:
    test: --version && make test
    tasks:
       preBuild:
-        - script: make ci-prebuild
-        - script: make ci
-        - script: make check-lint-format
+      - script: make ci-prebuild
+      - script: make ci
+      - script: make check-lint-format
       preTest:
-        - script: make pre-test
+      - script: make pre-test
       postBuild:
-        - script: make dist
+      - script: make dist
       postTest:
-        - script: make ssap
+      - script: make ssap
 - <<: *default
   name: main
 - <<: *default
   name: develop
 - <<: *default
-  name: release
+  name: PR
 - <<: *default
   name: feature
+- <<: *default
+  name: release
 - <<: *default 
   name: hotfix
