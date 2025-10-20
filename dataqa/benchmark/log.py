@@ -73,7 +73,7 @@ def get_logger(
 
     # Create a stream handler to output logs to stdout
     stream_handler = logging.StreamHandler(sys.stdout)
-    file_handler = logging.FileHandler(file_path)
+    file_handler = logging.FileHandler(file_path, encoding="utf-8")
 
     # Set the custom formatter for the handler
     formatter = ColorFormatter(

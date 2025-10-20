@@ -33,11 +33,12 @@ from dataqa.benchmark.schema import (
     UseCaseTestData,
 )
 from dataqa.benchmark.utils import out_yaml
-from dataqa.core.client import CoreRequest, CoreResponse 
+from dataqa.core.client import CoreRequest, CoreResponse
 from dataqa.core.llm.openai import AzureOpenAI, AzureOpenAIConfig
 from dataqa.core.pipelines.pipeline import build_graph_from_config
 from dataqa.core.pipelines.schema import PipelineConfig
-from dataqa.core.state import PipelineInput
+
+# from dataqa.core.state import PipelineInput
 from dataqa.core.utils.agent_util import (
     dataframe_to_llm_judge_string,
     image_to_llm_judge_string,
@@ -155,7 +156,7 @@ class TestPipeline:
                         data = yaml.safe_load(file)
                 except Exception as e:
                     self.logger.warning(
-                        f"Failed to load test resul;t from {path}: {e}"
+                        f"Failed to load test result from {path}: {e}"
                     )
                     return None
             try:
@@ -208,7 +209,7 @@ class TestPipeline:
         # save the complete test result in yaml
         path = Path(test_result.local_path)
         path.mkdir(parents=True, exist_ok=True)
-        with open(path / TEST_RESULT_FILE, "w") as f:
+        with open(path / TEST_RESULT_FILE, "w", encoding="utf-8") as f:
             try:
                 out_yaml.dump(convert_enum_to_str(test_result.model_dump()), f)
             except Exception:
@@ -216,7 +217,7 @@ class TestPipeline:
                     f"Failed to dump test result: {test_result.model_dump()}"
                 )
 
-    def save_row_prediction(
+    def save_raw_prediction(
         self,
         path: Union[str, Path],
         run_id: int,
@@ -242,17 +243,17 @@ class TestPipeline:
         # Save images
         img_path = path / TEST_RESULT_IMAGE
         img_path.mkdir(parents=True, exist_ok=True)
-        for i, img in enumerate(response.output_images):
+        for i, img_bytes in enumerate(response.output_images):
             img_name = f"output_image_{i + 1}.png"
-            with open(img_path / f"{img_name}", "wb") as f:
-                f.write(img.bytes)
+            with open(img_path / img_name, "wb") as f:
+                f.write(img_bytes)
 
     def combine_final_response(
         self, path: Union[str, Path], run_id: int, response: CoreResponse
-    ):
+    ) -> str:
         if not isinstance(response, CoreResponse):
             return "no response"
-        if not isinstance(path, Path):
+        if isinstance(path, str):
             path = Path(path)
         run_path = path / str(run_id)
         text = f"{response.text.strip()}\n"
@@ -261,30 +262,32 @@ class TestPipeline:
         for i, df in enumerate(response.output_dataframes):
             df_name = f"dataframe_{i + 1}.csv"
             fn = run_path / TEST_RESULT_DATAFRAME / df_name
-            if not fn.is_file():
+            if not os.path.isfile(fn):
                 self.logger.warning(f"Dataframe {df_name} is not found.")
                 continue
             try:
                 df = pd.read_csv(fn)
                 text += f"\n{dataframe_to_llm_judge_string(df_name, df)}"
             except Exception as e:
-                self.logger.warning(f"Failed to load dataframe from {fn}: {e}")
-                text += f"\dataframe: {df_name}\nFailed to load data"
-        
+                self.logger.warning(f"Failed to load dataframe from {fn} : {e}")
+                text += f"\ndataframe: {df_name}\nFailed to load data"
+
         # Load images
-        for i, _ in enumerate(response.output_images):
+        for i, img_bytes in enumerate(response.output_images):
             img_name = f"output_image_{i + 1}.jpg"
-            fn_image = run_path / TEST_RESULT_IMAGE / img_name
-            if not fn_image.is_file():
+            fn_img = run_path / TEST_RESULT_IMAGE / img_name
+            if not os.path.isfile(fn_img):
                 self.logger.warning(f"Image {img_name} is not found.")
                 continue
             try:
-                with open(fn_image, "rb") as f:
+                with open(fn_img, "rb") as f:
                     img_data = f.read()
                 text += f"\n{image_to_llm_judge_string(img_name, img_data)}"
+                # Assuming image_to_llm_judge_string can handle image data
             except Exception as e:
-                self.logger.warning(f"Failed to load image from {fn_image}: {e}")
+                self.logger.warning(f"Failed to load image from {fn_img} : {e}")
                 text += f"\nimage: {img_name}\nFailed to load data"
+
         return text
 
     async def run_prediction_for_one_test_data(
@@ -296,7 +299,7 @@ class TestPipeline:
         local_path = str(self.get_test_result_path(config=config, data=data))
 
         self.logger.debug(f"Test question ({idx}): {data.question}")
-        for run_id in range(self.config.run_id):
+        for run_id in range(self.config.num_run):
             # build agent, start state, LG config
             if self.config.solution_type == "agent":
                 client = LocalClient(config_path=str(config.cwd_config))
@@ -308,11 +311,11 @@ class TestPipeline:
                 )
                 start_time = time.time()
                 try:
-                    # run the question workflow in batch mode
+                    # run the agentic workflow in batch mode
                     response: CoreResponse = None
                     async for chunk in client.process_query(
                         request,
-                        stream=False,
+                        streaming=False,
                         summarize=False,
                         prompt_back=False,
                     ):
@@ -322,25 +325,27 @@ class TestPipeline:
                     # parse the final response and summary
                     final_response = response.text
                     if response.output_dataframes:
-                        final_response += f"\n📊 Output DataFrames:"
+                        final_response += "\n📊 Output DataFrames:"
                         for i, df in enumerate(response.output_dataframes):
-                            final_response += f"\n--- Dataframe {i + 1} ---"
+                            final_response += f"\n--- DataFrame {i + 1} ---"
                             # Using to_markdown for clean console output
                             final_response += df.to_markdown(index=False)
 
                     self.logger.debug(f"final_response: {final_response}")
+
                     self.logger.debug(
-                        f"Test question {idx} run {run_id} response: {repr(response.text)}"
+                        f"Test question {{idx}} run {run_id} response: {repr(response.text)}"
                     )
+
                     summary = ""
                     for step in response.steps:
-                        summary += f"\n--- {step.name} ---\n"
+                        summary += f"\n--- {step.name} ---"
                         summary += step.content
                 except Exception as e:
                     summary = (
                         f"LocalClient run failed: {traceback.format_exc()}"
                     )
-                    self.logger.error(
+                    self.logger.warning(
                         f"LocalClient run failed for test example {data.id} use case {config.name}: {repr(e)}"
                     )
                 self.save_raw_prediction(
@@ -349,6 +354,7 @@ class TestPipeline:
                     response=response,
                     solution_type="agent",
                 )
+
                 predictions.append(
                     Prediction(
                         run_id=run_id,
@@ -370,54 +376,61 @@ class TestPipeline:
                     )
                 )
             elif self.config.solution_type == "pipeline":
-                base_dir = os.environ.get("BASE_DIR", config.cwd_config)
+                base_dir = os.environ.get("BASE_DIR", ".")
+                config_path = os.path.join(base_dir, config.cwd_config)
                 pipeline_config = yaml.safe_load(
-                    open(config.path).read().format(BASE_DIR=base_dir)
+                    open(config_path).read().format(BASE_DIR=base_dir)
                 )
-                pipeline_config = PipelineConfig(**pipeline_config)
+                pipeline_config = yaml.safe_load(pipeline_config)
+                pipeline_schema = PipelineConfig(**pipeline_config)
+
                 workflow, state_base_model = build_graph_from_config(
-                    pipeline_schema=pipeline_config
+                    pipeline_schema=pipeline_schema
                 )
+
                 # previous_rewritten_query = ""
                 # TODO: FIX pipeline benchmarking
                 # state = state_base_model(
-                #   input=PipelineInput(
-                #     query=data.question,
-                #     previous_rewritten_query=previous_rewritten_query,
-                #   )
+                #     input=PipelineInput(
+                #         query=data.question,
+                #         previous_rewritten_query=previous_rewritten_query,
+                #     )
                 # )
                 # 
-                # if os.environ.get('CERT_PATH'):
+                # if os.environ.get("CERT_PATH"):
                 #     token = get_az_token_using_cert()
                 #     runnable_config = {
-                #       CONFIGURABLE: {
-                #         THREAD_ID: DEFAULT_THREAD,
-                #         API_KEY: os.environ.get("AZURE_OPENAI_API_KEY", ""),
-                #         BASE_URL: os.environ.get("AZURE_ENDPOINT", ""),
-                #         TOKEN: os.environ.get("AZURE_OPENAI_API_TOKEN", token),
-                #       }
-                #   }
-                # else:
-                #   runnable_config = {
-                #     CONFIGURABLE: {
-                #         THREAD_ID: DEFAULT_THREAD,
-                #         API_KEY: os.environ.get("AZURE_OPENAI_API_KEY", ""),
-                #         BASE_URL: os.environ.get("AZURE_ENDPOINT", ""),
-                #         TOKEN: os.environ.get("AZURE_OPENAI_API_TOKEN", ""),
+                #         CONFIGURABLE: {
+                #             THREAD_ID: DEFAULT_THREAD,
+                #             API_KEY: os.environ.get("AZURE_OPENAI_API_KEY", ""),
+                #             BASE_URL: os.environ.get("AZURE_ENDPOINT", ""),
+                #             TOKEN: os.environ.get("AZURE_OPENAI_API_TOKEN", token),
+                #         }
                 #     }
-                #   }
+                # else:
+                #     runnable_config = {
+                #         CONFIGURABLE: {
+                #             THREAD_ID: DEFAULT_THREAD,
+                #             API_KEY: os.environ.get("AZURE_OPENAI_API_KEY", ""),
+                #             BASE_URL: os.environ.get("AZURE_ENDPOINT", ""),
+                #             TOKEN: os.environ.get("AZURE_OPENAI_API_TOKEN", ""),
+                #         }
+                #     }
                 start_time = time.time()
-                test_result_item = TestResultItem(
-                    use_case_config=config,
-                    local_path=local_path,
-                    input_data=data,
-                    predictions=predictions,
-                )
-                self.save_test_result(test_result_item=test_result_item)
-                if idx % self.config.batch_size == 0:
-                    self.logger.info(
-                        f"Complete prediction job {idx} / {total} in use case {config.name}."
-                    )
+
+        test_result_item = TestResultItem(
+            use_case_config=config,
+            local_path=local_path,
+            input_data=data,
+            predictions=predictions,
+        )
+
+        self.save_test_result(test_result=test_result_item)
+
+        if idx % self.config.batch_size == 0:
+            self.logger.info(
+                f"Complete prediction job ({idx} / {total}) in use case {config.name}."
+            )
     
 
     async def run_prediction_for_one_use_case(
@@ -480,6 +493,16 @@ class TestPipeline:
         instruction = data.instruction_for_llm_judge
         if instruction:
             instruction = f"Follow the instructions below in your evaluation:\n{instruction.strip()}\n"
+        
+        if test_result is None:
+            self.logger.warning(
+                f"Skip LLM-judg evaluation for test example {data.id}."
+            )
+            return
+        
+        # from dataqa.integrations.local.generate_token_multi import get_access_token
+        # new_token = get_access_token()
+        # new_token = get_az_token_using_cert()[0]
 
         for prediction in test_result.predictions:
             if prediction.evaluation.llm_label != EvaluationLabel.NotAvailable:
@@ -500,6 +523,32 @@ class TestPipeline:
                 prediction.evaluation.llm_label = EvaluationLabel.Wrong
 
             else:
+                if os.environ.get("CERT_PATH"):
+                    # print(f"Initializing LLM using CERT_PATH: {os.environ.get('CERT_PATH')}")
+                    token = ""
+                    api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
+                    if api_key == "":
+                        print(
+                            "Running Standard LLM Azure API Subscription....."
+                        )
+                        api_key = get_az_token_using_cert()[0]
+                    else:
+                        print(
+                            "Running Multi-Tenant LLM Azure API Subscription....."
+                        )
+                        token = get_az_token_using_cert()[0]
+                    api_args = {
+                        API_KEY: api_key,
+                        BASE_URL: os.environ.get("AZURE_ENDPOINT", ""),
+                        TOKEN: token,
+                    }
+                else:
+                    api_args = {
+                        # For local mode, we assume credentials are in env vars
+                        API_KEY: os.environ.get("AZURE_OPENAI_API_KEY", ""),
+                        BASE_URL: os.environ.get("AZURE_ENDPOINT", ""),
+                        TOKEN: os.environ.get("AZURE_OPENAI_API_TOKEN", ""),
+                    }
                 llm_judge_output = await self.llm_judge_model.ainvoke(
                     messages=self.llm_judge_prompt.invoke(
                         dict(
@@ -509,10 +558,7 @@ class TestPipeline:
                             prediction=prediction.combined_response,
                         )
                     ),
-                    **{
-                        API_KEY: get_az_token_using_cert()[0],
-                        BASE_URL: os.environ["OPENAI_API_BASE"],
-                    },
+                    **api_args,
                 )
                 if isinstance(llm_judge_output.generation, LLMJudgeOutput):
                     prediction.evaluation.llm_judge_output = (
@@ -624,15 +670,18 @@ class TestPipeline:
                 [],
             )
             for result in results:
-                _latency += [
-                    prediction.latency for prediction in result.predictions
-                ]
-                labels = [
-                    prediction.evaluation.llm_label
-                    for prediction in result.predictions
-                    if prediction.evaluation.llm_label
-                    != EvaluationLabel.NotAvailable
-                ]
+                if result is None:
+                    continue
+                else:
+                    _latency += [
+                        prediction.latency for prediction in result.predictions
+                    ]
+                    labels = [
+                        prediction.evaluation.llm_label
+                        for prediction in result.predictions
+                        if prediction.evaluation.llm_label
+                        != EvaluationLabel.NotAvailable
+                    ]
                 if not labels:
                     continue
                 count = Counter(labels)
@@ -695,8 +744,7 @@ class TestPipeline:
             self.logger.debug(f"{usecase} {question_id}")
             self.logger.debug(question)
             self.logger.debug(response)
-        self.logger.debug(f"Found {len(reject_example)} reject responses."
-        )
+        self.logger.debug(f"Found {len(reject_example)} reject responses.")
         for usecase, question_id, question, response in reject_example:
             self.logger.debug(f"{usecase} {question_id}")
             self.logger.debug(question)

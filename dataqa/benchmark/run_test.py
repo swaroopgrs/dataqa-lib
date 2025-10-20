@@ -26,7 +26,7 @@ if __name__ == "__main__":
     if os.path.isfile(args.config):
         test_config_data = yaml.safe_load(open(args.config))
     else:
-        raise f"Config file {args.config} does not exist."
+        raise f"Config file {args.config} doesn't exist."
     
     test_config = BenchmarkConfig(**test_config_data)
 

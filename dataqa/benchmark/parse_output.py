@@ -22,6 +22,9 @@ def extract_test_results(base_dir):
                 ground_truth_output = test_result["input_data"][
                     "ground_truth_output"
                 ]
+                ground_truth_sql = test_result["input_data"]["solution"][0][test_result][
+                    "function_arguments"
+                ]["sql"]
 
                 for prediction in test_result["predictions"]:
                     run_id = prediction["run_id"]
@@ -36,6 +39,7 @@ def extract_test_results(base_dir):
                         if prediction["final_response"]
                         else None
                     )
+                    latency = prediction["latency"]
 
                     results.append(
                         {
@@ -46,8 +50,10 @@ def extract_test_results(base_dir):
                             "Example ID": example_id,
                             "Run ID": run_id,
                             "Question": question,
+                            "Ground Truth SQL": ground_truth_sql,
                             "Ground Truth Output": ground_truth_output,
                             "LLM Label": llm_label,
+                            "Latency": latency,
                             "LLM Judge Output": llm_judge_output,
                             "Combined Response": combined_response,
                             "Summary": summary,
