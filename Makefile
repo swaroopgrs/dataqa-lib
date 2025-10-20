@@ -43,7 +43,7 @@ ci-prebuild: ## Install build tools and prepare project directory for the CI pip
 	cat /dev/null > requirements.txt
 
 package: ## Create deployable whl packages for python project
-	python -m poetry build --format wheel 
+	python -m poetry build --format=wheel 
 
 ci: clean build package ## Runs clean, build and package
 
@@ -57,5 +57,5 @@ check-lint-format: ## Check format for all files
 	
 help: ## Show make target documentation
 	@awk -F ':|##' '/^[^\t].+?:.*?##/ {\
-	printf "\033[36m%-30s\0330m %s\n", $$1, $$NF \
+	printf "\033[36m%-30s\033[0m %s\n", $$1, $$NF \
 	}' $(MAKEFILE_LIST)

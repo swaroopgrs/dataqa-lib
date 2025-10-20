@@ -1,5 +1,5 @@
 jules: 11421
-mode: python:3.12
+mode: python-3.12
 baseVersion: 0.0.1
 featureBranchPipelineTrigger: true
 buildConfig:
@@ -10,50 +10,47 @@ buildConfig:
       - IDENTITY_SOURCE_ARTIFACTORY: JET
 ssap:
   preProdScan: true
-sonarConfig:
-  withProperties: >-
-    -Dsonar.language=py
-    -Dsonar.projectBaseDir=$(WORKSPACE)
-    -Dsonar.sources=dataqa
-    -Dsonar.tests=tests
-    -Dsonar.python.xunit.reportPaths=reports/xunit.xml
-    -Dsonar.python.coverage.reportPaths=reports/coverage.xml
-    -Dsonar.coverage.exclusions='**/setup.py,**/tests/**'
-    -Dsonar.verbose=true
+sonarDetails:
+  additionalProperties: >-
+      -Dsonar.language=py
+      -Dsonar.projectBaseDir=$(WORKSPACE)
+      -Dsonar.sources=dataqa
+      -Dsonar.tests=tests
+      -Dsonar.python.xunit.reportPaths=reports/xunit.xml
+      -Dsonar.python.coverage.reportPaths=reports/coverage.xml
+      -Dsonar.coverage.exclusions='**/setup.py,**/tests/**'
+      -Dsonar.verbose=true
 blackduck:
   artifactFilePatterns: "**/setup.py"
   criteria: BuildStatusErrorIfViolation=NONE,VulnerabilityThresholdForInstable=MEDIUM,VulnerabilityThresholdForError=HIGH
 frs:
   release: release
-  postCommit:
-    pypi:
+  jira: commit
+  pypi:
       packages: dist/*
 mapping:
-  - default:
-      name: default
-      build: --version && make build
-      test: --version && make test
-      tasks:
-        preBuild:
-          - script: make ci-prebuild
-          - script: make ci
-          - script: make check-lint-format
-        preTest:
-          - script: make pre-test
-        postBuild:
-          - script: make dist
-        postTest:
-          - script: make ssap
-      excl: default
-  - main:
-      name: main
-      excl: default
-  - name: develop
-      excl: default
-  - name: release
-      excl: default
-  - name: feature
-      excl: default
-  - name: release
-      excl: default
-  - name: hotfix
+- &default
+   name: default
+   build: --version && make build
+   test: --version && make test
+   tasks:
+      preBuild:
+        - script: make ci-prebuild
+        - script: make ci
+        - script: make check-lint-format
+      preTest:
+        - script: make pre-test
+      postBuild:
+        - script: make dist
+      postTest:
+        - script: make ssap
+- <<: *default
+  name: main
+- <<: *default
+  name: develop
+- <<: *default
+  name: release
+- <<: *default
+  name: feature
+- <<: *default 
+  name: hotfix
