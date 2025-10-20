@@ -4,7 +4,7 @@
 
 ## **1. Feature Additions & Fixes**
 
-- [x] **Streaming & Node Statuses**
+- [x] **Streaming Node Status**
     - Implement streaming of node start/completion status.
 - [x] **Streaming Final Output**
     - Stream the final output response.
@@ -12,18 +12,18 @@
     - Ensure final output responses are consistently formatted in Markdown.
 - [ ] **History & Memory**
     - Add proper history and memory for follow-up queries to both DBC and Local clients.
-- [ ] **Tag Retrievers**
+- [ ] **Tag Retriever**
     - Fix and test the tag retriever module.
-- [ ] **Vector Retrievers**
+- [ ] **Vector Retriever**
     - Fix and test the vector retriever module.
 - [ ] **Pipeline Core**
     - Fix any refactor `pipelines/pipeline.py` and `pipelines/schema.py`.
-    - Add recursion limit to create react agent
+- [x] add `recursion_limit` to `create_react_agent`
 - [x] **Improve AgentResponseParser Metadata Handling**
-    - Fix `AgentResponseParser` should gracefully handle empty or missing metadata (especially in DBC client).
+    - Fix: `AgentResponseParser` should gracefully handle empty or missing metadata (especially in DBC client).
 - [ ] **Asset Versioning**
     - Add version fields and changelogs to all asset files (rules, schema, examples)
-- [ ] **Asset Validation**
+- [ ] **Add SQL Validation**
     - Add static validation module.
     - Add LLM based reviewer/validator module; post SQL generation.
 - [ ] **Benchmarking**
@@ -36,15 +36,15 @@
 - [ ] **Auto-Generated API Docs**
     - Integrate [MkDocs](https://www.mkdocs.org/) for API documentation.
     - Ensure all public classes/functions have docstrings.
-- [ ] **High-Level Architecture Docs**
+- [ ] **High-Level Architecture Diagram**
     - Add a Mermaid or PlantUML diagram to the docs and README.
-- [ ] **Getting Started (User)**
+- [ ] **Getting Started Guide (Users)**
     - Write a step-by-step guide for users installing and running the library.
 - [ ] **Getting Started Guide (Contributors)**
-    - Add a `CONTRIBUTING.md` with setup, style, and PR process.
+    - Add a `CONTRIBUTING.md` with setup, code style, and PR process.
 - [ ] **Update Docs for Asset Format Changes**
     - Revise documentation to reflect new asset formats and config structures.
-- [ ] **Inline Comments**
+- [ ] **Code Comments**
     - Add/expand inline comments in complex modules (e.g., agent workflow, retrievers).
 - [ ] **Cookbook/Examples**
     - Add cookbook + example usage, and FAQ sections.
@@ -71,7 +71,7 @@
 - [ ] **Standardize Error Handling**
     - Use custom exception classes and propagate meaningful errors.
 - [ ] **Centralized Logging**
-    -  a unified logging config (log levels, structured logs).
+    - Implement a unified logging config (log levels, structured logs).
 - [ ] **Monitoring & Metrics**
     - Integrate with OpenTelemetry or Prometheus for metrics/tracing. This can be done via integration with LangFuse or Arize Phoenix.
 
