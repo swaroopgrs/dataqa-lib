@@ -2,7 +2,7 @@ site_name: DataQA Library
 site_description: Library for data question answering with agents.
 site_author: DataQA Team
 
-repo_url: https://bitbucketdc.jpmchase.net/scm/aicoelin/dataqa-lib.git
+repo_url: https://github.com/swaroopgrs/dataqa-lib.git
 repo_name: dataqa
 
 theme:
@@ -27,6 +27,7 @@ theme:
     - navigation.tabs
     - navigation.section
     - navigation.top
+    - navigation.expand
     - navigation.path
     - search.highlight
     - search.share
@@ -44,6 +45,8 @@ plugins:
             paths: [dataqa]
             docstring_style: google
             show_source: true
+            show_root_heading: true
+            show_root_toc_entry: false
 
 markdown_extensions:
   - pymdownx.highlight:
@@ -57,7 +60,12 @@ markdown_extensions:
           format: !!python/name:pymdownx.superfences.fence_code_format
   - admonition
   - pymdownx.details
-  - pymdownx.tabbed
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - tables
   - attr_list
   - md_in_html
   - toc:

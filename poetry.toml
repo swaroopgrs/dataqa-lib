@@ -1,4 +1,4 @@
-cache_dir = ".cache"
+cache-dir = ".cache"
 
 [virtualenvs]
 path = ".venv"
