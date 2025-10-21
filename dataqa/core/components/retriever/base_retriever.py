@@ -46,7 +46,8 @@ class RetrieverConfig(ComponentConfig):
     )
     retrieval_method: RetrievalMethod
     parameters: Dict[str, Any] = Field(
-        default_factory=dict, description="Parameters for the retriever component."
+        default_factory=dict,
+        description="Parameters for the retriever component.",
     )
 
 
@@ -66,7 +67,10 @@ class Retriever(Component, ABC):
 
     @abstractmethod
     def retrieve_assets(
-        self, query: Any, resources: List[Union[Rule, Example, TableSchema]], resource_type: ResourceType
+        self,
+        query: Any,
+        resources: List[Union[Rule, Example, TableSchema]],
+        resource_type: ResourceType,
     ) -> List[RetrievedAsset]:
         pass
 
@@ -90,7 +94,7 @@ class Retriever(Component, ABC):
             return asset_formatter.format_examples_for_prompt(content_list)
         elif resource_type == ResourceType.Schema:
             return asset_formatter.format_schema_for_prompt(content_list)
-        
+
         return ""
 
     @staticmethod
@@ -156,7 +160,10 @@ class AllRetriever(Retriever):
         logger.info(f"Output BaseModel: {self.output_base_model.model_fields}")
 
     def retrieve_assets(
-        self, query: RetrieverInput, resources: List[Union[Rule, Example, TableSchema]], resource_type: ResourceType
+        self,
+        query: RetrieverInput,
+        resources: List[Union[Rule, Example, TableSchema]],
+        resource_type: ResourceType,
     ) -> List[RetrievedAsset]:
         """
         For AllRetriever, simply wrap all provided resources into RetrievedAsset objects.
@@ -173,7 +180,7 @@ class AllRetriever(Retriever):
         return all_retrieved
 
     async def run(
-            self, input_data: RetrieverInput = None, config: Dict = {}
+        self, input_data: RetrieverInput = None, config: Dict = {}
     ) -> RetrieverOutput:
         """
         Iterates through configured resource types and modules, retrieves all assets,
@@ -191,19 +198,23 @@ class AllRetriever(Retriever):
             resources = self.resource_manager.get_resource(
                 resource_type, module_name
             )
-            
+
             state_name = self.get_state_name(resource_type, module_name)
             if not resources:
                 component_output[state_name] = ""
                 continue
 
-            retrieved_assets = self.retrieve_assets(input_data, resources, resource_type)
+            retrieved_assets = self.retrieve_assets(
+                input_data, resources, resource_type
+            )
             retrieved_asset_all.extend(retrieved_assets)
 
-            output_str = self.prepare_output_string(retrieved_assets, resource_type)
+            output_str = self.prepare_output_string(
+                retrieved_assets, resource_type
+            )
 
             component_output[state_name] = output_str
 
         component_output["output_data"] = retrieved_asset_all
-        
+
         return self.output_base_model.model_validate(component_output)

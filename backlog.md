@@ -44,13 +44,13 @@
 ### Schema Relationship Mapping
 - **Priority**: Low
 - **Description**: Build relationship graph from foreign key definitions
-- **Use Cases**: 
+- **Use Cases**:
   - Query optimization
   - Join suggestion
   - Data lineage tracking
 
 ### Schema Validation Configuration
-- **Priority**: Low  
+- **Priority**: Low
 - **Description**: Allow users to configure validation strictness levels
 - **Options**:
   - `strict`: Full validation (all relationships must be valid)
@@ -63,7 +63,7 @@
 - **Description**: Update template configuration files to new format
 - **Requirements**:
   - Update dataqa/templates/schema.yml to new format
-  - Update dataqa/templates/rules.yml to new format  
+  - Update dataqa/templates/rules.yml to new format
   - Update dataqa/templates/examples.yml to new format
   - Ensure templates reflect the new structure for future use
 - **Implementation Notes**:

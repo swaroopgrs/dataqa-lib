@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 class AnalyticsWorkerState(BaseModel):
-    messages: Annotated[List,add] = Field(default_factory=list)
+    messages: Annotated[List, add] = Field(default_factory=list)
 
 
 class AnalyticsWorkerConfig(ComponentConfig):
@@ -74,7 +74,7 @@ class AnalyticsWorker(Component):
         memory: Memory,
         llm: AzureOpenAI,
         config: Union[AnalyticsWorkerConfig, Dict] = None,
-        **kwargs
+        **kwargs,
     ):
         super().__init__(config=config, **kwargs)
         self.llm = llm
@@ -87,14 +87,14 @@ class AnalyticsWorker(Component):
             memory=memory, tool_names=tool_names
         )[0]
         self.workflow = self.build_workflow(memory=self.memory, llm=self.llm)
-        
+
     def build_workflow(
         self, memory: Memory, llm: AzureOpenAI, **kwargs
     ) -> CompiledGraph:
         return create_react_agent(
             model=llm._get_model(**kwargs), tools=self.tools
         )
-    
+
     def display(self):
         logger.info(f"Component Name: {self.config.name}")
         logger.info(f"Component Type: {self.component_type}")
@@ -102,7 +102,7 @@ class AnalyticsWorker(Component):
         logger.info(f"Output BaseModel: {self.output_base_model.__fields__}")
 
     async def run(
-            self, input_data: AnalyticsWorkerInput, config: RunnableConfig
+        self, input_data: AnalyticsWorkerInput, config: RunnableConfig
     ):
         task = input_data.plan[-1].tasks[0].task_description
         worker = input_data.plan[-1].tasks[0].worker
@@ -150,4 +150,4 @@ class AnalyticsWorker(Component):
             ]
             if self.config.worker_state_required
             else [],
-    )
+        )

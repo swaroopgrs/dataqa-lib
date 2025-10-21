@@ -2265,7 +2265,7 @@ class TestComponentBase:
 
 
 I have the above code. I am trying to build a natural language to sql library using llms. The goal is to build a config driven pipeline where the user can specify their config using a yaml file and we will build the pipeline and the components from that config. I am happy with the rough folder structure I provided.
-Most of the code is old which i am refactoring. The components/base.py and components/test_base.py are refactored. Rest of the stuff is still old or broken code. The gaol is to rebuild the rest of the components using the components/base as the foundataion. 
+Most of the code is old which i am refactoring. The components/base.py and components/test_base.py are refactored. Rest of the stuff is still old or broken code. The gaol is to rebuild the rest of the components using the components/base as the foundataion.
 Ideally the user will  define a pipeline via config yaml file which lists down all the components and the pipeline..rough structure below
 components
     - name: gpt-4o-model
@@ -2274,11 +2274,11 @@ components
         api_vesrion: xxxx
         api_key: xxxx
         temperature: 0
-      class_path: dataqa.components.llm.interfaces.openai.AzureOpenAI 
+      class_path: dataqa.components.llm.interfaces.openai.AzureOpenAI
     - name: query_rewriter
       component_class_path: xxxxx
       description: xxxx
-      params: 
+      params:
         llm: COMP_gpt_4o_model
         input: # Variable
             - name: query
@@ -2316,8 +2316,6 @@ piprlines:
         -name: END
           edges:
            - return
-            
-Ask you can see AzureOpenAI is not a component but an interface that we will use in other classes. also i am confused about the params, config piece. will the llm object in query_rewriter component be part of the query rewriter config? or the query_rewriter component takes llm object into its init method. 
+
+Ask you can see AzureOpenAI is not a component but an interface that we will use in other classes. also i am confused about the params, config piece. will the llm object in query_rewriter component be part of the query rewriter config? or the query_rewriter component takes llm object into its init method.
 Can you suggest a good config yaml strucutre thats easy enough for the user to write. Also, given that yaml structure how would we change the compoenents
-          
-            

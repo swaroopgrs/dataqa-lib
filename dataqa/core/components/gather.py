@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class GatherOutputOutput(BaseModel):
-    output: PipelineOutput = None 
+    output: PipelineOutput = None
 
 
 class GatherOutput(Component):

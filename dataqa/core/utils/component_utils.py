@@ -54,4 +54,3 @@ def extract(
             f"can not find keywords {prefix} or {suffix} in {response}"
         )
     return response[a + len(prefix) : b].strip()
-

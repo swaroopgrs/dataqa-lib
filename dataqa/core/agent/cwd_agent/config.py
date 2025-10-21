@@ -2,7 +2,9 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
-from dataqa.core.components.code_executor.in_memory_code_executor import InMemoryCodeExecutorConfig
+from dataqa.core.components.code_executor.in_memory_code_executor import (
+    InMemoryCodeExecutorConfig,
+)
 
 
 class PromptMessageConfig(BaseModel):
@@ -33,7 +35,7 @@ class CwdAgentPromptsConfig(BaseModel):
 
 
 class RetrievalWorkerConfig(BaseModel):
-    sql_execution_config: InMemoryCodeExecutorConfig 
+    sql_execution_config: InMemoryCodeExecutorConfig
 
 
 class AnalyticsWorkerConfig(BaseModel):
@@ -154,4 +156,3 @@ class CwdAgentDefinitionConfig(BaseModel):
 
     class Config:
         extra = "forbid"
-

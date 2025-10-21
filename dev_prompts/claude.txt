@@ -52,11 +52,11 @@ Create a robust component system that allows:
 class Component:
     def __init__(self, config):
         self.config = config
-        
+
     async def execute(self, *args, **kwargs):
         """Execute component functionality"""
         pass
-        
+
     def to_tool(self):
         """Convert component to a tool format for agent use"""
         pass
@@ -175,7 +175,7 @@ class KnowledgeBaseConfig(BaseModel):
     provider: str = "local"  # "local" or "opensearch"
     # Provider-specific configurations
     retrieval_methods: List[str] = ["dense"]  # "dense", "sparse", "hybrid", "tag"
-    
+
 class ComponentConfig(BaseModel):
     type: str
     config: Dict[str, Any] = {}
@@ -213,23 +213,23 @@ from typing import Any, Dict, Optional, Type, ClassVar, Dict
 
 class Component(ABC):
     """Base component class that all components will inherit from."""
-    
+
     # Class registry for component types
     _registry: ClassVar[Dict[str, Type["Component"]]] = {}
-    
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-    
+
     @abstractmethod
     async def execute(self, context: Dict[str, Any]) -> Any:
         """Execute the component's main functionality."""
         pass
-    
+
     def to_tool(self, name: str, description: str):
         """Convert this component to a tool usable by agents."""
         # Implementation to create a tool representation
         pass
-    
+
     @classmethod
     def register(cls, component_type: str):
         """Decorator to register a component class."""
@@ -237,13 +237,13 @@ class Component(ABC):
             cls._registry[component_type] = component_cls
             return component_cls
         return decorator
-    
+
     @classmethod
     def create(cls, component_type: str, config: Dict[str, Any]) -> "Component":
         """Create a component instance from type and configuration."""
         if component_type not in cls._registry:
             raise ValueError(f"Unknown component type: {component_type}")
-        
+
         component_cls = cls._registry[component_type]
         return component_cls(config)
 ```
@@ -262,22 +262,22 @@ from typing import Any, Dict, List, Optional, Type, ClassVar
 
 class LLMProvider(ABC):
     """Base class for LLM providers."""
-    
+
     _registry: ClassVar[Dict[str, Type["LLMProvider"]]] = {}
-    
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-    
+
     @abstractmethod
     async def generate(self, prompt: str, **kwargs) -> str:
         """Generate text from a prompt."""
         pass
-    
+
     @abstractmethod
     async def generate_streaming(self, prompt: str, **kwargs):
         """Generate streaming text from a prompt."""
         pass
-    
+
     @classmethod
     def register(cls, provider_name: str):
         """Decorator to register an LLM provider."""
@@ -285,28 +285,28 @@ class LLMProvider(ABC):
             cls._registry[provider_name] = provider_cls
             return provider_cls
         return decorator
-    
+
     @classmethod
     def create(cls, provider_name: str, config: Dict[str, Any]) -> "LLMProvider":
         """Create an LLM provider instance."""
         if provider_name not in cls._registry:
             raise ValueError(f"Unknown LLM provider: {provider_name}")
-        
+
         provider_cls = cls._registry[provider_name]
         return provider_cls(config)
 
 @LLMProvider.register("azure_openai")
 class AzureOpenAIProvider(LLMProvider):
     """AzureOpenAI provider implementation."""
-    
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         # Initialize Azure OpenAI SDK client
-        
+
     async def generate(self, prompt: str, **kwargs) -> str:
         # Implementation using Azure OpenAI
         pass
-        
+
     async def generate_streaming(self, prompt: str, **kwargs):
         # Implementation for streaming using Azure OpenAI
         pass
@@ -328,7 +328,7 @@ from typing import Dict, List, Any, Optional, Type, ClassVar
 
 class Document:
     """Base document class for knowledge base items."""
-    
+
     def __init__(self, content: str, metadata: Dict[str, Any], doc_type: str, tags: List[str] = None):
         self.content = content
         self.metadata = metadata
@@ -337,24 +337,24 @@ class Document:
 
 class KnowledgeBase(ABC):
     """Base class for knowledge base providers."""
-    
+
     _registry: ClassVar[Dict[str, Type["KnowledgeBase"]]] = {}
-    
+
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-    
+
     @abstractmethod
     async def add_document(self, document: Document) -> str:
         """Add a document to the knowledge base."""
         pass
-    
+
     @abstractmethod
-    async def retrieve(self, query: str, doc_type: Optional[str] = None, 
-                      retrieval_method: str = "dense", top_k: int = 5, 
+    async def retrieve(self, query: str, doc_type: Optional[str] = None,
+                      retrieval_method: str = "dense", top_k: int = 5,
                       tags: Optional[List[str]] = None) -> List[Document]:
         """Retrieve documents from the knowledge base."""
         pass
-    
+
     @classmethod
     def register(cls, provider_name: str):
         """Decorator to register a knowledge base provider."""
@@ -362,30 +362,30 @@ class KnowledgeBase(ABC):
             cls._registry[provider_name] = provider_cls
             return provider_cls
         return decorator
-    
+
     @classmethod
     def create(cls, provider_name: str, config: Dict[str, Any]) -> "KnowledgeBase":
         """Create a knowledge base provider instance."""
         if provider_name not in cls._registry:
             raise ValueError(f"Unknown knowledge base provider: {provider_name}")
-        
+
         provider_cls = cls._registry[provider_name]
         return provider_cls(config)
 
 @KnowledgeBase.register("local")
 class LocalKnowledgeBase(KnowledgeBase):
     """Local file-based knowledge base implementation."""
-    
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         # Initialize local storage and embedding model
-        
+
     async def add_document(self, document: Document) -> str:
         # Implementation for adding to local storage
         pass
-        
-    async def retrieve(self, query: str, doc_type: Optional[str] = None, 
-                      retrieval_method: str = "dense", top_k: int = 5, 
+
+    async def retrieve(self, query: str, doc_type: Optional[str] = None,
+                      retrieval_method: str = "dense", top_k: int = 5,
                       tags: Optional[List[str]] = None) -> List[Document]:
         # Implementation for retrieval from local storage
         pass
@@ -419,24 +419,24 @@ from typing import Dict, Any
 @Component.register("query_rewriter")
 class QueryRewriterComponent(Component):
     """Component for rewriting and refining user queries."""
-    
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
         # Initialize LLM for query rewriting
-        
+
     async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Rewrite the query for better retrieval."""
         original_query = context.get("query", "")
-        
+
         # Use LLM to rewrite the query
         rewritten_query = await self._rewrite_query(original_query)
-        
+
         # Update context with rewritten query
         context["original_query"] = original_query
         context["query"] = rewritten_query
-        
+
         return context
-    
+
     async def _rewrite_query(self, query: str) -> str:
         # Implementation for query rewriting using LLM
         pass
@@ -474,34 +474,34 @@ from typing import Dict, Any
 
 class CodeExecutor(Component):
     """Base class for code execution components."""
-    
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
-    
+
     @abstractmethod
     async def execute_code(self, code: str, language: str, context: Dict[str, Any]) -> Dict[str, Any]:
         """Execute code and return results."""
         pass
-    
+
     async def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """Execute code from context and update with results."""
         code = context.get("generated_code", "")
         language = context.get("language", "python")
-        
+
         # Execute the code
         result = await self.execute_code(code, language, context)
-        
+
         # Update context with execution results
         context["execution_result"] = result.get("result")
         context["execution_success"] = result.get("success", False)
         context["execution_error"] = result.get("error")
-        
+
         return context
 
 @Component.register("in_memory_executor")
 class InMemoryCodeExecutor(CodeExecutor):
     """In-memory code execution in a sandboxed environment."""
-    
+
     async def execute_code(self, code: str, language: str, context: Dict[str, Any]) -> Dict[str, Any]:
         # Implementation for in-memory execution
         pass
@@ -509,7 +509,7 @@ class InMemoryCodeExecutor(CodeExecutor):
 @Component.register("api_executor")
 class APICodeExecutor(CodeExecutor):
     """Code execution via external API."""
-    
+
     async def execute_code(self, code: str, language: str, context: Dict[str, Any]) -> Dict[str, Any]:
         # Implementation for API-based execution
         pass
@@ -571,28 +571,28 @@ from dataqa.core.component import Component
 
 class LangGraphWorkflow:
     """LangGraph-based workflow implementation."""
-    
+
     def __init__(self, config: Dict[str, Any], components: Dict[str, Component]):
         self.config = config
         self.components = components
         self.graph = self._build_graph()
-    
+
     def _build_graph(self) -> StateGraph:
         """Build the LangGraph workflow graph."""
         # Initialize LangGraph StateGraph
         graph = StateGraph()
-        
+
         # Add nodes for each component
         for name, component in self.components.items():
             graph.add_node(name, component.execute)
-        
+
         # Add edges based on configuration
         edges = self.config.get("edges", [])
         for edge in edges:
             source = edge.get("source")
             target = edge.get("target")
             condition = edge.get("condition")
-            
+
             if condition:
                 # Add conditional edge
                 graph.add_conditional_edges(
@@ -606,19 +606,19 @@ class LangGraphWorkflow:
             else:
                 # Add direct edge
                 graph.add_edge(source, target)
-        
+
         # Set entry point
         entry_point = self.config.get("entry_point", next(iter(self.components)))
         graph.set_entry_point(entry_point)
-        
+
         # Compile the graph
         return graph.compile()
-    
+
     def _create_condition_function(self, condition_config: Dict[str, Any]):
         """Create a condition function from configuration."""
         # Implementation for creating conditional functions
         pass
-    
+
     async def run(self, initial_state: Dict[str, Any]) -> Dict[str, Any]:
         """Run the workflow with the given initial state."""
         # Execute the LangGraph workflow
@@ -641,13 +641,13 @@ from dataqa.core.llm import LLMProvider
 
 class Agent:
     """Base class for LLM-powered agents."""
-    
+
     def __init__(self, config: Dict[str, Any], llm: LLMProvider, tools: List[Dict[str, Any]]):
         self.config = config
         self.llm = llm
         self.tools = tools
         self.memory = {}
-    
+
     async def run(self, query: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
         """Run the agent on a query with optional context."""
         # Implementation for agent execution
@@ -655,33 +655,33 @@ class Agent:
 
 class OrchestratorAgent(Agent):
     """Agent responsible for orchestrating other specialized agents."""
-    
-    def __init__(self, config: Dict[str, Any], llm: LLMProvider, 
+
+    def __init__(self, config: Dict[str, Any], llm: LLMProvider,
                 specialized_agents: Dict[str, Agent], tools: List[Dict[str, Any]]):
         super().__init__(config, llm, tools)
         self.specialized_agents = specialized_agents
-    
+
     async def run(self, query: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
         # Implementation for orchestration agent logic
         pass
 
 class QueryAgent(Agent):
     """Specialized agent for data querying tasks."""
-    
+
     async def run(self, query: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
         # Implementation for data querying agent logic
         pass
 
 class AnalysisAgent(Agent):
     """Specialized agent for data analysis tasks."""
-    
+
     async def run(self, query: str, data: Any, context: Dict[str, Any] = None) -> Dict[str, Any]:
         # Implementation for data analysis agent logic
         pass
 
 class VisualizationAgent(Agent):
     """Specialized agent for data visualization tasks."""
-    
+
     async def run(self, query: str, data: Any, context: Dict[str, Any] = None) -> Dict[str, Any]:
         # Implementation for data visualization agent logic
         pass
@@ -714,59 +714,59 @@ from dataqa.agents.base import OrchestratorAgent
 
 class DataQA:
     """Main façade for the DataQA system."""
-    
+
     def __init__(self, config_path: str = None, config: Dict[str, Any] = None):
         # Load and validate configuration
         self.config = config or (load_config(config_path) if config_path else {})
-        
+
         # Initialize knowledge base
         self.knowledge_base = self._init_knowledge_base()
-        
+
         # Initialize LLM provider
         self.llm = self._init_llm()
-        
+
         # Initialize components
         self.components = self._init_components()
-        
+
         # Initialize workflows
         self.workflows = self._init_workflows()
-        
+
         # Initialize agents
         self.agents = self._init_agents()
-        
+
         # Initialize orchestrator agent
         self.orchestrator = self._init_orchestrator()
-    
+
     def _init_knowledge_base(self) -> KnowledgeBase:
         """Initialize knowledge base from configuration."""
         # Implementation for knowledge base initialization
         pass
-    
+
     def _init_llm(self) -> LLMProvider:
         """Initialize LLM provider from configuration."""
         # Implementation for LLM initialization
         pass
-    
+
     def _init_components(self) -> Dict[str, Component]:
         """Initialize components from configuration."""
         # Implementation for components initialization
         pass
-    
+
     def _init_workflows(self) -> Dict[str, LangGraphWorkflow]:
         """Initialize workflows from configuration."""
         # Implementation for workflows initialization
         pass
-    
+
     def _init_agents(self) -> Dict[str, Any]:
         """Initialize specialized agents from configuration."""
         # Implementation for agents initialization
         pass
-    
+
     def _init_orchestrator(self) -> OrchestratorAgent:
         """Initialize orchestrator agent."""
         # Implementation for orchestrator initialization
         pass
-    
+
     async def query(self, query: str, mode: str = "agent") -> Dict[str, Any]:
         """Process a natural language query using specified mode."""
         if mode == "agent":
@@ -778,7 +778,7 @@ class DataQA:
             workflow = self.workflows.get(workflow_name)
             if not workflow:
                 raise ValueError(f"Workflow '{workflow_name}' not found")
-            
+
             return await workflow.run({"query": query})
         else:
             raise ValueError(f"Unknown mode: {mode}")
@@ -867,4 +867,3 @@ Some key aspects I've addressed:
    - Security validations and safeguards
 
 The implementation plan follows a phased approach, starting with the core infrastructure and progressively building more complex functionality. Each phase has clear objectives and example code to illustrate the design patterns.
-

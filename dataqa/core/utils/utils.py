@@ -103,11 +103,10 @@ def generate_alphabetic_bullets(n: int):
 
 
 def string_list_to_prompt(
-        string_list: List[str], prefix: Union[str, List[str]]
+    string_list: List[str], prefix: Union[str, List[str]]
 ) -> str:
     if not isinstance(prefix, list):
         new_list = [prefix + s for s in string_list]
     else:
         new_list = [prefix[i] + s for i, s in enumerate(string_list)]
     return "\n".join(new_list)
-

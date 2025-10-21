@@ -131,4 +131,3 @@ class BasePromptLLMChain(Component):
         # )
 
         return response.generation  # TODO return raw llm response to a list
-

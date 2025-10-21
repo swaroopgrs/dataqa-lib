@@ -2,5 +2,5 @@ cache-dir = ".cache"
 
 [virtualenvs]
 path = ".venv"
-create = true 
+create = true
 in-project = true

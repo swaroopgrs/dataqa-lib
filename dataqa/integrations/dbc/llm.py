@@ -1,10 +1,14 @@
 # dataqa/integrations/dbc/llm.py
 import asyncio
-from typing import Callable, Any, List, Optional
-from langchain_core.messages import BaseMessage
+from typing import Any, Callable, List, Optional
+
+from langchain_core.callbacks import (
+    AsyncCallbackManagerForLLMRun,
+    CallbackManagerForLLMRun,
+)
 from langchain_core.language_models import BaseChatModel, SimpleChatModel
-from langchain_core.outputs import ChatResult, ChatGeneration
-from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.pydantic_v1 import Field
 from langchain_core.tools import BaseTool
 from langchain_openai import AzureChatOpenAI
@@ -17,9 +21,15 @@ class DBCProxyChatModel(SimpleChatModel):
     """
     A proxy LangChain Chat Model that wraps the DBC `llm_invoke_with_retries` function.
     """
-    dbc_invoke_function: Callable = Field(..., description="The async llm_invoke_with_retries function from DBC.")
+
+    dbc_invoke_function: Callable = Field(
+        ..., description="The async llm_invoke_with_retries function from DBC."
+    )
     model_name: str = "dbc-proxy-model"
-    delegate_model: BaseChatModel = Field(..., description="A real chat model instance to delegate binding logic to.")
+    delegate_model: BaseChatModel = Field(
+        ...,
+        description="A real chat model instance to delegate binding logic to.",
+    )
 
     class Config:
         arbitrary_types_allowed = True
@@ -82,6 +92,7 @@ class DBCLLMAdapter(BaseLLM):
     """
     The adapter that creates the DBCProxyChatModel.
     """
+
     config_base_model = LLMConfig
 
     def __init__(self, llm_callable: Callable, model_name: str = "dbc_model"):
@@ -104,7 +115,7 @@ class DBCLLMAdapter(BaseLLM):
             self._proxy_model = DBCProxyChatModel(
                 dbc_invoke_function=self.llm_callable,
                 model_name=self.config.model,
-                delegate_model=delegate
+                delegate_model=delegate,
             )
         return self._proxy_model
 
@@ -114,17 +125,19 @@ class DBCLLMAdapter(BaseLLM):
         """
         try:
             response_message: BaseMessage = await self.llm_callable(
-                model=self.config.model,
-                messages=messages
+                model=self.config.model, messages=messages
             )
             generation = response_message.content
 
             return LLMOutput(
-                prompt=messages_to_serializable(messages),
-                generation=generation
+                prompt=messages_to_serializable(messages), generation=generation
             )
         except Exception as e:
             return LLMOutput(
                 prompt=messages_to_serializable(messages),
-                error={"error_code": 500, "error_type": type(e).__name__, "error_message": str(e)}
+                error={
+                    "error_code": 500,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                },
             )

@@ -71,5 +71,3 @@ class BasePrompt(Component):
         return self.output_base_model(
             messages=[(message.type, message.content) for message in messages]
         )
-
-

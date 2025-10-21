@@ -239,7 +239,7 @@ class TestPipeline:
         for i, df in enumerate(response.output_dataframes):
             df_name = f"dataframe_{i + 1}"
             self.save_dataframe(df, df_name, df_path)
-        
+
         # Save images
         img_path = path / TEST_RESULT_IMAGE
         img_path.mkdir(parents=True, exist_ok=True)
@@ -303,7 +303,7 @@ class TestPipeline:
             # build agent, start state, LG config
             if self.config.solution_type == "agent":
                 client = LocalClient(config_path=str(config.cwd_config))
-                
+
                 request = CoreRequest(
                     user_query=data.question,
                     question_id=data.id,
@@ -396,7 +396,7 @@ class TestPipeline:
                 #         previous_rewritten_query=previous_rewritten_query,
                 #     )
                 # )
-                # 
+                #
                 # if os.environ.get("CERT_PATH"):
                 #     token = get_az_token_using_cert()
                 #     runnable_config = {
@@ -431,7 +431,6 @@ class TestPipeline:
             self.logger.info(
                 f"Complete prediction job ({idx} / {total}) in use case {config.name}."
             )
-    
 
     async def run_prediction_for_one_use_case(
         self,
@@ -493,13 +492,13 @@ class TestPipeline:
         instruction = data.instruction_for_llm_judge
         if instruction:
             instruction = f"Follow the instructions below in your evaluation:\n{instruction.strip()}\n"
-        
+
         if test_result is None:
             self.logger.warning(
                 f"Skip LLM-judge evaluation for test example {data.id}."
             )
             return
-        
+
         # from dataqa.integrations.local.generate_token_multi import get_access_token
         # new_token = get_access_token()
         # new_token = get_az_token_using_cert()[0]
@@ -794,4 +793,3 @@ class TestPipeline:
         self.calculate_matric()
 
         self.logger.info("Experiment has been completed.")
-

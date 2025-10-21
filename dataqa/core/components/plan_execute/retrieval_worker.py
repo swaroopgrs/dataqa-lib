@@ -2,7 +2,7 @@ import logging
 from typing import Annotated, Dict, List, Union
 
 from langchain_core.runnables.config import RunnableConfig
-from langgraph.graph import START, END, StateGraph
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.graph import CompiledGraph
 from pydantic import BaseModel, Field
 
@@ -114,21 +114,27 @@ class SQLExecutor(InMemoryCodeExecutor):
             # the local InMemoryCodeExecutor and our DBCSQLExecutor adapter.
             # This requires a small change to how we pass input.
             from pydantic import create_model
-            InputModel = create_model('SqlInput', code=(str, ...))
-            executor_output = await self.run(InputModel(code=sql), config=config)
+
+            InputModel = create_model("SqlInput", code=(str, ...))
+            executor_output = await self.run(
+                InputModel(code=sql), config=config
+            )
 
             if executor_output.error:
-                 raise Exception(executor_output.error)
-            
+                raise Exception(executor_output.error)
+
             # The output dataframe is a JSON string, need to deserialize
-            import pandas as pd
             import json
+
+            import pandas as pd
+
             result_df = pd.DataFrame(json.loads(executor_output.dataframe[0]))
             self.memory.put_dataframe(name=df_name, df=result_df, config=config)
             response = SQLExecutorOutput(sql=sql, dataframe=df_name)
         except Exception as e:
             response = SQLExecutorOutput(sql=sql, error=repr(e))
         return {"sql_executor_output": response}
+
 
 class RetrievalWorkerConfig(ComponentConfig):
     sql_prompt: prompt_type
@@ -173,7 +179,9 @@ class RetrievalWorker(Component):
         if sql_executor:
             self.sql_executor = sql_executor
         else:
-            self.sql_executor = SQLExecutor(config=self.config.sql_execution_config, memory=memory)
+            self.sql_executor = SQLExecutor(
+                config=self.config.sql_execution_config, memory=memory
+            )
 
         self.workflow = self.build_workflow(memory=self.memory, llm=self.llm)
 
@@ -202,7 +210,7 @@ class RetrievalWorker(Component):
         logger.info(f"Output BaseModel: {self.output_base_model.__fields__}")
 
     async def run(
-            self, input_data: RetrievalWorkerInput, config: RunnableConfig
+        self, input_data: RetrievalWorkerInput, config: RunnableConfig
     ):
         assert isinstance(input_data, RetrievalWorkerInput)
         task = input_data.plan[-1].tasks[0].task_description

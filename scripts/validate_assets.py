@@ -1,8 +1,10 @@
 import argparse
+
 import yaml
 from pydantic import ValidationError
 
 from dataqa.core.data_models.asset_models import DatabaseSchema, Examples, Rules
+
 
 def validate_yaml(file_path, model, label):
     print(f"\nValidating {label} ({file_path})...")

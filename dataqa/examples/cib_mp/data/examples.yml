@@ -22,4 +22,4 @@ examples:
           AND SALES_DATE >= '2023-01-01' AND SALES_DATE <= '2023-12-31';
       reasoning: "To calculate the total sales amount for Visa in 2023, we need to sum the SALES_AMT for all transactions where the TD (Transaction Descriptor) is one of the Visa codes ('VI', 'VR', 'CR', 'CZ') and the SALES_DATE falls within the year 2023."
     tags: []
-    search_content: "" 
+    search_content: ""

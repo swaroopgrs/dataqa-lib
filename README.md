@@ -1,6 +1,6 @@
 # DataQA Library
 
-A config driven library for building data question answering pipelines. 
+A config driven library for building data question answering pipelines.
 
 ## Overview
 
@@ -12,7 +12,7 @@ DataQA is a config-driven modular framework for building agentic pipelines that 
 - `make ci-prebuild`
 - `make ci`
 
-### Code formatting and linting 
+### Code formatting and linting
 - `make lint-format`
 
 ### Before committing

@@ -71,7 +71,7 @@
         *   **Overall Library Settings:** (e.g., `sql_only_generation: true`).
     *   Provide a small, illustrative example of a configuration file declaring a simple SQL generation workflow and a basic agent.
 
-Below is some rough overview of the code i have so far (take with a grain of salt). This is not a proposed structure at all. Do not use the structure but the code below might be a good reference on how we can call agents, workflows.. as you can see the sample code below has the naming all over the place, so change it as you see fit. 
+Below is some rough overview of the code i have so far (take with a grain of salt). This is not a proposed structure at all. Do not use the structure but the code below might be a good reference on how we can call agents, workflows.. as you can see the sample code below has the naming all over the place, so change it as you see fit.
 
 Directory Structure:
 dataqa/
@@ -175,7 +175,7 @@ from typing import Dict
 
 class Memory:
     # TODO: memory management
-    # remove variables 
+    # remove variables
     # summary
     dataframes: Dict[str, pd.DataFrame]
 
@@ -204,7 +204,7 @@ class Memory:
     def summarize_dataframe(self):
         if not self.dataframes:
             return "You don't have access to any dataframes yet."
-        
+
         message = [f"You have access to the following {len(self.dataframes)} dataframes:"]
         for k, v in self.dataframes.items():
             message.append(self.summarize_one_dataframe(k, v))
@@ -246,7 +246,7 @@ class PipelineOutput(BaseModel):
     rewritten_query: str = Field(
         default="None",
         description="""
-        The newly generated rewritten query for the input query. 
+        The newly generated rewritten query for the input query.
         Any rewriter components should always save rewritten query to this field.
         """,
     )
@@ -308,11 +308,11 @@ class Agent:
     def display_workflow(self, out_path: str): # Added type hint for out_path
         img = self.workflow.get_graph(xray=True).draw_mermaid_png(output_file_path=out_path)
 
-    async def __call__(self, state): 
+    async def __call__(self, state):
         raise NotImplementedError
 
 
-    
+
 File: dataqa/agent/cwd_agent/__init__.py
 =======================================
 
@@ -389,7 +389,7 @@ def get_correlation_matrix_tool(memory: Memory) -> StructuredTool:
             return f"Tool {name} failed with the following exception\n{str(e)}"
     # The @tool decorator makes CalculateCorrelationMatrix callable and assigns attributes.
     # If explicit naming is needed for registration or consistency:
-    # CalculateCorrelationMatrix.name = name 
+    # CalculateCorrelationMatrix.name = name
     return CalculateCorrelationMatrix
 
 # Tool: nLargest
@@ -633,7 +633,7 @@ def get_analytics_tools(
     tools = []
     # If tool_names is a list, iterate through it. If it's a dict (like default), iterate its keys.
     names_to_load = tool_names if isinstance(tool_names, list) else tool_names.keys()
-    
+
     for name in names_to_load:
         if name not in DEFAULT_ANALYTICS_TOOLS:
             raise ValueError(f"Tool {name} is not defined.")
@@ -692,7 +692,7 @@ class AnalyticsWorker(Agent):
                     response=response_messages
                 )],
             ),
-            "analyzer_state": AnalyzerState(messages=response_messages) 
+            "analyzer_state": AnalyzerState(messages=response_messages)
         }
 
 
@@ -719,11 +719,11 @@ def task_router(state: CwdState) -> Union[str, object]:
     # TODO: quit if reach max number of steps
     if getattr(state, 'final_response', ''):
         return END
-    
+
     if not state.plan or not state.plan.tasks:
         return ValueError("Either  `final_response` or `plan` should be provided to task_router")
-    
-    return state.plan.tasks[0].worker.value 
+
+    return state.plan.tasks[0].worker.value
 
 
 class CwdAgent(Agent):
@@ -743,7 +743,7 @@ class CwdAgent(Agent):
     def _preprocess_prompts(self, prompts: Dict) -> Dict:
         schema = prompts.get('schema', '')
         for name in [
-            'planner_prompt', 'replanner_prompt', 
+            'planner_prompt', 'replanner_prompt',
             'sql_generator_prompt', 'analytics_prompt', 'plot_prompt'
         ]
             for msg in prompts[name]:
@@ -753,25 +753,25 @@ class CwdAgent(Agent):
     def build_workflow(self, memory: Memory, llm: BaseLLM) -> CompiledGraph:
         self.planner = Planner(memory=memory, llm=llm, prompt=self.prompts['planner_prompt'])
         self.replanner = Replanner(memory=memory, llm=llm, prompt=self.prompts['replanner_prompt'])
-        self.retrieval_worker = RetrievalWorker(memory=memory, llm=llm, 
+        self.retrieval_worker = RetrievalWorker(memory=memory, llm=llm,
                                            sql_prompt=self.prompts['sql_generator_prompt'],
                                            sql_execution_config=self.sql_execution_config)
-        self.analytics_worker = AnalyticsWorker(memory=memory, llm=llm, 
+        self.analytics_worker = AnalyticsWorker(memory=memory, llm=llm,
                                            prompt=self.prompts['analytics_prompt'])
-        self.plot_worker = PlotWorker(memory=memory, llm=llm, 
+        self.plot_worker = PlotWorker(memory=memory, llm=llm,
                                  prompt=self.prompts['plot_prompt'])
 
         # Define the graph
         workflow = StateGraph(CwdState)
         workflow.add_node("planner", self.planner)
-        workflow.add_node("replanner", self.replanner) 
+        workflow.add_node("replanner", self.replanner)
         workflow.add_node(WorkerName.RetrievalWorker.value, self.retrieval_worker)
         workflow.add_node(WorkerName.AnalyticsWorker.value, self.analytics_worker)
         workflow.add_node(WorkerName.PlotWorker.value, self.plot_worker)
 
         # Define edges
         workflow.add_edge(START, "planner")
-        
+
         workflow.add_edge("planner", "replanner") # Planner output goes to Replanner
 
         # Workers return to Replanner to decide next step or finish
@@ -784,7 +784,7 @@ class CwdAgent(Agent):
         workflow.add_conditional_edges("replanner",task_router)
         return workflow.compile()
 
-    def display_workflow(self): 
+    def display_workflow(self):
         super().display_workflow()
         self.retrieval_worker.display_workflow()
         self.analytics_worker.display_workflow()
@@ -792,7 +792,7 @@ class CwdAgent(Agent):
 
     async def __call__(self, state_input: CwdState) -> CwdState:
         async for event in self.workflow.astream(
-            state, 
+            state,
             stream_mode="updates",
             subgraphs=True,
         ):
@@ -814,7 +814,7 @@ from typing import List, Tuple
 from langgraph.graph.graph import CompiledGraph
 from langgraph.prebuilt import create_react_agent
 from langchain.tools import tool
-from langchain.prompts import ChatPromptTemplate 
+from langchain.prompts import ChatPromptTemplate
 
 from dataqa.agent.base import Agent
 from dataqa.memory import Memory
@@ -824,7 +824,7 @@ from dataqa.components.plan_execute.plan import (
     TaskResponse,
     WorkerName
 )
-from dataqa.agent.cwd_agent.state import CwdState 
+from dataqa.agent.cwd_agent.state import CwdState
 from dataqa.utils.prompt_utils import build_prompt, prompt_type
 
 class PlotWorker(Agent):
@@ -916,10 +916,10 @@ class RetrievalWorker(Agent):
     async def __call__(self, state: CwdState) -> Dict:
         task = state.plan.tasks[0].task_description
         response = await self.workflow.ainvoke(input=RetrievalWorkerState(task=task))
-        response = RetrievalWorkerState(**response) 
-        
+        response = RetrievalWorkerState(**response)
+
         output = response.sql_executor_output
-        
+
         message = (
             f"To complete the task {task}, the following SQL has been generated:\n"
             f"```sql\n{output.sql}\n```\n"
@@ -929,7 +929,7 @@ class RetrievalWorker(Agent):
             message += f"After running this SQL query, the output is saved in dataframe {output.dataframe}."
         elif output.error:
             message += f"While running this SQL query, the following runtime error was thrown:\n{output.error}"
-        
+
         return {
             "worker_response": WorkerResponse(
                 task_response=[TaskResponse(
@@ -947,7 +947,7 @@ File: dataqa/agent/cwd_agent/state.py
 from enum import Enum
 from pydantic import BaseModel, Field
 from typing import Annotated, List
-from operator import add 
+from operator import add
 
 from dataqa.components.plan_execute.plan import (
     Plan,
@@ -983,7 +983,7 @@ class CwdState(BaseModel):
     final_response: str = ''
     plan: Plan = None
     worker_response: Annotated[WorkerResponse, worker_response_reducer] = WorkerResponse()
-    # log: Annotated[List[Message], add] = Field(default_factory=list) 
+    # log: Annotated[List[Message], add] = Field(default_factory=list)
     retriever_state: Annotated[List[RetrievalWorkerState], add] = Field(default_factory=list)
     analyzer_state: Annotated[List[AnalyzerState], add] = Field(default_factory=list)
 
@@ -991,7 +991,7 @@ class CwdState(BaseModel):
     def update_field(self, field, value):
         if not hasattr(self, field):
             raise ValueError(f"{field} is not a valid field for CwdState")
-        if field in ["log", "retriever_state", "analyzer_state"]: 
+        if field in ["log", "retriever_state", "analyzer_state"]:
             value = getattr(self, field) + value
         if field == "worker_response":
             value = worker_response_reducer(getattr(self, field), value)
@@ -1278,7 +1278,7 @@ class InMemoryCodeExecutor(Component):
         logger.info(f"Component Type: {self.component_type}")
         logger.info(f"Input BaseModel: {self.input_base_model.__fields__}")
         logger.info(f"Output BaseModel: {self.output_base_model.__fields__}")
-    
+
     def load_dataframe(self, path):
         if path.endswith(".csv"):
             return pd.read_csv(path)
@@ -1711,7 +1711,7 @@ class Plan(BaseModel):
         tasks = []
         for i, task in enumerate(self.tasks):
             tasks.append(
-                f'Step {i+1}:\n'                
+                f'Step {i+1}:\n'
                 f' Worker: {task.worker.value}\n'
                 f' Task: {task.task_description}\n'
             )
@@ -1726,7 +1726,7 @@ class WorkerResponse(BaseModel):
     """The list of completed tasks and their response"""
     task_response: List[TaskResponseTask] = Field(default_factory=list)
 
-    def summarize(self): 
+    def summarize(self):
         if not self.task_response:
             return "No tasks completed yet."
         tasks = []
@@ -1770,13 +1770,13 @@ class Planner:
         self.memory = memory
         self.prompt = build_prompt(prompt)
         self.llm = llm
-    
+
     async def __call__(self, state):
         messages = self.prompt.invoke(dict(query=state.query))
         response = await self.llm.ainvoke(messages=messages, with_structured_output=Plan)
         plan = response.generation
         return dict(plan=plan)
-        
+
 
 
 File: dataqa/components/plan_execute/replanner.py
@@ -1788,7 +1788,7 @@ from dataqa.components.plan_execute.plan import Response, Act
 
 class Replanner:
     """
-    Input: 
+    Input:
         query: str
         plan: Plan
         past_steps: List[WorkerResponse]
@@ -1801,7 +1801,7 @@ class Replanner:
         self.memory = memory
         self.prompt = build_prompt(prompt)
         self.llm = llm
-    
+
     async def __call__(self, state):
         messages = self.prompt.invoke(dict(
             query=state.query,
@@ -1838,7 +1838,7 @@ from dataqa.components.base_component import (
     RunnableConfig,
 )
 from dataqa.utils.component_utils import build_base_model_from_parameters
-from dataqa.utils.prompt_utils import prompt_type, build_prompt 
+from dataqa.utils.prompt_utils import prompt_type, build_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -1969,7 +1969,7 @@ import logging
 import time
 import sys
 import yaml
-import os 
+import os
 from datetime import datetime
 
 from dataqa.components.base_component import Component, ComponentInput
@@ -2014,7 +2014,7 @@ class TagRetriever(Retriever):
         output_base_model_name = f"{self.config.name}_output"
         self.output_base_model = create_base_model(
             output_base_model_name, output_config, RetrieverOutput
-        ) 
+        )
         self.output_field_name = output_config[0]["name"] # TODO add support for dynamic multiple output fields
         logger.info(
             f"Component {self.config.name} of type {self.component_type} created."
@@ -2118,7 +2118,7 @@ class TagRetriever(Retriever):
         component_output = {
             "component_name": self.config.name,
             "component_type": self.component_type,
-            "output_data": retrieved_asset, 
+            "output_data": retrieved_asset,
             self.output_field_name: output_str,
             "metadata": {"time": retrieve_time},
         }
@@ -2338,7 +2338,7 @@ It should be provided either
         description="The maximum output tokens", # TODO o1 requires a different attribute "max_completion_token"
     )
     oai_params: Optional[Dict[str, Any]] = Field(default={})
-    azure_model_params: Optional[Dict[str, Any]] = Field(default={}) 
+    azure_model_params: Optional[Dict[str, Any]] = Field(default={})
     # TODO
     # throw exception
     # retry
@@ -2598,7 +2598,7 @@ def build_graph_from_config(
             names = mapped_field.split(".")
             if names[0] != PIPELINE_START:
                 names[0] = f"{names[0]}{COMPONENT_OUTPUT_SUFFIX}"
-            else: 
+            else:
                 names[0] = PIPELINE_INPUT
             mapping[field] = ".".join(names)
         component_instance.set_input_mapping(
@@ -2978,10 +2978,10 @@ prompt_type = Union[str, Prompt, Dict, List[str], List[Prompt], List[Dict], Chat
 def build_prompt(prompt: Union[str, Prompt, Dict, List[str], List[Prompt], List[Dict]]) -> ChatPromptTemplate:
     if isinstance(prompt, ChatPromptTemplate):
         return prompt
-    
+
     if not isinstance(prompt, list):
         prompt = [prompt]
-    
+
     messages = []
 
     for msg in prompt:
@@ -2995,7 +2995,7 @@ def build_prompt(prompt: Union[str, Prompt, Dict, List[str], List[Prompt], List[
             messages.append((msg.role, msg.construct))
         else:
             raise ValueError(f'Type {type(msg)} is not supported to build a prompt.')
-    
+
     return ChatPromptTemplate.from_messages(messages=messages)
 
 File: dataqa/utils/utils.py

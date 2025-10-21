@@ -30,7 +30,7 @@ class ResourceManager:
     def __init__(
         self,
         data_source: Optional[BaseDataSource] = None,
-        ingestion_data: Optional[IngestionData] = None
+        ingestion_data: Optional[IngestionData] = None,
     ):
         """
         Initialize the resource manager from a data source (for local mode)
@@ -42,20 +42,23 @@ class ResourceManager:
         elif ingestion_data:
             self._load_from_ingestion_data(ingestion_data)
         else:
-            raise ValueError("Either 'data_source' or 'ingestion_data' must be provided.")
+            raise ValueError(
+                "Either 'data_source' or 'ingestion_data' must be provided."
+            )
 
     def _load_from_ingestion_data(self, ingestion_data: IngestionData):
         """NEW: Loads resources directly from the IngestionData object."""
         self.rules = ingestion_data.rules
         self.schema = ingestion_data.schema
         self.examples = ingestion_data.examples
-        
+
         rule_count = len(self.rules.rules) if self.rules else 0
         schema_count = len(self.schema.tables) if self.schema else 0
         example_count = len(self.examples.examples) if self.examples else 0
 
-        logger.info(f"Loaded {rule_count} rules, {schema_count} tables, and {example_count} examples from IngestionData.")
-
+        logger.info(
+            f"Loaded {rule_count} rules, {schema_count} tables, and {example_count} examples from IngestionData."
+        )
 
     def load(self):
         """
@@ -93,19 +96,21 @@ class ResourceManager:
             if not self.rules:
                 return []
             return [
-                rule for rule in self.rules.rules
+                rule
+                for rule in self.rules.rules
                 if rule.module_name == module_name or not rule.module_name
             ]
         elif resource_type == ResourceType.Example:
             if not self.examples:
                 return []
             return [
-                example for example in self.examples.examples
+                example
+                for example in self.examples.examples
                 if example.module_name == module_name or not example.module_name
             ]
         elif resource_type == ResourceType.Schema:
             if not self.schema:
                 return []
             return self.schema.tables
-        
+
         return []

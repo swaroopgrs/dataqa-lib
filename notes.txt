@@ -1,38 +1,38 @@
 todo:
- - pipelines 
+ - pipelines
  - benchmark
  - knowledge_extraction
 
 
 This library will be used by a service called DatabaseConnect. The DBC service will provide the library the following
-* S3 callable function to read and write assets (rules, examples and schema). 
+* S3 callable function to read and write assets (rules, examples and schema).
 * Opensearch callable function. all the rules examples and schemas will be indexed in opensearch as part of their ingestion. we can use this callable function whenever we want to do vector retrieval
-* if we want to do retrieve all (AllRetreiver), we will use s3. if we want to use vector embedding retrieval we will use opensearch. 
+* if we want to do retrieve all (AllRetreiver), we will use s3. if we want to use vector embedding retrieval we will use opensearch.
 * For now, lets put opensearch callable related usage into backlog. since for the initial release of the service we will just be retrieving all assets
-* we will also get a sql executor callable for the library to call and execute the sql 
-* we will also be getting a llm callable. currently the library expects base_url, api_key from the library user and we build the azureopenai client. but DBC folks, have thier own client which we should just call for LLM related calls. 
+* we will also get a sql executor callable for the library to call and execute the sql
+* we will also be getting a llm callable. currently the library expects base_url, api_key from the library user and we build the azureopenai client. but DBC folks, have thier own client which we should just call for LLM related calls.
 
 I am thinking of wriring a dbc related inteface in the dataqa library. Here is what the service provides us roughly
 1. config_id
 2. tenant_id
 3. user_query
-4. conversaion_id, 
+4. conversaion_id,
 5. question_id
-6. callable function for LLM call with inbuilt retry mechanisms..we dont need to do retry on the libarary side. # takes in messages and returns messages 
+6. callable function for LLM call with inbuilt retry mechanisms..we dont need to do retry on the libarary side. # takes in messages and returns messages
 7. ConversationHistory
 8. Embedding related callable function..this is the opensearch callable # backlog item
-9. callable for sql executor 
+9. callable for sql executor
 10. s3 callable that can handle both read and write. we will use this to retrieve all assets and also to save and load dataframes and images
 
 
 every request we get might look like the below
 
-## Request Response Structure 
+## Request Response Structure
 Request:
     query: str
     conversation history: ConversationHistory  {query, output_text, output_df_names} # we can ignore output_image_names since we are not going to consume It
     # output_df_names will have s3 paths and we will be loading the df from there to construct the history to answer the query
-        
+
 Response BaseModel:
     text: str # final output text
     output_df_names: List[str] # names of dfs saved in s3
@@ -45,18 +45,18 @@ StepResponse BaseModel
 
 DBCService will be using CWDAgent to answer the questions..
 
-At the end dataqa library should support local yaml loading (may be a local interface idk) and dbc interface which will load from s3 and stuff. 
+At the end dataqa library should support local yaml loading (may be a local interface idk) and dbc interface which will load from s3 and stuff.
 
-dbcclient could be something like this 
+dbcclient could be something like this
 
 class DBCClient:
     """
     Main client interface for DBC service integration.
-    
+
     This class provides a simple process_query interface that encapsulates all
     DBC-specific logic and coordinates between DataQA components and DBC callable functions.
     """
-    
+
     def __init__(
         self,
         config_id: str,
@@ -69,9 +69,9 @@ class DBCClient:
     ):
 ==================
 
-This is all the code you need to see that is relevant for that context. There may be few references to other code but you can ignore it. 
+This is all the code you need to see that is relevant for that context. There may be few references to other code but you can ignore it.
 
-You wont be able to run the code since this can only run on a server with the right credentials. my local setup is not equipped to run it. So, do not try to execute the code. 
+You wont be able to run the code since this can only run on a server with the right credentials. my local setup is not equipped to run it. So, do not try to execute the code.
 
 Do not write unit tests or any kind of tests. i absolutely do not need them now.
 

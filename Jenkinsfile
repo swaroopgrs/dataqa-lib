@@ -5,7 +5,7 @@ buildPipeline()
 
 def buildPipeline() {
     jules_pipelineRunner {
-        // If your jules.yml sits somewhere else in your repo, please 
+        // If your jules.yml sits somewhere else in your repo, please
         // use a relative path here instead of just "jules.yml"
         yml = "jules.yml"
         archivePythonArtifacts = archivePythonArtifacts()

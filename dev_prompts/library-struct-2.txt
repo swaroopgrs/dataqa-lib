@@ -1,48 +1,48 @@
 I am trying to solve the problem of natural language querying against databases. This usually involves 3 steps at a high level
 * Data Querying
 * Data Analysis
-* Data Visualization 
+* Data Visualization
 
-Data Querying: To retrieve thed data. Databases sometimes can be queried using SQL (Snowflake, Databricks, Redshift, etc..). Sometimes databases can be queried we via an API call or a function call to retrive the data. 
-Data Analytics: To perform some analytics on the retrieved data. We can either generate the python/sql code for analytics or we could use the set of pre-built functions. 
+Data Querying: To retrieve thed data. Databases sometimes can be queried using SQL (Snowflake, Databricks, Redshift, etc..). Sometimes databases can be queried we via an API call or a function call to retrive the data.
+Data Analytics: To perform some analytics on the retrieved data. We can either generate the python/sql code for analytics or we could use the set of pre-built functions.
 Data Visualization: To perform visualizations on the retrieved data or on the analytics data. We either generate the code for visualization or we could use the set of pre-built functions.
 
-Lets focus on building a library to enable this. 
+Lets focus on building a library to enable this.
 
-Library Requirements: 
+Library Requirements:
 * Name: dataqa - A config driven python library for natural language querying of databases
-* At a library level we should have the ability to turn on an option to only generate sql (no python code generation. could still use python based custom functions as tool calls/function calls) or to turn on any code generation. 
+* At a library level we should have the ability to turn on an option to only generate sql (no python code generation. could still use python based custom functions as tool calls/function calls) or to turn on any code generation.
 * The users should have the ability to build Agents and/or Workflows depending on their needs (According to Anthropic: Workflows are systems where LLMs and tools are orchestrated through predefined code paths. Agents, on the other hand, are systems where LLMs dynamically direct their own processes and tool usage, maintaining control over how they accomplish tasks). Everything should be config driven.
-* We want to build this library in a way that its easy to switch/add support to new libraries in the future. Currently we want to support Langgraph to begin with; (meaning the workflows and agents we create will be langgraph based). Its important to keep in mind that if we want to add CrewAI or Autogen or Pydantic AI, we should be able to add it without changing a lot of the existing code. So, do not fully couple the library with Langgraph. 
-* We will not have access to the databases directly, instead the library will just focus on generating code and tool/function calling to solve the task. For execution of the code or function/tool calls, we will hit the api endpoints provided by the usecase. 
+* We want to build this library in a way that its easy to switch/add support to new libraries in the future. Currently we want to support Langgraph to begin with; (meaning the workflows and agents we create will be langgraph based). Its important to keep in mind that if we want to add CrewAI or Autogen or Pydantic AI, we should be able to add it without changing a lot of the existing code. So, do not fully couple the library with Langgraph.
+* We will not have access to the databases directly, instead the library will just focus on generating code and tool/function calling to solve the task. For execution of the code or function/tool calls, we will hit the api endpoints provided by the usecase.
 * Data Querying is the most important step in this. To do this properly, we usually require the assets below for a given usecase
     * Rules (that define custom rules for that use case)
-    * Examples (query-code pairs with an optional reasoning which guide the LLMs to generate code) 
+    * Examples (query-code pairs with an optional reasoning which guide the LLMs to generate code)
     * Schema of the databases (table name, table description, column name, column description, column type, sample column values)
 
-Initial Ideas - Please feel free to completely refine the below ideas. 
-* In order to provide the option of both Agents and Workflows, i am thinking, we need to build a bunch of components which we should be able to use to build a workflow graph as well as use the component as a tool for any Agent. 
-* There can be a base component and the rest of the components can be derive from it. We can have some hierarchy here. For example, code_executor_base can be derived from the base component and in_memory_code_executor and api_code executor can be derived from code_executor_base. 
+Initial Ideas - Please feel free to completely refine the below ideas.
+* In order to provide the option of both Agents and Workflows, i am thinking, we need to build a bunch of components which we should be able to use to build a workflow graph as well as use the component as a tool for any Agent.
+* There can be a base component and the rest of the components can be derive from it. We can have some hierarchy here. For example, code_executor_base can be derived from the base component and in_memory_code_executor and api_code executor can be derived from code_executor_base.
 * We can also have a generic LLM generation component which we can use to build any LLM related components.
 * We can support multiple LLM providers (Azure OpenAI, Amazon Bedrock, etc)
-* The users will provide these assets via yaml/txt files and we should be able to ingest them in a knowledge base like opensearch (for example) or a simple local store for testing. This knowledge base will be used to retrieve the assets. The idea here is: for a given use case, if we have a lot of assets, then we can retrive the relevent assets for the current query and put them in the final prompt for code generation there by giving LLM a focused task. 
-* For retrieval we will do multiple ways: dense retrival (embedding vector based), sparse retrieval (bm35), hybrid (combination of sparse and dense). The users can add tags to the assets above. We can then use tag based retriever (i have a custom implementation). We can do a combination of these retrievals then. 
-* Usually for data querying, we follow the below pattern 
-    * we rewrite the user question, 
+* The users will provide these assets via yaml/txt files and we should be able to ingest them in a knowledge base like opensearch (for example) or a simple local store for testing. This knowledge base will be used to retrieve the assets. The idea here is: for a given use case, if we have a lot of assets, then we can retrive the relevent assets for the current query and put them in the final prompt for code generation there by giving LLM a focused task.
+* For retrieval we will do multiple ways: dense retrival (embedding vector based), sparse retrieval (bm35), hybrid (combination of sparse and dense). The users can add tags to the assets above. We can then use tag based retriever (i have a custom implementation). We can do a combination of these retrievals then.
+* Usually for data querying, we follow the below pattern
+    * we rewrite the user question,
     * retrieve the schema, examples, business rules that is relevant to the current context
     * compose the final prompt with the retrieved assets which we send to LLM for code generation steps
     * we then send the code generated to the code execution api to get the result back
 
-* Some examples of the configs the users may build would be: 
+* Some examples of the configs the users may build would be:
     1. A simple workflow graph that produces sql code (they may not need any analyitcs and visualization). This could contain the components in this order query_rewriter, schema_retriever, rule_retriever, example_retriever, code_prompt_composer, code_generator, code_executor
     2. Agent graph that does everything. Here the data querying could be a defined workflow (similar to above) or an agent. Data analytics agent uses bunch of functions/components/tools to perfom some analytics. Data visualization agent does the visualization using bunch of functions/components/tools
     3. Workflow graph that does code generation/custom function usage for data querying, analytics and visualization
-    These are just examples for you to get an idea of what the library is trying to do..fully configurable agent and workflow creatiion. 
+    These are just examples for you to get an idea of what the library is trying to do..fully configurable agent and workflow creatiion.
 
 * We should be able to build multiple types of agents. Plan and Execute agents, ReAct agents, CoAct agents, ADaPT agents, ReWOO agents, etc..
-* I am thinking when it comes to multi agent systems, there will be a high level agent which can call other agents like data querying agent, data analysis agent, data visualization agent. These agents can inturn use the components/functions as tools. 
+* I am thinking when it comes to multi agent systems, there will be a high level agent which can call other agents like data querying agent, data analysis agent, data visualization agent. These agents can inturn use the components/functions as tools.
 
-* Usually when it comes to workflows, it is a predefined graph i.e., we know exactly the components and how they get called and which order. But when it comes to agents, its up to the LLM to decide how to break the task and plan; in that case, i am thinking that the asset retriever would be a critical component that every agent should have access to. To give you an example, for the question "plot the monthly deliquency rates for the company Foo". This question needs the definition of deliquency rates from the rule/eexample assets and then we use the correct columns needed to compute this rate. In this case both the data querying agent and the data analytics agent needs access to the asset retriever. in general, the user should be able to define via config if they want the asset retreiver to be part of their agents or not. 
+* Usually when it comes to workflows, it is a predefined graph i.e., we know exactly the components and how they get called and which order. But when it comes to agents, its up to the LLM to decide how to break the task and plan; in that case, i am thinking that the asset retriever would be a critical component that every agent should have access to. To give you an example, for the question "plot the monthly deliquency rates for the company Foo". This question needs the definition of deliquency rates from the rule/eexample assets and then we use the correct columns needed to compute this rate. In this case both the data querying agent and the data analytics agent needs access to the asset retriever. in general, the user should be able to define via config if they want the asset retreiver to be part of their agents or not.
 
 
 Guidelines:
@@ -56,11 +56,11 @@ Tasks (Act as an expert software desinger):
 2. A common config structure to delcare the graph (agent or workflow or a combination). Use your best judgement.
 
 
-Below is some rough overview of the code i have so far (take with a grain of salt). This is not a proposed structure at all. Do not use the structure but the code below might be a good reference on how we can call agents, workflows.. as you can see the sample code below has the naming all over the place, so change it as you see fit. 
+Below is some rough overview of the code i have so far (take with a grain of salt). This is not a proposed structure at all. Do not use the structure but the code below might be a good reference on how we can call agents, workflows.. as you can see the sample code below has the naming all over the place, so change it as you see fit.
 
 
 
-I have the below folder structure for the natural language to sql library called dataqa. this library will have a suite of components that will be used to build a piepline to generate code using LLM. 
+I have the below folder structure for the natural language to sql library called dataqa. this library will have a suite of components that will be used to build a piepline to generate code using LLM.
 
 Directory Structure:
 dataqa/
@@ -164,7 +164,7 @@ from typing import Dict
 
 class Memory:
     # TODO: memory management
-    # remove variables 
+    # remove variables
     # summary
     dataframes: Dict[str, pd.DataFrame]
 
@@ -193,7 +193,7 @@ class Memory:
     def summarize_dataframe(self):
         if not self.dataframes:
             return "You don't have access to any dataframes yet."
-        
+
         message = [f"You have access to the following {len(self.dataframes)} dataframes:"]
         for k, v in self.dataframes.items():
             message.append(self.summarize_one_dataframe(k, v))
@@ -235,7 +235,7 @@ class PipelineOutput(BaseModel):
     rewritten_query: str = Field(
         default="None",
         description="""
-        The newly generated rewritten query for the input query. 
+        The newly generated rewritten query for the input query.
         Any rewriter components should always save rewritten query to this field.
         """,
     )
@@ -297,11 +297,11 @@ class Agent:
     def display_workflow(self, out_path: str): # Added type hint for out_path
         img = self.workflow.get_graph(xray=True).draw_mermaid_png(output_file_path=out_path)
 
-    async def __call__(self, state): 
+    async def __call__(self, state):
         raise NotImplementedError
 
 
-    
+
 File: dataqa/agent/cwd_agent/__init__.py
 =======================================
 
@@ -378,7 +378,7 @@ def get_correlation_matrix_tool(memory: Memory) -> StructuredTool:
             return f"Tool {name} failed with the following exception\n{str(e)}"
     # The @tool decorator makes CalculateCorrelationMatrix callable and assigns attributes.
     # If explicit naming is needed for registration or consistency:
-    # CalculateCorrelationMatrix.name = name 
+    # CalculateCorrelationMatrix.name = name
     return CalculateCorrelationMatrix
 
 # Tool: nLargest
@@ -622,7 +622,7 @@ def get_analytics_tools(
     tools = []
     # If tool_names is a list, iterate through it. If it's a dict (like default), iterate its keys.
     names_to_load = tool_names if isinstance(tool_names, list) else tool_names.keys()
-    
+
     for name in names_to_load:
         if name not in DEFAULT_ANALYTICS_TOOLS:
             raise ValueError(f"Tool {name} is not defined.")
@@ -681,7 +681,7 @@ class AnalyticsWorker(Agent):
                     response=response_messages
                 )],
             ),
-            "analyzer_state": AnalyzerState(messages=response_messages) 
+            "analyzer_state": AnalyzerState(messages=response_messages)
         }
 
 
@@ -708,11 +708,11 @@ def task_router(state: CwdState) -> Union[str, object]:
     # TODO: quit if reach max number of steps
     if getattr(state, 'final_response', ''):
         return END
-    
+
     if not state.plan or not state.plan.tasks:
         return ValueError("Either  `final_response` or `plan` should be provided to task_router")
-    
-    return state.plan.tasks[0].worker.value 
+
+    return state.plan.tasks[0].worker.value
 
 
 class CwdAgent(Agent):
@@ -732,7 +732,7 @@ class CwdAgent(Agent):
     def _preprocess_prompts(self, prompts: Dict) -> Dict:
         schema = prompts.get('schema', '')
         for name in [
-            'planner_prompt', 'replanner_prompt', 
+            'planner_prompt', 'replanner_prompt',
             'sql_generator_prompt', 'analytics_prompt', 'plot_prompt'
         ]
             for msg in prompts[name]:
@@ -742,25 +742,25 @@ class CwdAgent(Agent):
     def build_workflow(self, memory: Memory, llm: BaseLLM) -> CompiledGraph:
         self.planner = Planner(memory=memory, llm=llm, prompt=self.prompts['planner_prompt'])
         self.replanner = Replanner(memory=memory, llm=llm, prompt=self.prompts['replanner_prompt'])
-        self.retrieval_worker = RetrievalWorker(memory=memory, llm=llm, 
+        self.retrieval_worker = RetrievalWorker(memory=memory, llm=llm,
                                            sql_prompt=self.prompts['sql_generator_prompt'],
                                            sql_execution_config=self.sql_execution_config)
-        self.analytics_worker = AnalyticsWorker(memory=memory, llm=llm, 
+        self.analytics_worker = AnalyticsWorker(memory=memory, llm=llm,
                                            prompt=self.prompts['analytics_prompt'])
-        self.plot_worker = PlotWorker(memory=memory, llm=llm, 
+        self.plot_worker = PlotWorker(memory=memory, llm=llm,
                                  prompt=self.prompts['plot_prompt'])
 
         # Define the graph
         workflow = StateGraph(CwdState)
         workflow.add_node("planner", self.planner)
-        workflow.add_node("replanner", self.replanner) 
+        workflow.add_node("replanner", self.replanner)
         workflow.add_node(WorkerName.RetrievalWorker.value, self.retrieval_worker)
         workflow.add_node(WorkerName.AnalyticsWorker.value, self.analytics_worker)
         workflow.add_node(WorkerName.PlotWorker.value, self.plot_worker)
 
         # Define edges
         workflow.add_edge(START, "planner")
-        
+
         workflow.add_edge("planner", "replanner") # Planner output goes to Replanner
 
         # Workers return to Replanner to decide next step or finish
@@ -773,7 +773,7 @@ class CwdAgent(Agent):
         workflow.add_conditional_edges("replanner",task_router)
         return workflow.compile()
 
-    def display_workflow(self): 
+    def display_workflow(self):
         super().display_workflow()
         self.retrieval_worker.display_workflow()
         self.analytics_worker.display_workflow()
@@ -781,7 +781,7 @@ class CwdAgent(Agent):
 
     async def __call__(self, state_input: CwdState) -> CwdState:
         async for event in self.workflow.astream(
-            state, 
+            state,
             stream_mode="updates",
             subgraphs=True,
         ):
@@ -803,7 +803,7 @@ from typing import List, Tuple
 from langgraph.graph.graph import CompiledGraph
 from langgraph.prebuilt import create_react_agent
 from langchain.tools import tool
-from langchain.prompts import ChatPromptTemplate 
+from langchain.prompts import ChatPromptTemplate
 
 from dataqa.agent.base import Agent
 from dataqa.memory import Memory
@@ -813,7 +813,7 @@ from dataqa.components.plan_execute.plan import (
     TaskResponse,
     WorkerName
 )
-from dataqa.agent.cwd_agent.state import CwdState 
+from dataqa.agent.cwd_agent.state import CwdState
 from dataqa.utils.prompt_utils import build_prompt, prompt_type
 
 class PlotWorker(Agent):
@@ -905,10 +905,10 @@ class RetrievalWorker(Agent):
     async def __call__(self, state: CwdState) -> Dict:
         task = state.plan.tasks[0].task_description
         response = await self.workflow.ainvoke(input=RetrievalWorkerState(task=task))
-        response = RetrievalWorkerState(**response) 
-        
+        response = RetrievalWorkerState(**response)
+
         output = response.sql_executor_output
-        
+
         message = (
             f"To complete the task {task}, the following SQL has been generated:\n"
             f"```sql\n{output.sql}\n```\n"
@@ -918,7 +918,7 @@ class RetrievalWorker(Agent):
             message += f"After running this SQL query, the output is saved in dataframe {output.dataframe}."
         elif output.error:
             message += f"While running this SQL query, the following runtime error was thrown:\n{output.error}"
-        
+
         return {
             "worker_response": WorkerResponse(
                 task_response=[TaskResponse(
@@ -936,7 +936,7 @@ File: dataqa/agent/cwd_agent/state.py
 from enum import Enum
 from pydantic import BaseModel, Field
 from typing import Annotated, List
-from operator import add 
+from operator import add
 
 from dataqa.components.plan_execute.plan import (
     Plan,
@@ -972,7 +972,7 @@ class CwdState(BaseModel):
     final_response: str = ''
     plan: Plan = None
     worker_response: Annotated[WorkerResponse, worker_response_reducer] = WorkerResponse()
-    # log: Annotated[List[Message], add] = Field(default_factory=list) 
+    # log: Annotated[List[Message], add] = Field(default_factory=list)
     retriever_state: Annotated[List[RetrievalWorkerState], add] = Field(default_factory=list)
     analyzer_state: Annotated[List[AnalyzerState], add] = Field(default_factory=list)
 
@@ -980,7 +980,7 @@ class CwdState(BaseModel):
     def update_field(self, field, value):
         if not hasattr(self, field):
             raise ValueError(f"{field} is not a valid field for CwdState")
-        if field in ["log", "retriever_state", "analyzer_state"]: 
+        if field in ["log", "retriever_state", "analyzer_state"]:
             value = getattr(self, field) + value
         if field == "worker_response":
             value = worker_response_reducer(getattr(self, field), value)
@@ -1267,7 +1267,7 @@ class InMemoryCodeExecutor(Component):
         logger.info(f"Component Type: {self.component_type}")
         logger.info(f"Input BaseModel: {self.input_base_model.__fields__}")
         logger.info(f"Output BaseModel: {self.output_base_model.__fields__}")
-    
+
     def load_dataframe(self, path):
         if path.endswith(".csv"):
             return pd.read_csv(path)
@@ -1700,7 +1700,7 @@ class Plan(BaseModel):
         tasks = []
         for i, task in enumerate(self.tasks):
             tasks.append(
-                f'Step {i+1}:\n'                
+                f'Step {i+1}:\n'
                 f' Worker: {task.worker.value}\n'
                 f' Task: {task.task_description}\n'
             )
@@ -1715,7 +1715,7 @@ class WorkerResponse(BaseModel):
     """The list of completed tasks and their response"""
     task_response: List[TaskResponseTask] = Field(default_factory=list)
 
-    def summarize(self): 
+    def summarize(self):
         if not self.task_response:
             return "No tasks completed yet."
         tasks = []
@@ -1759,13 +1759,13 @@ class Planner:
         self.memory = memory
         self.prompt = build_prompt(prompt)
         self.llm = llm
-    
+
     async def __call__(self, state):
         messages = self.prompt.invoke(dict(query=state.query))
         response = await self.llm.ainvoke(messages=messages, with_structured_output=Plan)
         plan = response.generation
         return dict(plan=plan)
-        
+
 
 
 File: dataqa/components/plan_execute/replanner.py
@@ -1777,7 +1777,7 @@ from dataqa.components.plan_execute.plan import Response, Act
 
 class Replanner:
     """
-    Input: 
+    Input:
         query: str
         plan: Plan
         past_steps: List[WorkerResponse]
@@ -1790,7 +1790,7 @@ class Replanner:
         self.memory = memory
         self.prompt = build_prompt(prompt)
         self.llm = llm
-    
+
     async def __call__(self, state):
         messages = self.prompt.invoke(dict(
             query=state.query,
@@ -1827,7 +1827,7 @@ from dataqa.components.base_component import (
     RunnableConfig,
 )
 from dataqa.utils.component_utils import build_base_model_from_parameters
-from dataqa.utils.prompt_utils import prompt_type, build_prompt 
+from dataqa.utils.prompt_utils import prompt_type, build_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -1958,7 +1958,7 @@ import logging
 import time
 import sys
 import yaml
-import os 
+import os
 from datetime import datetime
 
 from dataqa.components.base_component import Component, ComponentInput
@@ -2003,7 +2003,7 @@ class TagRetriever(Retriever):
         output_base_model_name = f"{self.config.name}_output"
         self.output_base_model = create_base_model(
             output_base_model_name, output_config, RetrieverOutput
-        ) 
+        )
         self.output_field_name = output_config[0]["name"] # TODO add support for dynamic multiple output fields
         logger.info(
             f"Component {self.config.name} of type {self.component_type} created."
@@ -2107,7 +2107,7 @@ class TagRetriever(Retriever):
         component_output = {
             "component_name": self.config.name,
             "component_type": self.component_type,
-            "output_data": retrieved_asset, 
+            "output_data": retrieved_asset,
             self.output_field_name: output_str,
             "metadata": {"time": retrieve_time},
         }
@@ -2327,7 +2327,7 @@ It should be provided either
         description="The maximum output tokens", # TODO o1 requires a different attribute "max_completion_token"
     )
     oai_params: Optional[Dict[str, Any]] = Field(default={})
-    azure_model_params: Optional[Dict[str, Any]] = Field(default={}) 
+    azure_model_params: Optional[Dict[str, Any]] = Field(default={})
     # TODO
     # throw exception
     # retry
@@ -2587,7 +2587,7 @@ def build_graph_from_config(
             names = mapped_field.split(".")
             if names[0] != PIPELINE_START:
                 names[0] = f"{names[0]}{COMPONENT_OUTPUT_SUFFIX}"
-            else: 
+            else:
                 names[0] = PIPELINE_INPUT
             mapping[field] = ".".join(names)
         component_instance.set_input_mapping(
@@ -2967,10 +2967,10 @@ prompt_type = Union[str, Prompt, Dict, List[str], List[Prompt], List[Dict], Chat
 def build_prompt(prompt: Union[str, Prompt, Dict, List[str], List[Prompt], List[Dict]]) -> ChatPromptTemplate:
     if isinstance(prompt, ChatPromptTemplate):
         return prompt
-    
+
     if not isinstance(prompt, list):
         prompt = [prompt]
-    
+
     messages = []
 
     for msg in prompt:
@@ -2984,7 +2984,7 @@ def build_prompt(prompt: Union[str, Prompt, Dict, List[str], List[Prompt], List[
             messages.append((msg.role, msg.construct))
         else:
             raise ValueError(f'Type {type(msg)} is not supported to build a prompt.')
-    
+
     return ChatPromptTemplate.from_messages(messages=messages)
 
 File: dataqa/utils/utils.py
@@ -3181,11 +3181,3 @@ pipelines:
       - name: END:
         edges:
           - return
-
-
-
-
-
-
-
-

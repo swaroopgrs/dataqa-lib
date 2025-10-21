@@ -75,4 +75,3 @@ class BaseConditionalEdge(Component, ABC):
         assert isinstance(response, self.output_base_model)
 
         return response
-

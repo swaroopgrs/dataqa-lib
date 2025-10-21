@@ -78,7 +78,9 @@ class VectorRetriever(Retriever):
 
         self.embedding_model = embedding_model
 
-        logger.info(f"Component {self.config.name} of type {self.component_type} created.")
+        logger.info(
+            f"Component {self.config.name} of type {self.component_type} created."
+        )
 
     def display(self):
         logger.info(f"Component Name: {self.config.name}")
@@ -100,11 +102,11 @@ class VectorRetriever(Retriever):
     ) -> List[RetrievedAsset]:
         """
         Retrieves assets from the resource based on the query.
-        
+
         Args:
            query (RetrieverInput): The query to match against the resource.
            resource (Resource): The resource to retrieve assets from.
-        
+
         Returns:
            list[RetrievedAsset]: A list of retrieved assets.
         """
@@ -205,7 +207,7 @@ if __name__ == "__main__":
         data_file_path="examples/ccb_risk/data/schema_embedding.pkl"
     )
     from scripts.azure_token import get_az_token_using_cert
-    
+
     api_key = get_az_token_using_cert()[0]
 
     embedding_model_config = {
@@ -224,12 +226,20 @@ if __name__ == "__main__":
     r_input = retriever_node_config["input_config"]
     r_output = retriever_node_config["output_config"]
 
-    vector_retriever = VectorRetriever(r_config, my_resource_manager, r_input, r_output, embedding_model)
+    vector_retriever = VectorRetriever(
+        r_config, my_resource_manager, r_input, r_output, embedding_model
+    )
     vector_retriever_input = vector_retriever.prepare_input(mock_state)
-    my_retrieved_asset = asyncio.run(vector_retriever.run(vector_retriever_input))
+    my_retrieved_asset = asyncio.run(
+        vector_retriever.run(vector_retriever_input)
+    )
     print("*" * 50)
-    print(f"Component {vector_retriever.config.name} of type {vector_retriever.component_type} created.")
+    print(
+        f"Component {vector_retriever.config.name} of type {vector_retriever.component_type} created."
+    )
     print("*" * 50)
     print(f"Retrieved {len(my_retrieved_asset.output_data)} records")
     print("*" * 50)
-    print(f"Underlying string:\n{my_retrieved_asset.dict()[r_output[0]['name']]}")
+    print(
+        f"Underlying string:\n{my_retrieved_asset.dict()[r_output[0]['name']]}"
+    )

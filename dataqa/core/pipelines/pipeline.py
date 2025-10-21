@@ -226,4 +226,3 @@ def build_graph_from_yaml(
     pipeline_schema = PipelineConfig(**pipeline_config)
 
     return build_graph_from_config(pipeline_schema, pipeline_name)
-

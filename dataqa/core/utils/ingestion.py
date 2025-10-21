@@ -159,7 +159,9 @@ class SchemaUtil:
         for vectorization.
         """
         if not self.schema:
-            raise ValueError("Schema not loaded. Please call load_schema() first.")
+            raise ValueError(
+                "Schema not loaded. Please call load_schema() first."
+            )
 
         if search_content_config is None:
             search_content_config = DEFAULT_SEARCH_CONTENT_CONFIG
@@ -172,8 +174,15 @@ class SchemaUtil:
                 search_content_config.get("tables"),
                 search_content_config.get("include_key", False),
             )
-            table_values = table.model_dump(include={'table_name', 'description', 'primary_keys', 'foreign_keys'})
-            
+            table_values = table.model_dump(
+                include={
+                    "table_name",
+                    "description",
+                    "primary_keys",
+                    "foreign_keys",
+                }
+            )
+
             table_records.append(
                 TableRecord(
                     table_name=table.table_name,
@@ -190,8 +199,10 @@ class SchemaUtil:
                     search_content_config.get("columns"),
                     search_content_config.get("include_key", False),
                 )
-                column_values = column.model_dump(include={'name', 'type', 'description'})
-                
+                column_values = column.model_dump(
+                    include={"name", "type", "description"}
+                )
+
                 column_records.append(
                     ColumnRecord(
                         table_name=table.table_name,
@@ -246,7 +257,7 @@ class SchemaUtil:
             raise ValueError(
                 "Parsed schema not available. Please run parse_schema() function first."
             )
-        
+
         embedding_model = OpenAIEmbedding()
         for schema_type, records in self.parsed_schema.items():
             for record in tqdm(

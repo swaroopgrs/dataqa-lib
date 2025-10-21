@@ -55,4 +55,3 @@ def get_plot_tools_and_descriptions(
     return get_tools_and_descriptions(
         memory=memory, tool_names=tool_names, all_tools_dict=DEFAULT_PLOT_TOOLS
     )
-

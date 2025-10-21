@@ -11,7 +11,7 @@ TASKS = "TASKS"
 TOOLS = "TOOLS"
 PLAN = "PLAN"
 TASK_REJECTED = "TASK REJECTED"
-HISTORY = "HISTORY" # Conversation History
+HISTORY = "HISTORY"  # Conversation History
 
 
 # Summary of the multiple agent architecture

@@ -16,7 +16,10 @@ from dataqa.core.components.plan_execute.schema import (
 )
 from dataqa.core.llm.openai import AzureOpenAI
 from dataqa.core.memory import Memory
-from dataqa.core.tools import DEFAULT_PLOT_TOOLS, get_plot_tools_and_descriptions
+from dataqa.core.tools import (
+    DEFAULT_PLOT_TOOLS,
+    get_plot_tools_and_descriptions,
+)
 from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
@@ -95,7 +98,7 @@ class PlotWorker(Component):
     async def run(self, input_data: PlotWorkerInput, config: RunnableConfig):
         task = input_data.plan[-1].tasks[0].task_description
         worker = input_data.plan[-1].tasks[0].worker
-        
+
         rule = input_data.rule
         if rule:
             rule = f"\n\n``Use Case Instruction``:\n{rule.strip()}"
@@ -119,7 +122,7 @@ class PlotWorker(Component):
         response = await self.workflow.ainvoke(
             {"messages": messages.to_messages()}
         )
-        
+
         return PlotWorkerOutput(
             worker_response=WorkerResponse(
                 task_response=[

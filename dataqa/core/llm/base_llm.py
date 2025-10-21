@@ -91,7 +91,7 @@ class LLMOutput(BaseModel):
         description="""
         The LLM generations.
         Parsed to Dict or Pydantic BaseModel is the structured output is required.
-        """
+        """,
     )
     from_component: Optional[str] = Field(
         default="",

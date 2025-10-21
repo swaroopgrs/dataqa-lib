@@ -164,5 +164,3 @@ class PipelineConfig(BaseModel):
             component_defintions[component.name] = component_fields
 
         return component_defintions
-
-

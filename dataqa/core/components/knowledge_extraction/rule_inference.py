@@ -1,14 +1,15 @@
-from langchain_core.runnables.config import RunnableConfig
-from pydantic import BaseModel, Field
 from typing import List
 
+from langchain_core.runnables.config import RunnableConfig
+from pydantic import BaseModel, Field
+
 from dataqa.llm.openai import AzureOpenAI
-from dataqa.utils.prompt_utils import build_prompt, prompt_type
 from dataqa.utils.langgraph_utils import (
-    CONFIGURABLE,
-    BASE_URL,
     API_KEY,
+    BASE_URL,
+    CONFIGURABLE,
 )
+from dataqa.utils.prompt_utils import build_prompt, prompt_type
 
 prompt_example = """
 As an AI assistant, your task is to infer business rules based on below information.
@@ -22,8 +23,8 @@ User question:
 What is the total gross sales volume by MOP code for co_id 1003 for the month of Jan 2025?
 
 Generated SQL:
-SELECT 
-    MOP_CD, 
+SELECT
+    MOP_CD,
     SUM(GROSS_SALES_USD) AS total_gross_sales_usd
 FROM PROD_BD_TH_FLAT_V3
 WHERE CO_ID = '1003'
@@ -81,7 +82,7 @@ As an AI assistant, you are given a list of business rules that are used to gene
 List of business rules:
 {rule_list_str}
 
-Please consolidate business rules. The output should be a list of consolidated business rules. 
+Please consolidate business rules. The output should be a list of consolidated business rules.
 A consolidated business rule contains the rule description and a list of rule indexes that the rule is extracted from.
 """
 
@@ -124,7 +125,8 @@ class ConsolidatedRule(BaseModel):
 
     rule: str = Field(description="rule description")
     source: List[str] = Field(
-        default_factory=list, description="A list rule indexes that the rule is extracted from"
+        default_factory=list,
+        description="A list rule indexes that the rule is extracted from",
     )
 
 
@@ -134,7 +136,6 @@ class ConsolidatedRules(BaseModel):
     rules: List[ConsolidatedRule] = Field(
         default_factory=list, description="A list of consolidated rules"
     )
-
 
 
 class RuleInference:
@@ -156,11 +157,13 @@ class RuleInference:
         self.prompt = build_prompt(prompt)
         self.llm = llm
 
-    async def __call__(self,
-                       query: str,
-                       generated_sql: str,
-                       expected_sql: str,
-                       config: RunnableConfig):
+    async def __call__(
+        self,
+        query: str,
+        generated_sql: str,
+        expected_sql: str,
+        config: RunnableConfig,
+    ):
         """
         Inference business rule by comparing ground truth query and generated query
 
@@ -170,7 +173,13 @@ class RuleInference:
         :param config: Config for the inference
         :return: A list of rules
         """
-        messages = self.prompt.invoke(dict(query=query, generated_sql=generated_sql, expected_sql=expected_sql))
+        messages = self.prompt.invoke(
+            dict(
+                query=query,
+                generated_sql=generated_sql,
+                expected_sql=expected_sql,
+            )
+        )
         api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
         base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
 
@@ -204,11 +213,8 @@ class RuleConsolidation:
         self.prompt = build_prompt(prompt)
         self.llm = llm
 
-    async def __call__(self,
-                       rule_list_str: str,
-                       config: RunnableConfig):
-        """
-        """
+    async def __call__(self, rule_list_str: str, config: RunnableConfig):
+        """ """
         messages = self.prompt.invoke(dict(rule_list_str=rule_list_str))
         api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
         base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
@@ -243,16 +249,21 @@ class RuleTriggered:
         self.prompt = build_prompt(prompt)
         self.llm = llm
 
-    async def __call__(self,
-                       rule_list_str: str,
-                       query: str,
-                       expected_sql: str,
-                       config: RunnableConfig):
-        """
-        """
-        messages = self.prompt.invoke(dict(rule_list_str=rule_list_str,
-                                           query=query,
-                                           expected_sql=expected_sql))
+    async def __call__(
+        self,
+        rule_list_str: str,
+        query: str,
+        expected_sql: str,
+        config: RunnableConfig,
+    ):
+        """ """
+        messages = self.prompt.invoke(
+            dict(
+                rule_list_str=rule_list_str,
+                query=query,
+                expected_sql=expected_sql,
+            )
+        )
         api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
         base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
 
@@ -302,13 +313,15 @@ Rule-24: Always group by 'MBR_ENT' when calculating sales volume.
 """
 
 if __name__ == "__main__":
-    import os
     import asyncio
-    os.environ['CERT_PATH'] = ""
+    import os
+
+    os.environ["CERT_PATH"] = ""
     os.environ["CLIENT_ID"] = ""
     os.environ["TENANT_ID"] = ""
     os.environ["OPENAI_API_BASE"] = ""
     from scripts.azure_token import get_az_token_using_cert
+
     api_key = get_az_token_using_cert()[0]
     config = {
         "configurable": {
@@ -317,12 +330,14 @@ if __name__ == "__main__":
         }
     }
 
-    llm_config = {"model": "gpt-4o-2024-08-06",
-                  "api_version": "2024-08-01-preview",
-                  "api_type": "azure_ad",
-                  "temperature": 0,
-                  "num_response": 1,
-                  "azure_model_params": {"model_name": "gpt-4o"}}
+    llm_config = {
+        "model": "gpt-4o-2024-08-06",
+        "api_version": "2024-08-01-preview",
+        "api_type": "azure_ad",
+        "temperature": 0,
+        "num_response": 1,
+        "azure_model_params": {"model_name": "gpt-4o"},
+    }
     llm = AzureOpenAI(**llm_config)
     # rule_inference = RuleInference(llm=llm, prompt=rule_inference_prompt_template)
     # rules = asyncio.run(rule_inference(query="What is the total gross sales volume by MOP code for co_id 1003 for the month of Jan 2025?",
@@ -333,11 +348,14 @@ if __name__ == "__main__":
     # rules = asyncio.run(rule_consolidation(rule_list_str=rule_list_str,
     #                                        config=config))
     rule_triggered = RuleTriggered(llm=llm, prompt=rule_pruning_prompt_template)
-    rules = asyncio.run(rule_triggered(rule_list_str=rule_list_str,
-                                       query="What is the total gross sales volume by MOP code for co_id 1003 for the month of Jan 2025?",
-                                       expected_sql="SELECT co_id,CASE WHEN mop_cd in ('VI','VR','CR','CZ') THEN 'VI' WHEN mop_cd in ('MC','MR') THEN 'MC' WHEN mop_cd in ('DI','DD','JC') THEN 'DI' ELSE mop_cd END brand, sum(gross_sales_usd) as gross_sales_usd\nFROM PROD_BD_TH_FLAT_V3\nWHERE co_id in ('1003') AND subm_dt_yyyymm in  ('202501')\nGROUP BY co_id, brand;",
-                                       config=config)
-                        )
+    rules = asyncio.run(
+        rule_triggered(
+            rule_list_str=rule_list_str,
+            query="What is the total gross sales volume by MOP code for co_id 1003 for the month of Jan 2025?",
+            expected_sql="SELECT co_id,CASE WHEN mop_cd in ('VI','VR','CR','CZ') THEN 'VI' WHEN mop_cd in ('MC','MR') THEN 'MC' WHEN mop_cd in ('DI','DD','JC') THEN 'DI' ELSE mop_cd END brand, sum(gross_sales_usd) as gross_sales_usd\nFROM PROD_BD_TH_FLAT_V3\nWHERE co_id in ('1003') AND subm_dt_yyyymm in  ('202501')\nGROUP BY co_id, brand;",
+            config=config,
+        )
+    )
     print(rules)
     for rule in rules["rules"][0].rules:
         print(rule)

@@ -54,5 +54,3 @@ tables:
             description: Account is in the collections period
           - value: 97
             description: Charged-off, Unpaid balance reported as a loss by credit grantor
-
-

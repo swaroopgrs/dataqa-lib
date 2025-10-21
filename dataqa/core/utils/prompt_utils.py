@@ -61,4 +61,3 @@ def build_prompt(
             )
 
     return ChatPromptTemplate.from_messages(messages=messages)
-

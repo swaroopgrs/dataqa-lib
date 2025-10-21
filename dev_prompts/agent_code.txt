@@ -84,7 +84,7 @@ class Plan(BaseModel):
         task_summaries = []
         for i, task in enumerate(self.tasks):
             task_summaries.append(
-                f'Step {i+1}:\n'                
+                f'Step {i+1}:\n'
                 f' Worker: {task.worker.value}\n'
                 f' Task: {task.description}\n'
             )
@@ -166,7 +166,7 @@ def worker_response_reducer(res1: WorkerResponse, res2: WorkerResponse) -> Worke
     combined_response = (res1.response or "")
     if res2.response and res2.response not in combined_response:
         combined_response += ("; " if combined_response else "") + res2.response
-        
+
     return WorkerResponse(
         task_response=res1.task_response + res2.task_response,
         task_description=combined_task_description.strip('; '),
@@ -186,7 +186,7 @@ class CwdState(BaseModel):
     def update_field(self, field_name, value): # As per image
         if not hasattr(self, field_name):
             raise ValueError(f"'{field_name}' is not a valid field for CwdState")
-        
+
         # Specific handling for Annotated fields that are lists (log, retriever_state, analyzer_state)
         # The Annotated reducer should handle this naturally when LangGraph updates the state.
         # This manual update_field might be for other purposes or simpler updates.
@@ -209,12 +209,12 @@ class CwdState(BaseModel):
 def task_router(state: CwdState) -> Literal[WorkerName.Retriever.value, WorkerName.Analyzer.value, WorkerName.Visualizer.value, "replanner", "__end__"]:
     if getattr(state, 'final_response', '') and state.final_response: # Check if final_response is non-empty
         return "__end__"
-    
+
     if not state.plan or not state.plan.tasks:
         # No plan, or plan is exhausted. Go to replanner.
         # Replanner can decide to end or create a new plan.
-        return "replanner" 
-    
+        return "replanner"
+
     # Get the next task from the plan
     current_task_worker = state.plan.tasks[0].worker
     return current_task_worker.value
@@ -248,7 +248,7 @@ class Memory:
     def summarize_dataframe(self):
         if not self.dataframes:
             return "You don't have access to any dataframes yet."
-        
+
         message_parts = [f"You have access to the following {len(self.dataframes)} dataframes:"]
         for k, v_df in self.dataframes.items():
             message_parts.append(self.summarize_one_dataframe(k, v_df))
@@ -391,7 +391,7 @@ JOIN position ON locate.SEDOL = position.SEDOL AND position.BLOOMBERG = 'AWPT AB
 
     async def ainvoke(self, input: Union[str, List[BaseMessage]], **kwargs) -> Any:
         structured_output_cls = kwargs.get('structured_output')
-        
+
         prompt_content = ""
         if isinstance(input, list) and input:
             prompt_content = input[-1].content
@@ -511,11 +511,11 @@ class SQLGenerator(Agent):
     async def __call__(self, state: RetrieverState) -> Dict[str, SQLGeneratorOutput]:
         # state here is RetrieverState, specifically its 'task' field
         current_task_description = state.task.description
-        
+
         # Format the prompt (simplified)
         # In a real scenario, HumanMessage might be better if LLM expects chat format
         formatted_prompt = self.prompt_template.replace("<schema>", prompts['schema']).replace("{task_description}", current_task_description)
-        
+
         response: SQLGeneratorOutput = await self.llm.ainvoke(
             input=[HumanMessage(content=formatted_prompt)], # Pass as list of messages
             structured_output=SQLGeneratorOutput
@@ -531,9 +531,9 @@ class SQLExecutor(Agent):
     async def __call__(self, state: RetrieverState) -> Dict[str, SQLExecutorOutput]:
         # state here is RetrieverState, with sql_generator_output populated
         sql_to_execute = state.sql_generator_output.sql_str
-        
+
         executor_run_output: ExecutorOutput = self.code_executor.run(code=sql_to_execute)
-        
+
         output = SQLExecutorOutput(
             sql=executor_run_output.sql,
             dataframe_name=executor_run_output.dataframe_name,
@@ -564,13 +564,13 @@ class Replaner(Agent): # Typo as in image
     async def __call__(self, state: CwdState) -> Dict[str, Any]:
         past_steps_summary = state.worker_response.summarize() if state.worker_response else "No past steps."
         dataframe_summary = self.memory.summarize_dataframe()
-        
+
         formatted_prompt = self.prompt_template.format(
             past_steps_summary=past_steps_summary,
             dataframe_summary=dataframe_summary,
             query=state.query
         )
-        
+
         act_response: Act = await self.llm.ainvoke(
             input=[HumanMessage(content=formatted_prompt)],
             structured_output=Act
@@ -585,9 +585,9 @@ class Retriever(Agent):
     def __init__(self, memory: Memory, llm: MockAzureChatOpenAI):
         super().__init__(memory=memory, llm=llm)
         self.name = WorkerName.Retriever.value
-        
+
         self.sql_generator_agent = SQLGenerator(llm=llm, memory=memory)
-        
+
         # Config for the SQLExecutor's InMemoryCodeExecutor
         executor_conf = InMemoryCodeExecutorConfig(
             data_files={ # These tell InMemoryCodeExecutor which DFs from Memory to make available
@@ -596,7 +596,7 @@ class Retriever(Agent):
             }
         )
         self.sql_executor_agent = SQLExecutor(config=executor_conf, memory=memory, llm=llm)
-        
+
         self.workflow = self._build_internal_workflow()
 
     def _build_internal_workflow(self) -> CompiledGraph:
@@ -615,7 +615,7 @@ class Retriever(Agent):
             return {"worker_response": WorkerResponse(response="Retriever called without a task.", worker_self_name=WorkerName.Retriever)}
 
         current_task = state.plan.tasks[0]
-        
+
         # Invoke the internal workflow for SQL generation and execution
         retriever_run_state = RetrieverState(task=current_task)
         final_retriever_state: RetrieverState = await self.workflow.ainvoke(retriever_run_state)
@@ -636,7 +636,7 @@ class Retriever(Agent):
 
             if final_retriever_state.sql_executor_output.error:
                 msg_parts.append(f"SQL execution error: {final_retriever_state.sql_executor_output.error}")
-        
+
         response_str = "\n".join(msg_parts)
 
         # Update CwdState fields
@@ -658,7 +658,7 @@ class Analyzer(Agent):
         self.prompt_template = prompts['analyzer_prompt']
         # Analyzer uses a react agent (mocked here)
         self.react_agent_workflow = create_react_agent(
-            llm=llm, 
+            llm=llm,
             tools=[GetRowByMaxColumn] # Pass the tool instance
         )
 
@@ -675,18 +675,18 @@ class Analyzer(Agent):
             plan_summary=plan_summary,
             task_description=current_task.description
         )
-        
+
         # React agent expects messages in a specific format, typically a list of BaseMessage
         # The input here is what the React agent will process.
         react_input_messages = [HumanMessage(content=formatted_prompt)]
         react_agent_output = await self.react_agent_workflow.ainvoke({'messages': react_input_messages})
-        
+
         # React agent output is typically {'messages': [AIMessage, ToolMessage, ...]}
         # We need to extract the final textual response for WorkerResponse
         final_analysis_message = react_agent_output['messages'][-1].content if react_agent_output['messages'] else "No analysis content."
 
         updated_plan = Plan(tasks=state.plan.tasks[1:])
-        
+
         # AnalyzerState stores the conversation with the react_agent
         analyzer_state_update = AnalyzerState(messages=react_agent_output['messages'])
 
@@ -708,9 +708,9 @@ class Visualizer(Agent):
         current_task = state.plan.tasks[0]
         # Mock visualization
         visualization_output = f"Mock visualization for: {current_task.description}. (Data from memory: {self.memory.list_dataframes()})"
-        
+
         updated_plan = Plan(tasks=state.plan.tasks[1:])
-        
+
         return {
             "worker_response": WorkerResponse(response=visualization_output, task_description=current_task.description, worker_self_name=WorkerName.Visualizer),
             "plan": updated_plan
@@ -722,13 +722,13 @@ class CWDAgent(Agent):
     def __init__(self, memory: Memory, llm: MockAzureChatOpenAI):
         super().__init__(memory=memory, llm=llm)
         self.name = "CWDAgent" # As per image for display_workflow
-        
+
         self.planner_node = Planner(memory=memory, llm=llm)
         self.replanner_node = Replaner(memory=memory, llm=llm) # Typo preserved
         self.retriever_node = Retriever(memory=memory, llm=llm)
         self.analyzer_node = Analyzer(memory=memory, llm=llm)
         self.visualizer_node = Visualizer(memory=memory, llm=llm)
-        
+
         self.workflow = self._build_main_workflow()
 
     def _build_main_workflow(self) -> CompiledGraph:
@@ -744,12 +744,12 @@ class CWDAgent(Agent):
 
         # Conditional edges after planner and each worker node, routing via task_router
         nodes_that_route_via_task_router = [
-            "planner", 
-            WorkerName.Retriever.value, 
-            WorkerName.Analyzer.value, 
+            "planner",
+            WorkerName.Retriever.value,
+            WorkerName.Analyzer.value,
             WorkerName.Visualizer.value
         ]
-        
+
         task_router_map = {
             WorkerName.Retriever.value: WorkerName.Retriever.value,
             WorkerName.Analyzer.value: WorkerName.Analyzer.value,
@@ -760,16 +760,16 @@ class CWDAgent(Agent):
 
         for node_name in nodes_that_route_via_task_router:
             graph.add_conditional_edges(node_name, task_router, task_router_map)
-        
+
         # Conditional edge after replanner
         def replanner_router(state: CwdState):
             if state.final_response:
                 return "__end__"
             # If replanner generated a new plan, route it via task_router
-            return task_router(state) 
+            return task_router(state)
 
         graph.add_conditional_edges("replanner", replanner_router, task_router_map)
-        
+
         return graph.compile()
 
     async def __call__(self, query: str) -> CwdState: # Changed to take query string
@@ -786,13 +786,13 @@ async def main():
 
     main_cwd_agent = CWDAgent(memory=global_memory, llm=llm)
     main_cwd_agent.display_workflow() # For console
-    
+
     # For specific agent workflows if needed (Retriever's is internal)
-    # main_cwd_agent.retriever_node.display_workflow() 
+    # main_cwd_agent.retriever_node.display_workflow()
 
     # query = "who has the largest holdings of awpt ab?" # Original query
     query = "Find the average price for AWPT AB." # Test query closer to SQL example
-    
+
     print(f"\n--- Running CWDAgent for query: '{query}' ---")
     final_agent_state = await main_cwd_agent(query=query)
 
@@ -801,7 +801,7 @@ async def main():
         print(f"Final Response: {final_agent_state.final_response}")
     else:
         print("No final response was generated.")
-    
+
     print("\n--- Worker Responses Log ---")
     if final_agent_state.worker_response and (final_agent_state.worker_response.task_response or final_agent_state.worker_response.response):
         print(f"Last Worker: {final_agent_state.worker_response.worker_self_name}")

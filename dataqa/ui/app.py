@@ -1,19 +1,22 @@
-import streamlit as st
 import sys
 from pathlib import Path
+
+import streamlit as st
 
 # Add the parent directory to the path so we can import dataqa modules
 sys.path.append(str(Path(__file__).parent.parent))
 
+from views import data_scanner, evaluation, project_manager, rule_inference
+
 from dataqa.ui.views import agent_playground
-from views import evaluation, data_scanner, rule_inference, project_manager
 
 st.set_page_config(
     page_title="DataQA Suite",
     page_icon="🤖",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
+
 
 def main():
     st.title("🤖 DataQA Suite")
@@ -34,6 +37,7 @@ def main():
 
     # Display the selected page
     pages[selected_page].show()
+
 
 if __name__ == "__main__":
     main()

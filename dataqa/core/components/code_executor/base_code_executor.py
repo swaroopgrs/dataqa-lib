@@ -32,5 +32,3 @@ class CodeExecutor(Component, ABC):
     @abstractmethod
     def run(self, input_data: Any) -> CodeExecutorOutput:
         pass
-
-

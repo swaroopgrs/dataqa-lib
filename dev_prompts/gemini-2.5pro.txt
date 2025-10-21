@@ -113,7 +113,7 @@ components:
 
 orchestration:
   default_mode: agent # or workflow
-  
+
   # --- Workflow Definitions ---
   workflows:
     - name: simple_sql_query
@@ -163,7 +163,7 @@ orchestration:
           - AssetRetriever
           - PromptComposer
           - CodeGenerator
-          - DataAPIExecutor 
+          - DataAPIExecutor
         adapter_config: {} # LangGraph specific config
 
       - name: DataAnalysisAgent

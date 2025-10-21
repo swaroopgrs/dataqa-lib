@@ -6,7 +6,11 @@ from pydantic import BaseModel
 
 from dataqa.core.components.base_component import Component, ComponentConfig
 from dataqa.core.components.base_utils import get_field
-from dataqa.core.components.plan_execute.schema import Plan, Response, WorkerName
+from dataqa.core.components.plan_execute.schema import (
+    Plan,
+    Response,
+    WorkerName,
+)
 
 PlanConditionalEdgeConfig = ComponentConfig
 

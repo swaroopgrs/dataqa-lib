@@ -164,5 +164,3 @@ def get_plot_tool(memory: Memory) -> Tuple[StructuredTool, str, str]:
 
 
 DEFAULT_PLOT_TOOLS = {"Plot": get_plot_tool}
-
-

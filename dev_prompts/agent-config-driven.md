@@ -298,7 +298,7 @@ class CwdAgent(Agent):
         final_prompts: Dict[str, prompt_type] = {}
         for field_name, prompt_value_config in prompts_config: # Iterate through Pydantic model fields
             # prompt_value_config is CwdAgentPromptValue (Union[str, List[PromptMessageConfig]])
-            
+
             processed_content: prompt_type
             if isinstance(prompt_value_config, str):
                 # Single string treated as system message content
@@ -314,7 +314,7 @@ class CwdAgent(Agent):
             else:
                 # Should not happen if Pydantic validation is correct
                 raise ValueError(f"Unexpected prompt configuration type for {field_name}")
-            
+
             final_prompts[field_name] = processed_content
         return final_prompts
 
@@ -346,7 +346,7 @@ class CwdAgent(Agent):
         # ... rest of the graph definition (StateGraph, nodes, edges) remains the same ...
         workflow = StateGraph(CwdState)
         workflow.add_node("planner", self.planner)
-        workflow.add_node("replanner", self.replanner) 
+        workflow.add_node("replanner", self.replanner)
         workflow.add_node(WorkerName.RetrievalWorker.value, self.retrieval_worker)
         workflow.add_node(WorkerName.AnalyticsWorker.value, self.analytics_worker)
         workflow.add_node(WorkerName.PlotWorker.value, self.plot_worker)
@@ -370,7 +370,7 @@ class CwdAgent(Agent):
         import yaml
         with open(config_file_path, 'r') as f:
             raw_config_dict = yaml.safe_load(f)
-        
+
         agent_definition_config = CwdAgentDefinitionConfig(**raw_config_dict)
         return cls(memory=memory, config=agent_definition_config)
 

@@ -18,5 +18,3 @@ def df_to_markdown(df: pd.DataFrame) -> str:
     # Convert the modified DataFrame to Markdown
     markdown_string = df_copy.to_markdown(index=False)
     return markdown_string
-
-

@@ -36,13 +36,13 @@ class TagRetriever(Retriever):
     ):
         """
         Create a new instance of the TagRetriever.
-        
+
         Args:
            config (Dict): The configuration for the retriever.
            resource_manager (ResourceManager): The resource manager.
            input_config (List): The configuration for the input fields.
            output_config (List): The configuration for the output fields.
-        
+
         Returns:
            TagRetriever: A new instance of the TagRetriever class.
         """
@@ -160,8 +160,8 @@ class TagRetriever(Retriever):
         return False
 
     async def run(
-            self, input_data: RetrieverInput, config: Dict = {}
-        ) -> RetrieverOutput:
+        self, input_data: RetrieverInput, config: Dict = {}
+    ) -> RetrieverOutput:
         """
         TODO: filter fields of retrieved asset to base model of component output
         :param query: RetrieverInput for tag retrieval method
@@ -229,10 +229,14 @@ if __name__ == "__main__":
         tag_retriever_input = tag_retriever.prepare_input(mock_state)
         my_retrieved_asset = asyncio.run(tag_retriever.run(tag_retriever_input))
         print("*" * 50)
-        print(f"Component {tag_retriever.config.name} of type {tag_retriever.component_type} created.")
+        print(
+            f"Component {tag_retriever.config.name} of type {tag_retriever.component_type} created."
+        )
         print(f"Retrieved {len(my_retrieved_asset.output_data)} records")
         print("Content:")
         for r in my_retrieved_asset.output_data:
             print(r.content.tags)
         print("*" * 50)
-        print(f"Underlying string:\n{my_retrieved_asset.dict()[r_output[0]['name']]}")
+        print(
+            f"Underlying string:\n{my_retrieved_asset.dict()[r_output[0]['name']]}"
+        )

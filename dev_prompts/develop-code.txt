@@ -3731,8 +3731,8 @@ User question:
 What is the total gross sales volume by MOP code for co_id 1003 for the month of Jan 2025?
 
 Generated SQL:
-SELECT 
-    MOP_CD, 
+SELECT
+    MOP_CD,
     SUM(GROSS_SALES_USD) AS total_gross_sales_usd
 FROM PROD_BD_TH_FLAT_V3
 WHERE CO_ID = '1003'
@@ -3790,7 +3790,7 @@ As an AI assistant, you are given a list of business rules that are used to gene
 List of business rules:
 {rule_list_str}
 
-Please consolidate business rules. The output should be a list of consolidated business rules. 
+Please consolidate business rules. The output should be a list of consolidated business rules.
 A consolidated business rule contains the rule description and a list of rule indexes that the rule is extracted from.
 """
 
@@ -9795,7 +9795,7 @@ def string_list_to_prompt(string_list: List[str], prefix: Union[str, List[str]])
 File: examples/cib_mp/agent/config_graph_building.yaml
 ================================================
 components:
-  - name: return 
+  - name: return
     params:
       config:
         name: return
@@ -9822,7 +9822,7 @@ components:
         name: query_rewriter
         model: gpt-4o-2024-08-06
         prompt: FILE_{BASE_DIR}/examples/cib_mp/data/rewriter_prompt.txt
-        input: 
+        input:
         - name: query
           type: str
           description: input query
@@ -9846,7 +9846,7 @@ components:
       config:
         name: code_generator_prompt
         prompt: FILE_{BASE_DIR}/examples/cib_mp/data/code_prompt.txt
-        input: 
+        input:
         - name: rewritten_query
           type: str
           description: input query
@@ -9877,7 +9877,7 @@ components:
       config:
         name: code_executor
         component_type: in_memory_executor
-        data_files: 
+        data_files:
         - path: "{BASE_DIR}/examples/cib_mp/data/fake_PROD_BD_TH_FLAT_V3.csv"
           table_name: PROD_BD_TH_FLAT_V3
         - path: "{BASE_DIR}/examples/cib_mp/data/fake_EIS_D_CUST_PORTFOLIO.csv"
@@ -11449,6 +11449,3 @@ prompts:
     FROM EIS_D_CUST_PORTFOLIO
     WHERE cust_stat = 'A';
     </sql>
-
-
-

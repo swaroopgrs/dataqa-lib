@@ -4,11 +4,11 @@ Below is a **detailed, step-by-step plan** you can feed into an LLM (or break in
 
 ## 1. Project & Packaging Setup
 
-1. **Initialize with Poetry**  
-   - `poetry init` → define name `dataqa`, version, dependencies placeholder.  
+1. **Initialize with Poetry**
+   - `poetry init` → define name `dataqa`, version, dependencies placeholder.
    - Add dev-dependencies: `pytest`, `ruff`, `sphinx`, `mypy`.
 
-2. **Repo Layout**  
+2. **Repo Layout**
    ```
    dataqa/
      ├── dataqa/
@@ -25,8 +25,8 @@ Below is a **detailed, step-by-step plan** you can feed into an LLM (or break in
      └── README.md
    ```
 
-3. **Documentation & CI**  
-   - Sphinx: `docs/conf.py`, autodoc.  
+3. **Documentation & CI**
+   - Sphinx: `docs/conf.py`, autodoc.
    - GitHub Actions: lint, test, build docs.
 
 ---
@@ -94,28 +94,28 @@ class BaseComponent(ABC):
 ### 3.4 Retrieval Component
 - **RetrievalBase** ← `BaseComponent`
 - **InMemoryRetrieval**, **OpensearchRetrieval**
-- Methods:  
-  - `get_schema(table_names: List[str]) -> Dict`  
-  - `get_examples(query: str) -> List[Example]`  
+- Methods:
+  - `get_schema(table_names: List[str]) -> Dict`
+  - `get_examples(query: str) -> List[Example]`
   - `get_business_rules(context: str) -> List[str]`
 
 ---
 
 ## 4. Data-Querying Pipeline
 
-1. **Query Rewriting**  
-   - Component: `QueryRewriter` (LLM-based)  
+1. **Query Rewriting**
+   - Component: `QueryRewriter` (LLM-based)
    - Input: raw user question → Output: normalized/focused query
 
-2. **Asset Retrieval**  
+2. **Asset Retrieval**
    - Use `RetrievalBase` to fetch:
-     - schema snippets  
-     - query→code examples  
-     - business rules  
+     - schema snippets
+     - query→code examples
+     - business rules
    - Assemble into context bundle
 
-3. **Prompt Composition**  
-   - Template driven (Jinja2):  
+3. **Prompt Composition**
+   - Template driven (Jinja2):
      ```
      You are a SQL generation assistant.
      Schema:
@@ -129,15 +129,15 @@ class BaseComponent(ABC):
      Generate code only.
      ```
 
-4. **Code Generation**  
+4. **Code Generation**
    - Call `LlmComponent.generate(prompt)`
 
-5. **Code Execution**  
+5. **Code Execution**
    - Pass to `CodeExecutor.run(code)`
    - Handle success: return dataframe or JSON
    - On error: capture exception, if `retry_on_error` then automatically regenerate with “error context” appended.
 
-6. **Result Wrapping**  
+6. **Result Wrapping**
    - Always return a standardized `QueryResult` object:
      ```python
      class QueryResult(NamedTuple):
@@ -150,16 +150,16 @@ class BaseComponent(ABC):
 
 ## 5. Data-Analysis & Visualization
 
-- **Analysis**  
+- **Analysis**
   - Two modes:
-    1. **Prebuilt functions**: e.g. `mean, groupby, pivot_table` wrappers  
+    1. **Prebuilt functions**: e.g. `mean, groupby, pivot_table` wrappers
     2. **LLM-generated code**: similar pipeline to querying, but prompt tuned for pandas/matplotlib
 
-- **Visualization**  
-  - Prebuilt chart functions (e.g. `bar_chart(data, x, y)`)  
+- **Visualization**
+  - Prebuilt chart functions (e.g. `bar_chart(data, x, y)`)
   - Or generate code via LLM (prompt includes “Use matplotlib to plot…”)
 
-- **Component Hooks**  
+- **Component Hooks**
   - `AnalysisComponent`, `VisualizationComponent` ← `BaseComponent`
   - Each takes config to choose “mode: prebuilt|llm” plus parameters
 
@@ -167,13 +167,13 @@ class BaseComponent(ABC):
 
 ## 6. Workflow Graphs (LangGraph-based)
 
-1. **Define Nodes**  
+1. **Define Nodes**
    - Each component (QueryRewriter, Retrieval, LLM, Executor, Analyzer, Visualizer) is a node.
 
-2. **Define Edges**  
+2. **Define Edges**
    - Query → Rewrite → Retrieve → Generate → Execute → Analyze → Visualize
 
-3. **Config-Driven Graph**  
+3. **Config-Driven Graph**
    ```yaml
    workflows:
      simple_query:
@@ -192,23 +192,23 @@ class BaseComponent(ABC):
          - [generate, execute]
    ```
 
-4. **Workflow Runner**  
+4. **Workflow Runner**
    - Reads config, instantiates components, runs graph.
 
-5. **Pluggability**  
+5. **Pluggability**
    - To swap in CrewAI’s orchestrator, write an adapter that takes the same graph config.
 
 ---
 
 ## 7. Agent Definitions
 
-- **High-Level Agent**  
-  - Delegates to sub-agents:  
-    - **DataQueryAgent**  
-    - **DataAnalysisAgent**  
+- **High-Level Agent**
+  - Delegates to sub-agents:
+    - **DataQueryAgent**
+    - **DataAnalysisAgent**
     - **DataVizAgent**
 
-- **Agent API**  
+- **Agent API**
   ```python
   class Agent(ABC):
       def __init__(self, tools: Dict[str, BaseComponent]): ...
@@ -216,33 +216,33 @@ class BaseComponent(ABC):
       def run(self, input: str) -> Any: ...
   ```
 
-- **Multi-Agent Flow**  
-  1. User question → HighLevelAgent  
-  2. Based on analysis: call DataQueryAgent or DataAnalysisAgent, etc.  
+- **Multi-Agent Flow**
+  1. User question → HighLevelAgent
+  2. Based on analysis: call DataQueryAgent or DataAnalysisAgent, etc.
   3. Chained back-and-forth until final output.
 
-- **Tool Registration**  
+- **Tool Registration**
   - Each Agent constructor takes a `tools` dict populated from components.
 
 ---
 
 ## 8. Error Handling & Retries
 
-- **Centralized Error Types**  
+- **Centralized Error Types**
   - `CodeExecutionError`, `LLMGenerationError`, `RetrievalError`
-- **Retry Decorator**  
+- **Retry Decorator**
   - Applies to any component with `retry_on_error` from config
-- **User Feedback Loop**  
+- **User Feedback Loop**
   - On repeated failures, Agent can ask the user for clarification.
 
 ---
 
 ## 9. Extensibility & Adapter Pattern
 
-- **Interface Definitions**  
+- **Interface Definitions**
   - Every component interface in `components/interfaces.py`
-- **Registration Mechanism**  
-  - Entry points or a simple factory:  
+- **Registration Mechanism**
+  - Entry points or a simple factory:
     ```python
     COMPONENT_REGISTRY = {
       "openai": OpenAIComponent,
@@ -250,59 +250,59 @@ class BaseComponent(ABC):
       ...
     }
     ```
-- **Adding New Framework**  
-  1. Implement the interface  
-  2. Register in `COMPONENT_REGISTRY`  
+- **Adding New Framework**
+  1. Implement the interface
+  2. Register in `COMPONENT_REGISTRY`
   3. Update config schema to accept new type
 
 ---
 
 ## 10. Asset Ingestion & Retrieval Index
 
-1. **Parsers**  
+1. **Parsers**
    - YAML/TXT → normalized `SchemaDoc`, `ExampleDoc`, `RuleDoc`
-2. **Indexers**  
-   - For local: simple key-value store  
+2. **Indexers**
+   - For local: simple key-value store
    - For Opensearch: bulk ingest API wrapper
-3. **Retriever**  
+3. **Retriever**
    - Embedding-based or keyword matching
 
 ---
 
 ## 11. Testing & CI
 
-- **pytest**  
-  - Unit tests for each component interface  
+- **pytest**
+  - Unit tests for each component interface
   - End-to-end: config → workflow run on toy CSV
-- **Linting**  
-  - `ruff --fix`  
-- **Type Checking**  
+- **Linting**
+  - `ruff --fix`
+- **Type Checking**
   - `mypy dataqa/`
 
 ---
 
 ## 12. Documentation & Examples
 
-- **README**  
-  - Quickstart:  
+- **README**
+  - Quickstart:
     ```python
     from dataqa import DataQALibrary
     lib = DataQALibrary(config="config.yml")
     result = lib.query("Show me total sales by region")
     lib.visualize(result.data, kind="bar")
     ```
-- **Sphinx**  
+- **Sphinx**
   - Auto-generate API, plus how-to guides for:
-    - Adding a new LLM provider  
-    - Writing custom components  
+    - Adding a new LLM provider
+    - Writing custom components
     - Building an Agent vs. Workflow
 
 ---
 
 ### Next Steps
 
-1. **Feed this plan** (or chunks of it) to your LLM, asking it to scaffold each module.  
-2. **Iterate**: once code is generated, run tests and refine configs.  
+1. **Feed this plan** (or chunks of it) to your LLM, asking it to scaffold each module.
+2. **Iterate**: once code is generated, run tests and refine configs.
 3. **Extend**: drop in new orchestrators (CrewAI, Autogen) by writing thin adapters.
 
 With this blueprint, your LLM has a clear map—every package, module, config file, class hierarchy, and workflow definition it needs to generate the full `dataqa` library in a **configuration-driven**, **extensible** way.

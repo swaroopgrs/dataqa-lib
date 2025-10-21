@@ -54,5 +54,5 @@ mapping:
   name: feature
 - <<: *default
   name: release
-- <<: *default 
+- <<: *default
   name: hotfix

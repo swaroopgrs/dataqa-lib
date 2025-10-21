@@ -1,6 +1,5 @@
 from typing import Dict, List, Optional, Union
 
-
 from dataqa.core.data_models.asset_models import (
     RetrievedAsset,
     TableSchema,
@@ -30,13 +29,14 @@ def get_vector_schema_record(
 
 
 def reconstruct_table_schema(
-    retrieved_vector_schema: List[RetrievedAsset], full_vector_schema_data: List[VectorSchema]
+    retrieved_vector_schema: List[RetrievedAsset],
+    full_vector_schema_data: List[VectorSchema],
 ) -> List[TableSchema]:
     tables: Dict[str, TableSchema] = {}
     for record_asset in retrieved_vector_schema:
         record = record_asset.content
         table_name = record.table_name
-        
+
         if table_name not in tables:
             matched_table_record = get_vector_schema_record(
                 full_vector_schema_data,
@@ -48,12 +48,16 @@ def reconstruct_table_schema(
                 description=record.table_description,
                 columns=[],
                 tags=matched_table_record.values.get("tags", []),
-                primary_keys=matched_table_record.values.get("primary_keys", []),
-                foreign_keys=matched_table_record.values.get("foreign_keys", []),
+                primary_keys=matched_table_record.values.get(
+                    "primary_keys", []
+                ),
+                foreign_keys=matched_table_record.values.get(
+                    "foreign_keys", []
+                ),
             )
 
         table = tables[table_name]
-        
+
         # Find or create column
         column = next(
             (c for c in table.columns if c.name == record.column_name), None
@@ -66,7 +70,7 @@ def reconstruct_table_schema(
                 "values": [],
             }
             table.columns.append(column)
-        
+
         if record.record_type == VectorSchemaRecordType.Value:
             column["values"].append(
                 {"value": record.value, "description": record.value_description}
@@ -76,10 +80,10 @@ def reconstruct_table_schema(
 
 
 def convert_table_schema_to_sql_str(
-        table_schema: Dict[str, Union[str, list]]
+    table_schema: Dict[str, Union[str, list]],
 ) -> str:
     """
-    Converts a table schema dictionary (from TableSchema.model_dump()) to a 
+    Converts a table schema dictionary (from TableSchema.model_dump()) to a
     descriptive SQL CREATE TABLE string for LLM prompts.
     """
     table_name = table_schema.get("table_name", "unknown_table")
@@ -89,13 +93,13 @@ def convert_table_schema_to_sql_str(
     command_parts = []
     if table_description:
         command_parts.append(f"-- {table_description}")
-    
+
     command_parts.append(f"CREATE TABLE {table_name} (")
 
     column_definitions = []
     for column in columns_data:
         col_def_parts = []
-        
+
         # Add comment block with description and categorical values
         col_desc = column.get("description")
         col_values = column.get("values")
@@ -106,7 +110,11 @@ def convert_table_schema_to_sql_str(
             if col_values:
                 col_def_parts.append("    values:")
                 for val in col_values:
-                    val_desc_str = f" / {val['description']}" if val.get("description") else ""
+                    val_desc_str = (
+                        f" / {val['description']}"
+                        if val.get("description")
+                        else ""
+                    )
                     col_def_parts.append(f"      {val['value']}{val_desc_str}")
             col_def_parts.append("    */")
 
@@ -114,7 +122,7 @@ def convert_table_schema_to_sql_str(
         col_name = column.get("name", "unknown_col")
         col_type = column.get("type", "UNKNOWN_TYPE")
         col_def_parts.append(f"    {col_name} {col_type}")
-        
+
         column_definitions.append("\n".join(col_def_parts))
 
     command_parts.append(",\n".join(column_definitions))

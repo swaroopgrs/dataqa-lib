@@ -121,4 +121,3 @@ class TestResultItem(BaseModel):
     local_path: str = ""
     input_data: Union[TestDataItem, None] = None
     predictions: List[Prediction] = Field(default_factory=list)
-

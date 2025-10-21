@@ -20,21 +20,24 @@ from dataqa.core.agent.cwd_agent.prompt import (
 )
 from dataqa.core.components.code_executor.base_code_executor import CodeExecutor
 from dataqa.core.components.plan_execute.analytics_worker import (
-    AnalyticsWorker, 
-    AnalyticsWorkerConfig, 
+    AnalyticsWorker,
+    AnalyticsWorkerConfig,
     AnalyticsWorkerState,
 )
 from dataqa.core.components.plan_execute.condition import (
-    PlanConditionalEdge, 
+    PlanConditionalEdge,
     PlanConditionalEdgeConfig,
 )
 from dataqa.core.components.plan_execute.planner import Planner, PlannerConfig
 from dataqa.core.components.plan_execute.plot_worker import (
-    PlotWorker, 
-    PlotWorkerConfig, 
+    PlotWorker,
+    PlotWorkerConfig,
     PlotWorkerState,
 )
-from dataqa.core.components.plan_execute.replanner import Replanner, ReplannerConfig
+from dataqa.core.components.plan_execute.replanner import (
+    Replanner,
+    ReplannerConfig,
+)
 from dataqa.core.components.plan_execute.retrieval_worker import (
     RetrievalWorker,
     RetrievalWorkerConfig,
@@ -43,6 +46,9 @@ from dataqa.core.components.plan_execute.retrieval_worker import (
 from dataqa.core.components.plan_execute.schema import (
     PlanExecuteState,
     worker_response_reducer,
+)
+from dataqa.core.components.resource_manager.resource_manager import (
+    ResourceManager,
 )
 from dataqa.core.llm.base_llm import BaseLLM
 from dataqa.core.memory import Memory
@@ -53,7 +59,6 @@ from dataqa.core.tools import (
 from dataqa.core.utils.agent_util import AgentResponseParser
 from dataqa.core.utils.langgraph_utils import CONFIGURABLE, DEBUG
 from dataqa.core.utils.utils import cls_from_str
-from dataqa.core.components.resource_manager.resource_manager import ResourceManager
 
 
 class CWDState(PlanExecuteState):
@@ -121,7 +126,7 @@ class CWDAgent(Agent):
         config: CwdAgentDefinitionConfig,
         llms: Dict[str, BaseLLM],
         resource_manager: ResourceManager,
-        sql_executor: CodeExecutor, # CORRECT: Use the abstract base class
+        sql_executor: CodeExecutor,  # CORRECT: Use the abstract base class
     ):
         self.config = config
         self.llms = llms
@@ -163,11 +168,15 @@ class CWDAgent(Agent):
         self.retriever.output_mapping = retriever_output
 
         # 4. Finalize initialization by calling the parent constructor
-        super().__init__(
-            memory=memory, llm=self.llms["default"]
-        )
+        super().__init__(memory=memory, llm=self.llms["default"])
 
-    def _instantiate_prompt_template(self, analytics_worker_short_tool_description: str, analytics_worker_long_tool_description: str, plot_worker_short_tool_description: str, plot_worker_long_tool_description: str):
+    def _instantiate_prompt_template(
+        self,
+        analytics_worker_short_tool_description: str,
+        analytics_worker_long_tool_description: str,
+        plot_worker_short_tool_description: str,
+        plot_worker_long_tool_description: str,
+    ):
         # ... (This method remains unchanged)
         planner_prompt = instantiate_planner_prompt_by_use_case(
             use_case_name=self.config.use_case_name,
@@ -219,7 +228,7 @@ class CWDAgent(Agent):
             llm_output="llm_output",
         )
         return planner
-    
+
     def build_replanner(self, memory: Memory, llm: BaseLLM) -> Replanner:
         config = ReplannerConfig(
             name="replanner", prompt=self.processed_prompts["replanner_prompt"]
@@ -243,7 +252,7 @@ class CWDAgent(Agent):
         return replanner
 
     def build_retrieval_worker(
-            self, memory: Memory, llm: BaseLLM
+        self, memory: Memory, llm: BaseLLM
     ) -> RetrievalWorker:
         config = RetrievalWorkerConfig(
             name="retrieval_worker",
@@ -251,10 +260,10 @@ class CWDAgent(Agent):
             sql_execution_config=self.config.workers.retrieval_worker.sql_execution_config,
         )
         worker = RetrievalWorker(
-            memory=memory, 
-            llm=llm, 
-            config=config, 
-            sql_executor=self.sql_executor
+            memory=memory,
+            llm=llm,
+            config=config,
+            sql_executor=self.sql_executor,
         )
         worker.set_input_mapping(
             dict(
@@ -271,11 +280,11 @@ class CWDAgent(Agent):
         return worker
 
     def build_analytics_worker(
-            self, memory: Memory, llm: BaseLLM
+        self, memory: Memory, llm: BaseLLM
     ) -> AnalyticsWorker:
         config = AnalyticsWorkerConfig(
-            name="analytics_worker", 
-            prompt=self.processed_prompts["analytics_prompt"]
+            name="analytics_worker",
+            prompt=self.processed_prompts["analytics_prompt"],
         )
         worker = AnalyticsWorker(memory=memory, llm=llm, config=config)
         worker.set_input_mapping(
@@ -355,7 +364,9 @@ class CWDAgent(Agent):
 
         return workflow.compile()
 
-    async def __call__(self, state: CWDState, config: RunnableConfig) -> Tuple[CWDState, List[Dict]]:
+    async def __call__(
+        self, state: CWDState, config: RunnableConfig
+    ) -> Tuple[CWDState, List[Dict]]:
         async def stream():
             all_events = []
             if config[CONFIGURABLE].get(DEBUG, False):
@@ -380,11 +391,9 @@ class CWDAgent(Agent):
                     print(formatted_event)
 
             return state, all_events
-        
+
         timeout = self.config.timeout
         start_time = time.monotonic()
-        state, all_events = await asyncio.wait_for(
-            stream(), timeout=timeout
-        )
+        state, all_events = await asyncio.wait_for(stream(), timeout=timeout)
         state.total_time = time.monotonic() - start_time
         return state, all_events

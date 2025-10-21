@@ -79,4 +79,3 @@ class KnowledgeBase:
 #     )
 #     my_kb = KnowledgeBase(retriever_config["knowledge_base"])
 #     print()
-

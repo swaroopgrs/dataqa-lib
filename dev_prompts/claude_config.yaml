@@ -385,21 +385,21 @@ graph:
   type: "agent"  # Can be "agent", "workflow", or "hybrid"
   entry_point: "coordinator_agent"  # For agent-based system
   # entry_point: "full_analysis_workflow"  # For workflow-based system
-  
+
   # For hybrid systems, define the connections between agents and workflows
   connections:
     - from: "coordinator_agent.output"
       to: "query_agent.input"
       condition: "query_task"
-    
+
     - from: "coordinator_agent.output"
       to: "sql_generation_workflow.input"
       condition: "direct_sql_task"
-    
+
     - from: "query_agent.output"
       to: "analytics_agent.input"
       condition: "needs_analysis"
-    
+
     - from: "analytics_agent.output"
       to: "viz_agent.input"
       condition: "needs_visualization"

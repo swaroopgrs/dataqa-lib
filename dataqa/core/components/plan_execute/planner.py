@@ -12,7 +12,6 @@ from dataqa.core.components.plan_execute.schema import (
     PlannerAct,
     Response,
 )
-
 from dataqa.core.llm.base_llm import LLMOutput
 from dataqa.core.llm.openai import BaseLLM
 from dataqa.core.memory import Memory
@@ -30,7 +29,7 @@ class PlannerConfig(ComponentConfig):
     prompt: prompt_type
     num_retries: int = Field(
         description="the number of retries to counter output format errors",
-        default=5
+        default=5,
     )
     llm_output_required: bool = True
 
@@ -52,11 +51,11 @@ class Planner(Component):
     """
     Planner Component
 
-    Input: 
+    Input:
         query: str
     Output:
         plan: Plan
-    
+
     """
 
     component_type = "Planner"
@@ -86,7 +85,7 @@ class Planner(Component):
         logger.info(f"Component Type: {self.component_type}")
         logger.info(f"Input BaseModel: {self.input_base_model.__fields__}")
         logger.info(f"Output BaseModel: {self.output_base_model.__fields__}")
-    
+
     def validate_llm_input(self):
         for field in self.prompt.input_schema.__annotations__:
             assert field in self.input_base_model.__annotations__, (
@@ -99,7 +98,7 @@ class Planner(Component):
         rule = input_data.rule
         if rule:
             rule = f"\n\n``Use Case Instruction``:\n{rule.strip()}"
-        
+
         messages = self.prompt.invoke(
             dict(
                 query=input_data.query,
@@ -113,7 +112,7 @@ class Planner(Component):
         )
         api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
         base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
-        
+
         responses = []
         for _ in range(self.config.num_retries):
             response = await self.llm.ainvoke(
@@ -133,7 +132,7 @@ class Planner(Component):
             )
 
         llm_output = responses if self.config.llm_output_required else []
-        
+
         if response.generation.action == Action.Return:
             return PlannerOutput(
                 final_response=Response(

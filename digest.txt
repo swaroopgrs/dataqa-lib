@@ -2005,7 +2005,7 @@ class CoreResponse(BaseModel):
         default_factory=list,
         description="A list of intermediate processing steps for transparency."
     )
-    
+
     class Config:
         arbitrary_types_allowed = True
 
@@ -2015,7 +2015,7 @@ class CoreResponse(BaseModel):
 class DataQAClient(ABC):
     """
     Abstract Base Class for a DataQA client.
-    
+
     This defines the standard interface for interacting with the DataQA agentic system,
     regardless of the execution environment (local, DBC service, etc.).
     """
@@ -2358,7 +2358,7 @@ class CwdAgentPromptsConfig(BaseModel):
 
 
 class RetrievalWorkerConfig(BaseModel):
-    sql_execution_config: InMemoryCodeExecutorConfig 
+    sql_execution_config: InMemoryCodeExecutorConfig
 
 
 class AnalyticsWorkerConfig(BaseModel):
@@ -2514,18 +2514,18 @@ from dataqa.core.components.code_executor.in_memory_code_executor import (
     InMemoryCodeExecutorConfig,
 )
 from dataqa.core.components.plan_execute.analytics_worker import (
-    AnalyticsWorker, 
-    AnalyticsWorkerConfig, 
+    AnalyticsWorker,
+    AnalyticsWorkerConfig,
     AnalyticsWorkerState,
 )
 from dataqa.core.components.plan_execute.condition import (
-    PlanConditionalEdge, 
+    PlanConditionalEdge,
     PlanConditionalEdgeConfig,
 )
 from dataqa.core.components.plan_execute.planner import Planner, PlannerConfig
 from dataqa.core.components.plan_execute.plot_worker import (
-    PlotWorker, 
-    PlotWorkerConfig, 
+    PlotWorker,
+    PlotWorkerConfig,
     PlotWorkerState,
 )
 from dataqa.core.components.plan_execute.replanner import Replanner, ReplannerConfig
@@ -2715,7 +2715,7 @@ class CWDAgent(Agent):
             llm_output="llm_output",
         )
         return planner
-    
+
     def build_replanner(self, memory: Memory, llm: BaseLLM) -> Replanner:
         config = ReplannerConfig(
             name="replanner", prompt=self.processed_prompts["replanner_prompt"]
@@ -2747,9 +2747,9 @@ class CWDAgent(Agent):
             sql_execution_config=self.config.workers.retrieval_worker.sql_execution_config,
         )
         worker = RetrievalWorker(
-            memory=memory, 
-            llm=llm, 
-            config=config, 
+            memory=memory,
+            llm=llm,
+            config=config,
             sql_executor=self.sql_executor
         )
         worker.set_input_mapping(
@@ -2770,7 +2770,7 @@ class CWDAgent(Agent):
             self, memory: Memory, llm: BaseLLM
     ) -> AnalyticsWorker:
         config = AnalyticsWorkerConfig(
-            name="analytics_worker", 
+            name="analytics_worker",
             prompt=self.processed_prompts["analytics_prompt"]
         )
         worker = AnalyticsWorker(memory=memory, llm=llm, config=config)
@@ -2876,7 +2876,7 @@ class CWDAgent(Agent):
                     print(formatted_event)
 
             return state, all_events
-        
+
         timeout = self.config.timeout
         start_time = time.monotonic()
         state, all_events = await asyncio.wait_for(
@@ -3211,7 +3211,7 @@ File: core/components/__init__.py
 File: core/components/base_component.py
 ================================================
 import logging
-import warnings 
+import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Type, Union
 
@@ -3340,7 +3340,7 @@ class Component(ABC):
                 raise ValueError(
                     f"Field '{field_name}' is required by the input model of {self.component_type}, but it was not provided in the input mapping."
                 )
-            
+
         self.input_mapping = mapping
 
     async def __call__(self, state, config: Optional[RunnableConfig] = {}):
@@ -3357,7 +3357,7 @@ class Component(ABC):
 
         # validate output and update state
         assert isinstance(response, self.output_base_model)
-        
+
         if self.output_mapping:
             output = {}
             for k, v in self.output_mapping.items():
@@ -3405,7 +3405,7 @@ logger = logging.getLogger(__name__)
 
 
 class GatherOutputOutput(BaseModel):
-    output: PipelineOutput = None 
+    output: PipelineOutput = None
 
 
 class GatherOutput(Component):
@@ -3631,8 +3631,8 @@ User question:
 What is the total gross sales volume by MOP code for co_id 1003 for the month of Jan 2025?
 
 Generated SQL:
-SELECT 
-    MOP_CD, 
+SELECT
+    MOP_CD,
     SUM(GROSS_SALES_USD) AS total_gross_sales_usd
 FROM PROD_BD_TH_FLAT_V3
 WHERE CO_ID = '1003'
@@ -3690,7 +3690,7 @@ As an AI assistant, you are given a list of business rules that are used to gene
 List of business rules:
 {rule_list_str}
 
-Please consolidate business rules. The output should be a list of consolidated business rules. 
+Please consolidate business rules. The output should be a list of consolidated business rules.
 A consolidated business rule contains the rule description and a list of rule indexes that the rule is extracted from.
 """
 
@@ -4898,14 +4898,14 @@ class AnalyticsWorker(Component):
             memory=memory, tool_names=tool_names
         )[0]
         self.workflow = self.build_workflow(memory=self.memory, llm=self.llm)
-        
+
     def build_workflow(
         self, memory: Memory, llm: AzureOpenAI, **kwargs
     ) -> CompiledGraph:
         return create_react_agent(
             model=llm._get_model(**kwargs), tools=self.tools
         )
-    
+
     def display(self):
         logger.info(f"Component Name: {self.config.name}")
         logger.info(f"Component Type: {self.component_type}")
@@ -5099,11 +5099,11 @@ class Planner(Component):
     """
     Planner Component
 
-    Input: 
+    Input:
         query: str
     Output:
         plan: Plan
-    
+
     """
 
     component_type = "Planner"
@@ -5133,7 +5133,7 @@ class Planner(Component):
         logger.info(f"Component Type: {self.component_type}")
         logger.info(f"Input BaseModel: {self.input_base_model.__fields__}")
         logger.info(f"Output BaseModel: {self.output_base_model.__fields__}")
-    
+
     def validate_llm_input(self):
         for field in self.prompt.input_schema.__annotations__:
             assert field in self.input_base_model.__annotations__, (
@@ -5146,7 +5146,7 @@ class Planner(Component):
         rule = input_data.rule
         if rule:
             rule = f"\n\n``Use Case Instruction``:\n{rule.strip()}"
-        
+
         messages = self.prompt.invoke(
             dict(
                 query=input_data.query,
@@ -5160,7 +5160,7 @@ class Planner(Component):
         )
         api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
         base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
-        
+
         responses = []
         for _ in range(self.config.num_retries):
             response = await self.llm.ainvoke(
@@ -5180,7 +5180,7 @@ class Planner(Component):
             )
 
         llm_output = responses if self.config.llm_output_required else []
-        
+
         if response.generation.action == Action.Return:
             return PlannerOutput(
                 final_response=Response(
@@ -5297,7 +5297,7 @@ class PlotWorker(Component):
     async def run(self, input_data: PlotWorkerInput, config: RunnableConfig):
         task = input_data.plan[-1].tasks[0].task_description
         worker = input_data.plan[-1].tasks[0].worker
-        
+
         rule = input_data.rule
         if rule:
             rule = f"\n\n``Use Case Instruction``:\n{rule.strip()}"
@@ -5321,7 +5321,7 @@ class PlotWorker(Component):
         response = await self.workflow.ainvoke(
             {"messages": messages.to_messages()}
         )
-        
+
         return PlotWorkerOutput(
             worker_response=WorkerResponse(
                 task_response=[
@@ -5607,7 +5607,7 @@ class SQLExecutor(InMemoryCodeExecutor):
 
             if executor_output.error:
                  raise Exception(executor_output.error)
-            
+
             # The output dataframe is a JSON string, need to deserialize
             import pandas as pd
             import json
@@ -6238,7 +6238,7 @@ class ResourceManager:
         self.rules = ingestion_data.rules
         self.schema = ingestion_data.schema
         self.examples = ingestion_data.examples
-        
+
         rule_count = len(self.rules.rules) if self.rules else 0
         schema_count = len(self.schema.tables) if self.schema else 0
         example_count = len(self.examples.examples) if self.examples else 0
@@ -6296,7 +6296,7 @@ class ResourceManager:
             if not self.schema:
                 return []
             return self.schema.tables
-        
+
         return []
 
 
@@ -6402,7 +6402,7 @@ class Retriever(Component, ABC):
             return asset_formatter.format_examples_for_prompt(content_list)
         elif resource_type == ResourceType.Schema:
             return asset_formatter.format_schema_for_prompt(content_list)
-        
+
         return ""
 
     @staticmethod
@@ -6503,7 +6503,7 @@ class AllRetriever(Retriever):
             resources = self.resource_manager.get_resource(
                 resource_type, module_name
             )
-            
+
             state_name = self.get_state_name(resource_type, module_name)
             if not resources:
                 component_output[state_name] = ""
@@ -6517,7 +6517,7 @@ class AllRetriever(Retriever):
             component_output[state_name] = output_str
 
         component_output["output_data"] = retrieved_asset_all
-        
+
         return self.output_base_model.model_validate(component_output)
 
 
@@ -6562,13 +6562,13 @@ class TagRetriever(Retriever):
     ):
         """
         Create a new instance of the TagRetriever.
-        
+
         Args:
            config (Dict): The configuration for the retriever.
            resource_manager (ResourceManager): The resource manager.
            input_config (List): The configuration for the input fields.
            output_config (List): The configuration for the output fields.
-        
+
         Returns:
            TagRetriever: A new instance of the TagRetriever class.
         """
@@ -6869,11 +6869,11 @@ class VectorRetriever(Retriever):
     ) -> List[RetrievedAsset]:
         """
         Retrieves assets from the resource based on the query.
-        
+
         Args:
            query (RetrieverInput): The query to match against the resource.
            resource (Resource): The resource to retrieve assets from.
-        
+
         Returns:
            list[RetrievedAsset]: A list of retrieved assets.
         """
@@ -6974,7 +6974,7 @@ if __name__ == "__main__":
         data_file_path="examples/ccb_risk/data/schema_embedding.pkl"
     )
     from scripts.azure_token import get_az_token_using_cert
-    
+
     api_key = get_az_token_using_cert()[0]
 
     embedding_model_config = {
@@ -7334,12 +7334,12 @@ def extract_json_from_string(text: str) -> str:
         json_start = text.find('{')
         if json_start == -1:
             return text # No JSON object found
-        
+
         # Find the end of the JSON block
         json_end = text.rfind('}')
         if json_end == -1:
             return text # No JSON object found
-            
+
         return text[json_start:json_end + 1]
     except Exception:
         return text # Return original text on any error
@@ -7448,7 +7448,7 @@ logger = logging.getLogger(__name__)
 
 class AzureOpenAIConfig(LLMConfig):
     api_version: str
-    api_type: str 
+    api_type: str
     base_url: str = Field(
         default="base_url",
         description="""
@@ -8070,17 +8070,17 @@ class LocalFileDataSource(BaseDataSource):
     def read_asset(self, asset_name: str) -> Dict:
         """
         Reads a YAML asset file from the local filesystem.
-        
+
         Args:
             asset_name: The name of the file, e.g., "rules.yml".
-        
+
         Returns:
             The parsed dictionary content of the YAML file.
         """
         file_path = os.path.join(self.asset_directory, asset_name)
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"Asset file not found at: {file_path}")
-            
+
         with open(file_path, 'r') as f:
             return yaml.safe_load(f)
 
@@ -10930,7 +10930,7 @@ class SchemaUtil:
                 search_content_config.get("include_key", False),
             )
             table_values = table.model_dump(include={'table_name', 'description', 'primary_keys', 'foreign_keys'})
-            
+
             table_records.append(
                 TableRecord(
                     table_name=table.table_name,
@@ -10948,7 +10948,7 @@ class SchemaUtil:
                     search_content_config.get("include_key", False),
                 )
                 column_values = column.model_dump(include={'name', 'type', 'description'})
-                
+
                 column_records.append(
                     ColumnRecord(
                         table_name=table.table_name,
@@ -11003,7 +11003,7 @@ class SchemaUtil:
             raise ValueError(
                 "Parsed schema not available. Please run parse_schema() function first."
             )
-        
+
         embedding_model = OpenAIEmbedding()
         for schema_type, records in self.parsed_schema.items():
             for record in tqdm(
@@ -11151,7 +11151,7 @@ def reconstruct_table_schema(
     for record_asset in retrieved_vector_schema:
         record = record_asset.content
         table_name = record.table_name
-        
+
         if table_name not in tables:
             matched_table_record = get_vector_schema_record(
                 full_vector_schema_data,
@@ -11168,7 +11168,7 @@ def reconstruct_table_schema(
             )
 
         table = tables[table_name]
-        
+
         # Find or create column
         column = next(
             (c for c in table.columns if c.name == record.column_name), None
@@ -11181,7 +11181,7 @@ def reconstruct_table_schema(
                 "values": [],
             }
             table.columns.append(column)
-        
+
         if record.record_type == VectorSchemaRecordType.Value:
             column["values"].append(
                 {"value": record.value, "description": record.value_description}
@@ -11194,7 +11194,7 @@ def convert_table_schema_to_sql_str(
         table_schema: Dict[str, Union[str, list]]
 ) -> str:
     """
-    Converts a table schema dictionary (from TableSchema.model_dump()) to a 
+    Converts a table schema dictionary (from TableSchema.model_dump()) to a
     descriptive SQL CREATE TABLE string for LLM prompts.
     """
     table_name = table_schema.get("table_name", "unknown_table")
@@ -11204,13 +11204,13 @@ def convert_table_schema_to_sql_str(
     command_parts = []
     if table_description:
         command_parts.append(f"-- {table_description}")
-    
+
     command_parts.append(f"CREATE TABLE {table_name} (")
 
     column_definitions = []
     for column in columns_data:
         col_def_parts = []
-        
+
         # Add comment block with description and categorical values
         col_desc = column.get("description")
         col_values = column.get("values")
@@ -11229,7 +11229,7 @@ def convert_table_schema_to_sql_str(
         col_name = column.get("name", "unknown_col")
         col_type = column.get("type", "UNKNOWN_TYPE")
         col_def_parts.append(f"    {col_name} {col_type}")
-        
+
         column_definitions.append("\n".join(col_def_parts))
 
     command_parts.append(",\n".join(column_definitions))
@@ -11416,7 +11416,7 @@ for company in companies:
             "CUST_NAME": f"{company['name']} - {fake.city()}",
             "CUST_TYPE_CD": random.choice(cust_types),
             "CUST_STATE_CD": random.choice(states),
-            "CUST_COUNTRY_CD": random.choice(seq=countries), 
+            "CUST_COUNTRY_CD": random.choice(seq=countries),
             "CUST_EXTL_ID": cust_extl_id,
             "CO_ORG_ID": company['co_id'],
             "CUST_STAT_CD": random.choice(cust_stats),
@@ -11516,15 +11516,15 @@ class Pipeline:
     state_base_model: Type[BaseModel]
 
     def __init__(
-            self, 
-            pipeline_name: str, 
-            workflow: CompiledStateGraph, 
+            self,
+            pipeline_name: str,
+            workflow: CompiledStateGraph,
             state_base_model: Type[BaseModel],
     ):
         self.pipeline_name = pipeline_name
         self.workflow = workflow
         self.state_base_model = state
-    
+
     async def retrieve_rewritten_query(
             self,
             conversation_id,
@@ -11539,15 +11539,15 @@ class Pipeline:
                 return previous_state["channel_values"]["return_output"].rewritten_query
         except Exception:
             return "None"
-    
+
     async def update_state(self, state, conversation_id):
         if self.workflow.checkpointer is not None:
             await self.workflow.aupdate_state(conversation_id, state.model_dump())
 
     def prepare_output(self, state: PipelineOutput) -> CWDResponse:
         if state.rewritten_query:
-            pass 
-    
+            pass
+
     async def run(self, query: str, conversation_id=None):
         previous_rewritten_query = await self.retrieve_rewritten_query(conversation_id)
         state = self.state_base_model(
@@ -11569,9 +11569,9 @@ class Pipeline:
                         raise Exception(v.error_message)
         response = self.prepare_output(state.return_outptut)
         return response
-        
-        
-    
+
+
+
 
 
 base_dir = os.environ.get("BASE_DIR")
@@ -11815,7 +11815,7 @@ async def main():
     Main function to initialize the client, send a query, and print the results.
     """
     print("🚀 Initializing DataQA LocalClient...")
-    
+
     # 1. Define the path to the agent's configuration file.
     #    The LocalClient will use this to build the entire agent and its dependencies.
     SCRIPT_DIR = Path(__file__).resolve().parent
@@ -11833,7 +11833,7 @@ async def main():
     )
 
     print(f"\n▶️  Sending query: '{query}'")
-    
+
     # 4. Process the query and await the response.
     #    This single call orchestrates the entire agentic workflow.
     response: CoreResponse = await client.process_query(request)
@@ -11878,7 +11878,7 @@ if __name__ == "__main__":
         raise ValueError("Please set the AZURE_OPENAI_API_KEY environment variable.")
     if not os.environ.get("OPENAI_API_BASE"):
         raise ValueError("Please set the OPENAI_API_BASE environment variable.")
-    
+
     # Run the asynchronous main function.
     asyncio.run(main())
 
@@ -11987,7 +11987,7 @@ async def main():
     Main function to initialize the client, send a query, and print the results.
     """
     print("🚀 Initializing DataQA LocalClient...")
-    
+
     # 1. Define the path to the agent's configuration file.
     #    The LocalClient will use this to build the entire agent and its dependencies.
     SCRIPT_DIR = Path(__file__).resolve().parent
@@ -12005,7 +12005,7 @@ async def main():
     )
 
     print(f"\n▶️  Sending query: '{query}'")
-    
+
     # 4. Process the query and await the response.
     #    This single call orchestrates the entire agentic workflow.
     response: CoreResponse = await client.process_query(request)
@@ -12048,7 +12048,7 @@ if __name__ == "__main__":
     # The LocalClient relies on these for its LLM components.
     if not os.environ.get("GEMINI_API_KEY"):
         raise ValueError("Please set the GEMINI_API_KEY environment variable.")
-    
+
     # Run the asynchronous main function.
     asyncio.run(main())
 
@@ -12188,7 +12188,7 @@ def mock_asset_callable(config_id: uuid.UUID, file_types: Set[FileType]) -> Inge
     For this mock, it reads them from the local file system.
     """
     print(f" MOCK [asset_callable]: Called for config_id={config_id} with types={file_types}")
-    
+
     ingestion_data = {}
     if FileType.RULES in file_types:
         rules_path = DATA_DIR / "rules.yml"
@@ -12199,7 +12199,7 @@ def mock_asset_callable(config_id: uuid.UUID, file_types: Set[FileType]) -> Inge
     if FileType.EXAMPLES in file_types:
         examples_path = DATA_DIR / "examples.yml"
         ingestion_data['examples'] = Examples(**yaml.safe_load(open(examples_path)))
-        
+
     return IngestionData(**ingestion_data)
 
 def mock_storage_callable(data: bytes, path_suffix: str) -> str:
@@ -12299,7 +12299,7 @@ async def main():
         sql_callable=mock_sql_service.sql_callable,
         storage_callable=mock_storage_callable
     )
-    
+
     print(f"\n▶️  Processing DBCRequest with query: '{query}'")
 
     # 4. Process the request using the client's main method
@@ -12334,7 +12334,7 @@ if __name__ == "__main__":
         raise ValueError("Please set the AZURE_OPENAI_API_KEY environment variable.")
     if not os.environ.get("OPENAI_API_BASE"):
         raise ValueError("Please set the OPENAI_API_BASE environment variable.")
-    
+
     asyncio.run(main())
 
 
@@ -12385,7 +12385,7 @@ examples:
           AND SALES_DATE >= '2023-01-01' AND SALES_DATE <= '2023-12-31';
       reasoning: "To calculate the total sales amount for Visa in 2023, we need to sum the SALES_AMT for all transactions where the TD (Transaction Descriptor) is one of the Visa codes ('VI', 'VR', 'CR', 'CZ') and the SALES_DATE falls within the year 2023."
     tags: []
-    search_content: "" 
+    search_content: ""
 
 
 ================================================
@@ -12667,13 +12667,13 @@ class DBCClient:
 
         # 1. Prepare conversation history for the agent
         history = [turn.output_text for turn in self.request.conversation_history]
-        
+
         # 2. Fetch all necessary assets for the use case
         dbc_ingestion_data = self.asset_callable(
             config_id=self.usecase_config.config_id,
             file_types={FileType.RULES, FileType.SCHEMA, FileType.EXAMPLES}
         )
-        
+
         # 3. Translate DBC model to core library model
         core_ingestion_data = CoreIngestionData.model_validate(dbc_ingestion_data.model_dump())
 
@@ -12689,7 +12689,7 @@ class DBCClient:
         # 5. Run the agent
         initial_state = CWDState(query=self.request.user_query, history=history)
         final_state, events = await agent(initial_state, runnable_config)
-        
+
         # 6. Process and persist final outputs
         from dataqa.core.utils.agent_util import AgentResponseParser
         parser = AgentResponseParser(events, memory, runnable_config)
@@ -12700,7 +12700,7 @@ class DBCClient:
 
         if final_response_obj:
             text_response = final_response_obj.response
-            
+
             for name in final_response_obj.output_df_name:
                 df = memory.get_dataframe(name, runnable_config)
                 if df is not None:
@@ -12767,9 +12767,9 @@ class DBC_CWDAgentFactory:
         base_config_path = Path(__file__).parent / "agent_template.yml"
         if not base_config_path.exists():
             raise FileNotFoundError(f"Base agent structure template not found at {base_config_path}")
-        
+
         base_config_dict = yaml.safe_load(open(base_config_path))
-        
+
         # 2. Inject use case name and description into the config.
         base_config_dict["use_case_name"] = usecase_config.usecase_name
         base_config_dict["use_case_description"] = usecase_config.usecase_description
@@ -12778,11 +12778,11 @@ class DBC_CWDAgentFactory:
         # 3. Build adapters for DBC services.
         dbc_llm_adapter = DBCLLMAdapter(llm_callable)
         llms = {name: dbc_llm_adapter for name in CWDAgent.components}
-        
+
         resource_manager = ResourceManager(ingestion_data=ingestion_data)
-        
+
         sql_executor = DBCSQLExecutor(sql_callable, config_id=usecase_config.config_id, config={})
-        
+
         # 4. Use the generic builder to assemble the agent.
         builder = CWDAgentBuilder(config=agent_config)
         agent = (builder
@@ -12791,7 +12791,7 @@ class DBC_CWDAgentFactory:
                  .with_resource_manager(resource_manager)
                  .with_sql_executor(sql_executor)
                  .build())
-        
+
         return agent
 
 
@@ -12955,7 +12955,7 @@ class IngestionData(BaseModel):
     rules: Optional[Rules] = None
     schema: Optional[DatabaseSchema] = None
     examples: Optional[Examples] = None
-    
+
     class Config:
         arbitrary_types_allowed = True
 
@@ -13042,12 +13042,12 @@ logger = logging.getLogger(__name__)
 class DBCResourceManager(ResourceManager):
     """
     Resource Manager implementation that uses DBC S3 callable functions.
-    
+
     This class extends ResourceManager to work with the DBC service by using
     provided S3 callable functions instead of direct file system access.
     The only difference from ResourceManager is the data source (S3 vs local files).
     """
-    
+
     def __init__(
         self,
         s3_callable: Callable,
@@ -13057,7 +13057,7 @@ class DBCResourceManager(ResourceManager):
     ):
         """
         Initialize DBC Resource Manager.
-        
+
         Args:
             s3_callable: Callable function for S3 operations provided by DBC service
             config_id: Configuration identifier for the DBC service
@@ -13067,7 +13067,7 @@ class DBCResourceManager(ResourceManager):
         self.s3_callable = s3_callable
         self.config_id = config_id
         self.tenant_id = tenant_id
-        
+
         # Set up default resource configuration if not provided
         if resources_config is None:
             resources_config = [
@@ -13075,27 +13075,27 @@ class DBCResourceManager(ResourceManager):
                 ResourceConfig(type=ResourceType.Rule, file_path=f"configs/{config_id}/rules.yml", api_url=""),
                 ResourceConfig(type=ResourceType.Example, file_path=f"configs/{config_id}/examples.yml", api_url=""),
             ]
-        
+
         # Create config in the same format as parent class expects
         config = ResourceManagerConfig(
             source="yaml",
             resources=resources_config
         )
-        
+
         # Initialize parent class - this will call our overridden load method
         super().__init__(config)
 
     def _call_s3_callable(self, operation: str, **kwargs) -> Dict:
         """
         Call the S3 callable function with error handling.
-        
+
         Args:
             operation: The S3 operation to perform
             **kwargs: Additional arguments for the S3 callable
-            
+
         Returns:
             Dict: Response from the S3 callable
-            
+
         Raises:
             DBCCallableError: If the S3 callable fails
         """
@@ -13106,15 +13106,15 @@ class DBCResourceManager(ResourceManager):
                 "tenant_id": self.tenant_id,
                 "operation": operation
             })
-            
+
             response = self.s3_callable(**kwargs)
-            
+
             if not response or "error" in response:
                 error_msg = response.get("error", "Unknown S3 callable error") if response else "No response from S3 callable"
                 raise DBCCallableError(f"S3 callable failed for operation '{operation}': {error_msg}")
-                
+
             return response
-            
+
         except Exception as e:
             if isinstance(e, DBCCallableError):
                 raise
@@ -13123,21 +13123,21 @@ class DBCResourceManager(ResourceManager):
     def _load_yaml_from_s3(self, s3_path: str) -> Dict:
         """
         Load YAML content from S3 using the DBC S3 callable.
-        
+
         Args:
             s3_path: S3 path to the YAML file
-            
+
         Returns:
             Dict: Parsed YAML content
         """
         try:
             response = self._call_s3_callable("get_object", s3_path=s3_path)
-            
+
             if "content" not in response:
                 raise DBCCallableError(f"No content returned from S3 for path: {s3_path}")
-                
+
             content = response["content"]
-            
+
             # Parse YAML content
             if isinstance(content, str):
                 return yaml.safe_load(content)
@@ -13145,17 +13145,17 @@ class DBCResourceManager(ResourceManager):
                 return yaml.safe_load(content.decode('utf-8'))
             else:
                 return content  # Assume it's already parsed
-                
+
         except yaml.YAMLError as e:
             raise DBCClientError(f"Failed to parse YAML from S3 path {s3_path}: {str(e)}")
 
     def load(self) -> Dict[str, Resource]:
         """
         Load all configured resources using DBC S3 callable.
-        
+
         Override the parent's load method to use S3 instead of file system,
         but delegate all resource processing to the parent class.
-        
+
         Returns:
             Dict[str, Resource]: Dictionary of loaded resources keyed by type:module_name
         """
@@ -13163,27 +13163,27 @@ class DBCResourceManager(ResourceManager):
         for resource_config in self.config.resources:
             try:
                 logger.info(f"Loading {resource_config.type.value} from S3 path: {resource_config.file_path}")
-                
+
                 # Load YAML data from S3 (using file_path as s3_path)
                 resource_data_all = self._load_yaml_from_s3(resource_config.file_path)
-                
+
                 # Store raw data in the same format as parent class expects
                 if resource_config.type in [ResourceType.Schema, ResourceType.Rule, ResourceType.Example]:
                     self.raw_data[f"resource:{resource_config.type.value}:"] = resource_data_all
                 else:
                     self.raw_data[f"resource:{resource_config.type.value}:"] = resource_data_all
-                
+
                 logger.info(f"Successfully loaded {resource_config.type.value} from S3")
-                
+
             except Exception as e:
                 logger.error(f"Failed to load resource {resource_config.type.value} from S3 path {resource_config.file_path}: {str(e)}")
                 continue
-        
+
         # Now call parent class load method to process the loaded data
         # But we need to temporarily override the file loading part
         original_yaml_load = yaml.safe_load
         original_open = open
-        
+
         def mock_open(file_path, mode='r'):
             # Return the already loaded data from raw_data
             for resource_config in self.config.resources:
@@ -13194,12 +13194,12 @@ class DBCResourceManager(ResourceManager):
                         import io
                         return io.StringIO(yaml.dump(self.raw_data[resource_key]))
             raise FileNotFoundError(f"No S3 data loaded for path: {file_path}")
-        
+
         # Temporarily replace file operations
         import builtins
         original_builtin_open = builtins.open
         builtins.open = mock_open
-        
+
         try:
             # Call parent class load method - it will use our mocked file operations
             return super().load()
@@ -13213,14 +13213,14 @@ class DBCResourceManager(ResourceManager):
     def save_dataframe_to_s3(self, dataframe_data: bytes, s3_path: str) -> str:
         """
         Save dataframe data to S3 using DBC S3 callable.
-        
+
         Args:
             dataframe_data: Serialized dataframe data
             s3_path: S3 path where to save the dataframe
-            
+
         Returns:
             str: S3 path of the saved dataframe
-            
+
         Raises:
             DBCCallableError: If the S3 save operation fails
         """
@@ -13231,36 +13231,36 @@ class DBCResourceManager(ResourceManager):
                 content=dataframe_data,
                 content_type="application/octet-stream"
             )
-            
+
             if "s3_path" in response:
                 return response["s3_path"]
             else:
                 return s3_path  # Return the original path if not provided in response
-                
+
         except Exception as e:
             raise DBCCallableError(f"Failed to save dataframe to S3 path {s3_path}: {str(e)}")
 
     def load_dataframe_from_s3(self, s3_path: str) -> bytes:
         """
         Load dataframe data from S3 using DBC S3 callable.
-        
+
         Args:
             s3_path: S3 path to the dataframe file
-            
+
         Returns:
             bytes: Serialized dataframe data
-            
+
         Raises:
             DBCCallableError: If the S3 load operation fails
         """
         try:
             response = self._call_s3_callable("get_object", s3_path=s3_path)
-            
+
             if "content" not in response:
                 raise DBCCallableError(f"No content returned from S3 for dataframe path: {s3_path}")
-                
+
             return response["content"]
-            
+
         except Exception as e:
             raise DBCCallableError(f"Failed to load dataframe from S3 path {s3_path}: {str(e)}")
 
@@ -13284,7 +13284,7 @@ class DBCSQLExecutor(CodeExecutor):
     component_type = "DBCSQLExecutor"
     input_base_model = "dynamically built"
     output_base_model = CodeExecutorOutput
-    
+
     def __init__(self, sql_callable: Callable, config_id: uuid.UUID, config: Dict):
         super().__init__(config={"name": "dbc_sql_executor", **config})
         self.sql_callable = sql_callable
@@ -13301,7 +13301,7 @@ class DBCSQLExecutor(CodeExecutor):
                 config_id=self.config_id,
                 sql_query=input_data.code
             )
-            
+
             # The component interface expects the dataframe to be a list of JSON strings.
             return CodeExecutorOutput(
                 code=input_data.code,
@@ -13323,7 +13323,7 @@ class DBCDataSource(BaseDataSource):
     def __init__(self, s3_callable: Callable, asset_s3_prefix: str):
         """
         A DataSource that reads assets from S3 using a provided callable.
-        
+
         Args:
             s3_callable: A function with a signature like `s3_callable(s3_path: str, mode: str) -> bytes`.
                          It is only used for reading ('r') in this context.
@@ -13395,12 +13395,12 @@ class LocalClient(DataQAClient):
                 BASE_URL: os.environ.get("OPENAI_API_BASE", ""),
             }
         }
-        
+
         agent = self._get_or_create_agent(memory)
 
         history_texts = [turn.output_text for turn in request.history]
         initial_state = CWDState(query=request.user_query, history=history_texts)
-        
+
         final_state, events = await agent(initial_state, runnable_config)
 
         # Process the final state into a CoreResponse
@@ -13415,7 +13415,7 @@ class LocalClient(DataQAClient):
                 df = memory.get_dataframe(name, runnable_config)
                 if df is not None:
                     output_dfs.append(df)
-            
+
             for name in final_response_obj.output_img_name:
                 img_bytes, _ = memory.get_image_data(name, runnable_config)
                 if img_bytes:
@@ -13423,7 +13423,7 @@ class LocalClient(DataQAClient):
 
         parser = AgentResponseParser(events, memory, runnable_config)
         steps = [CoreStep(name=f"Step {i+1}", content=s) for i, s in enumerate(parser.formatted_events)]
-        
+
         return CoreResponse(
             text=text_response,
             output_dataframes=output_dfs,
@@ -13482,7 +13482,7 @@ class LocalAgentFactory:
             llm_cls = cls_from_str(llm_config.type)
             llm_spec_config = llm_cls.config_base_model(**llm_config.config)
             llm_configs_map[name] = llm_cls(config=llm_spec_config)
-        
+
         for component in CWDAgent.components:
             llm_name = agent_config.llm.get_component_llm_name(component)
             llms[component] = llm_configs_map[llm_name]
@@ -13498,7 +13498,7 @@ class LocalAgentFactory:
         # The data_files paths have already been resolved by replacing <CONFIG_DIR>
         sql_exec_config = agent_config.workers.retrieval_worker.sql_execution_config
         sql_executor = InMemoryCodeExecutor(config=sql_exec_config)
-        
+
         # 4. Use the generic builder to assemble the agent
         builder = CWDAgentBuilder(config=agent_config)
         agent = (builder
@@ -13507,7 +13507,7 @@ class LocalAgentFactory:
                  .with_resource_manager(resource_manager)
                  .with_sql_executor(sql_executor)
                  .build())
-        
+
         return agent
 
 
@@ -13915,7 +13915,3 @@ tables:
             description: Account is in the collections period
           - value: 97
             description: Charged-off, Unpaid balance reported as a loss by credit grantor
-
-
-
-

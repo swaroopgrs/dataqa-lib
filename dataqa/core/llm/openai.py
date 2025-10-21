@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class AzureOpenAIConfig(LLMConfig):
     api_version: str
-    api_type: str 
+    api_type: str
     base_url: str = Field(
         default="base_url",
         description="""
@@ -28,7 +28,7 @@ class AzureOpenAIConfig(LLMConfig):
         It should be provided either
         through this config field or through config
         call AzureOpenAI.invoke()
-        """
+        """,
     )
     api_key: str = Field(
         default="api_key",
@@ -37,21 +37,23 @@ class AzureOpenAIConfig(LLMConfig):
         It should be provided either
         through this config field or through config
         call AzureOpenAI.invoke()
-        """
+        """,
     )
     temperature: float = Field(default=1)
-    num_response: int = Field( # TODO how to generate multiple responses
+    num_response: int = Field(  # TODO how to generate multiple responses
         default=1, description="The number of llm response to be generated"
     )
     max_completion_tokens: int = Field(
         default=5000,
-        description="The maximum output tokens", # TODO o1 requires a different attribute "max_completion_token"
+        description="The maximum output tokens",  # TODO o1 requires a different attribute "max_completion_token"
     )
     frequency_penalty: float = Field(
         default=None, description="[-2, 2]. Penalty against repeating tokens."
     )
     oai_params: Optional[dict] = Field(default={})
-    azure_model_params: Optional[dict] = Field(default={},)
+    azure_model_params: Optional[dict] = Field(
+        default={},
+    )
 
 
 class AzureOpenAI(BaseLLM):
@@ -129,18 +131,14 @@ class AzureOpenAI(BaseLLM):
                 openai.PermissionDeniedError,
                 openai.APIError,
             ) as e:
-                logger.exception(
-                    f"error calling llm try {i + 1}", exc_info=e
-                )
+                logger.exception(f"error calling llm try {i + 1}", exc_info=e)
                 error_msgs.append(e)
                 error = LLMError(
                     error_code=0, error_type="LLM Errrpor", error_message=str(e)
                 )
                 break
             except Exception as e:
-                logger.exception(
-                    f"error calling llm try {i + 1}", exc_info=e
-                )
+                logger.exception(f"error calling llm try {i + 1}", exc_info=e)
                 error_msgs.append(e)
                 # record latest error
                 error = LLMError(

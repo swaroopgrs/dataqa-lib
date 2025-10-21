@@ -28,4 +28,3 @@ def create_base_model(
         return create_model(model_name, **model_fields)
     else:
         return create_model(model_name, __base__=parent_model, **model_fields)
-

@@ -1,5 +1,5 @@
 import logging
-import warnings 
+import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Type, Union
 
@@ -127,7 +127,7 @@ class Component(ABC):
                 raise ValueError(
                     f"Field '{field_name}' is required by the input model of {self.component_type}, but it was not provided in the input mapping."
                 )
-            
+
         self.input_mapping = mapping
 
     async def __call__(self, state, config: Optional[RunnableConfig] = {}):
@@ -144,7 +144,7 @@ class Component(ABC):
 
         # validate output and update state
         assert isinstance(response, self.output_base_model)
-        
+
         if self.output_mapping:
             output = {}
             for k, v in self.output_mapping.items():
