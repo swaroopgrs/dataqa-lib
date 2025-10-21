@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
-from dataqa.core.components.code_excutor.api_executor import (
+from dataqa.core.components.code_executor.api_executor import (
     ApiCodeExecutorConfig,
 )
 from dataqa.core.components.code_executor.in_memory_code_executor import (

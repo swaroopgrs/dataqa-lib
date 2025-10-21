@@ -49,7 +49,7 @@ class CoreStatus(BaseModel):
     """A generic representation for the status of the core agent during inference."""
 
     name: str = Field(
-        ..., description="Name or identifier of the processing step."
+        ..., description="Name of identifier of the processing step"
     )
     message: str = Field(..., description="A text message to be streamed.")
 

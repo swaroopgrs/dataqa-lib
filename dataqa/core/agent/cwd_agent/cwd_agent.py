@@ -10,7 +10,6 @@ from langchain_core.runnables.config import RunnableConfig
 from langgraph.graph import START, StateGraph
 from pydantic import BaseModel, Field
 
-from dataqa.code.utils.prompt_utils import build_prompt
 from dataqa.core.agent.base import Agent
 from dataqa.core.agent.cwd_agent.config import (
     CwdAgentDefinitionConfig,
@@ -20,7 +19,7 @@ from dataqa.core.agent.cwd_agent.prompt import (
     instantiate_planner_prompt_by_use_case_jinja,
     instantiate_plot_worker_prompt_by_use_case_jinja,
     instantiate_replanner_prompt_by_use_case_jinja,
-    instantiate_sql_generator_prompt_by_use_cas_jinja,
+    instantiate_sql_generator_prompt_by_use_case_jinja,
     instantiate_sql_validation_prompt_jinja,
     instantiate_summarization_prompt_by_use_case_jinja,
 )
@@ -73,6 +72,7 @@ from dataqa.core.utils.langgraph_utils import (
     THREAD_ID,
     TOKEN,
 )
+from dataqa.core.utils.prompt_utils import build_prompt
 from dataqa.core.utils.utils import cls_from_str
 
 logger = logging.getLogger(__name__)
@@ -89,7 +89,7 @@ class StatusMessage(Enum):
 
 
 class Summary(BaseModel):
-    "The summary of agent working trajectory."
+    """The summary of agent working trajectory."""
 
     summary: str
 
@@ -174,7 +174,6 @@ class CWDAgent(Agent):
             self.analytics_worker_short_tool_description,
             self.analytics_worker_long_tool_description,
         ) = get_analytics_tools_and_descriptions(memory)
-
         (
             self.plot_tools,
             self.plot_worker_short_tool_description,
@@ -200,7 +199,7 @@ class CWDAgent(Agent):
             retriever_output[field] = field
         self.retriever.output_mapping = retriever_output
 
-        # 3.1 Instantiate fallback retriever
+        # 3.1 Instantiate fall back retriever
         if config.fallback_retriever_config is not None:
             self.fallback_retriever = cls_from_str(
                 config.fallback_retriever_config.type
@@ -226,7 +225,6 @@ class CWDAgent(Agent):
         plot_worker_short_tool_description: str,
         plot_worker_long_tool_description: str,
     ):
-        # ... (This method remains unchanged)
         planner_prompt = instantiate_planner_prompt_by_use_case_jinja(
             use_case_name=self.config.use_case_name,
             use_case_description=self.config.use_case_description,
@@ -274,7 +272,8 @@ class CWDAgent(Agent):
 
     def build_planner(self, memory: Memory, llm: BaseLLM) -> Planner:
         config = PlannerConfig(
-            name="planner", **self.processed_prompts["planner_prompt"]
+            name="planner",
+            **self.processed_prompts["planner_prompt"],
         )
         planner = Planner(memory=memory, llm=llm, config=config)
         planner.set_input_mapping(
@@ -294,7 +293,8 @@ class CWDAgent(Agent):
 
     def build_replanner(self, memory: Memory, llm: BaseLLM) -> Replanner:
         config = ReplannerConfig(
-            name="replanner", **self.processed_prompts["replanner_prompt"]
+            name="replanner",
+            **self.processed_prompts["replanner_prompt"],
         )
         replanner = Replanner(memory=memory, llm=llm, config=config)
         replanner.set_input_mapping(
@@ -453,10 +453,11 @@ class CWDAgent(Agent):
         """
         Run CWDAgent, return a generator of streaming message and CWDState
 
-        - If streaming = True, first return a list of (node_name, streaming_message), then return (final CWDState, the list of events)
+        - If streaming = True, first return a list of (node_name, streaming_message), then return (final CWDState, the list of events).
 
         - If streaming = False, return (final CWDState, the list of events) directly.
         """
+
         all_events = []
 
         async def generate_summary() -> str:
@@ -468,6 +469,7 @@ class CWDAgent(Agent):
                 trajectory.append(
                     f"Step {i + 1}\nTask: {response.task_description}\nResponse: {response.response}"
                 )
+
             messages = prompt.invoke(
                 input=dict(
                     query=state.query,
@@ -484,7 +486,7 @@ class CWDAgent(Agent):
                 api_key=api_key,
                 base_url=base_url,
                 token=token,
-                from_comoponent="summarization",
+                from_component="summarization",
                 with_structured_output=Summary,
             )
             if isinstance(output.generation, Summary):
@@ -520,10 +522,13 @@ class CWDAgent(Agent):
                             )
                         )
                         logger.info(formatted_event)
+
+                # summarize agent trajectory
                 if summarize and state.worker_response.task_response:
                     state.summary = await generate_summary()
+
             except asyncio.CancelledError:
-                logger.exception("Agent streaming is cancelled.")
+                logger.exception("Agent streaming is canceled.")
                 raise
             finally:
                 logger.info("Finish agent streaming.")
@@ -534,7 +539,7 @@ class CWDAgent(Agent):
             timeout = self.config.timeout
             start_time = time.monotonic()
             logger.info(
-                f"Conversation ID: {thread_id}, question ID: {question_id} - Start to run agent graph."
+                f"Conversation ID: {thread_id}; question ID: {question_id}. - Starting to run agent graph."
             )
             async with asyncio.timeout(timeout):
                 async for name, message in stream():
@@ -544,18 +549,20 @@ class CWDAgent(Agent):
 
             state.total_time = time.monotonic() - start_time
             logger.info(
-                f"Conversation ID: {thread_id}, question ID: {question_id} - Finished running agent graph in {round(state.total_time, 2)} seconds."
+                f"Conversation ID: {thread_id}; question ID: {question_id}. - Finished running agent graph in {round(state.total_time, 2)} seconds."
             )
             yield state, all_events
+
         except asyncio.TimeoutError as e:
-            # TODO: better handle intermediate results during timeout
+            # TODO better handle intermediate results during timeout
             state.final_response = Response(
-                response="Reach time limit for running CWD Agent, No final response generated.",
+                response="Reach time limit for running CWD Agent. No final response generated.",
                 output_df_name=[],
                 output_img_name=[],
             )
             state.error = repr(e)
             yield state, all_events
+
         except Exception as e:
             call_stack = traceback.format_exc()
             state.final_response = Response(
@@ -565,6 +572,6 @@ class CWDAgent(Agent):
             )
             state.error = f"{repr(e)}\n{call_stack}"
             logger.error(
-                f"Conversation ID: {thread_id}, question ID: {question_id}, Error: agent failed with error:\n{state.error}"
+                f"Conversation ID: {thread_id}; question ID: {question_id}. Error: Agent failed with error:\n{state.error}"
             )
             yield state, all_events

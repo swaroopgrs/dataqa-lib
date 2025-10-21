@@ -1,3 +1,7 @@
+from typing import Dict, Literal
+
+from jinja2 import Environment, PackageLoader
+
 USER_OBJECTIVE = "USER OBJECTIVE"  # The user's query or goal
 PLANNER = "Planner"
 REPLANNER = "Replanner"
@@ -24,6 +28,9 @@ AGENTS_DESCRIPTION = f"""This AI Assistant is equipped with five agents: {PLANNE
 - After executing a {TASK}, the {REPLANNER} evaluates the results to determine if the {USER_OBJECTIVE} is complete, adjusts the {PLAN} if necessary, and provides the updated {PLAN} to the {WORKER}."""
 
 WORKER_DESCRIPTION = f"""{RETRIEVAL_WORKER} is responsible for data retrieval by generating and executing SQL queries.
+{RETRIEVAL_WORKER} has access to database tables only. {RETRIEVAL_WORKER} can not access intermediate dataframes stored in memory.
+Intermediate dataframes stored in memory can only be used by {ANALYTICS_WORKER} and {PLOT_WORKER}.
+DO NOT generate plan for {RETRIEVAL_WORKER} that requires access to intermediate dataframes stored in memory.
 {ANALYTICS_WORKER} is equipped with the following tools:
 {{analytics_worker_tool_description}}
 {PLOT_WORKER} is equipped with the following tools:
@@ -173,9 +180,15 @@ def instantiate_replanner_prompt_by_use_case(
 ### REPLANNER END
 
 ### SQL GENERATOR
-
+# TODO: load dialect and functions from config
+DIALECT = "SQLite"
+FUNCTIONS = """
+- name: strftime(format, timestring, modifier, modifier, ...)
+  example: STRFTIME('%Y', date) = '1998'
+"""
 SQL_GENERATOR_PROMPT_TEMPLATE = f"""
 You are a coding assistant focused on generating SQL queries for data analysis. Your primary task is to assist users in extracting insights from structured databases. You will write SQL to query this data and perform necessary calculations. Your goal is to provide accurate, efficient, and user-friendly solutions to complex data queries.
+When naming the output dataframe, try to include filter condition in the name so that it wil be unique and easily identifiable.
 -------------------------------------------------
 KEY RESPONSIBILITIES:
 
@@ -185,6 +198,13 @@ SCHEMA:
 
 Find the list of tables and their schema below. The schema lists all column names, their data types, their descriptions, and some example values if applicable.
 {{use_case_schema}}
+
+-------------------------------------------------
+DIALECT AND FUNCTIONS:
+
+Using {DIALECT} to generate SQL.
+Below is a list of functions that can be used in the SQL query. You can use these functions to perform calculations on the data.
+{FUNCTIONS}
 
 -------------------------------------------------
 RULES AND GUIDELINES:
@@ -206,7 +226,7 @@ EXAMPLES:
 
 -------------------------------------------------
 Can you write the code for the below query
-Q: {{{{query}}}}
+Q: {{query}}
 A:
 """
 
@@ -306,3 +326,59 @@ def instantiate_plot_worker_prompt_by_use_case(
 
 
 ### PLOT WORKER END
+
+
+### Jinja Prompt
+def instantiate_planner_prompt_by_use_case_jinja(
+    use_case_name: str,
+    use_case_description: str,
+    analytics_worker_tool_description: str,
+    plot_worker_tool_description: str,
+) -> Dict[Literal["action_prompt", "plan_prompt"], str]:
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("planner.jinja")
+
+    context = dict(
+        use_case_name=use_case_name.strip(),
+        use_case_description=use_case_description.strip(),
+        analytics_worker_tool_description=analytics_worker_tool_description.rstrip(),
+        plot_worker_tool_description=plot_worker_tool_description.rstrip(),
+        disambiguate=True,
+    )
+
+    action_prompt = template.render(context)
+
+    context["disambiguate"] = False
+
+    plan_prompt = template.render(context)
+
+    return {"action_prompt": action_prompt, "plan_prompt": plan_prompt}
+
+
+def instantiate_replanner_prompt_by_use_case_jinja(
+    use_case_name: str,
+    use_case_description: str,
+    analytics_worker_tool_description: str,
+    plot_worker_tool_description: str,
+) -> str:
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("replanner.jinja")
+
+    context = dict(
+        use_case_name=use_case_name.strip(),
+        use_case_description=use_case_description.strip(),
+        analytics_worker_tool_description=analytics_worker_tool_description.rstrip(),
+        plot_worker_tool_description=plot_worker_tool_description.rstrip(),
+    )
+
+    prompt = template.render(context)
+
+    return prompt
