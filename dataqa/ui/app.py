@@ -17,16 +17,17 @@ st.set_page_config(
 
 def main():
     st.title("🤖 DataQA Suite")
+    st.markdown("---")
 
     # Sidebar navigation
     st.sidebar.title("Navigation")
 
     pages = {
-        "Project Manager": project_manager,
-        "Agent Playground": agent_playground,
-        "Evaluation": evaluation,
-        "Data Scanner": data_scanner,
-        "Rule Inference": rule_inference,
+        "🏠 Project Manager": project_manager,
+        "🤖 Agent Playground": agent_playground,
+        "📊 Evaluation": evaluation,
+        "🔍 Data Scanner": data_scanner,
+        "🧠 Rule Inference": rule_inference,
     }
 
     selected_page = st.sidebar.selectbox("Select a page", list(pages.keys()))
