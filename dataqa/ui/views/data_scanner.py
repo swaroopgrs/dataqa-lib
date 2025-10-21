@@ -8,7 +8,7 @@ import os
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from dataqa.core.components.knowledge_extraction.data_scanner import DataScanner, run_data_scanner
+from dataqa.core.components.knowledge_extraction.data_scanner import DataScanner
 
 def show():
     st.header("🔍 Data Scanner")
@@ -195,7 +195,7 @@ def show():
                     st.info(f"File: {file_path} (Size: {file_path.stat().st_size} bytes, Modified: {pd.to_datetime(file_path.stat().st_mtime, unit='s')})")
                 
                 with col2:
-                    if st.button(f"Use as Final Schema", key=f"use_{name}"):
+                    if st.button("Use as Final Schema", key=f"use_{name}"):
                         copy_to_final_schema(file_path, project_path / "data" / "schema.yml")
                 
                 # Show content
@@ -209,7 +209,7 @@ def show():
                     else:
                         st.code(content, language='yaml')
 
-                    if st.button(f"Download Full File", key=f"download_{name}"):
+                    if st.button("Download Full File", key=f"download_{name}"):
                         download_button = st.download_button(
                             label="Download",
                             data=content,

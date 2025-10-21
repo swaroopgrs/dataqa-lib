@@ -2,7 +2,6 @@
 from typing import Callable
 import yaml
 from pathlib import Path
-import uuid
 
 from dataqa.core.agent.cwd_agent.builder import CWDAgentBuilder
 from dataqa.core.agent.cwd_agent.cwd_agent import CWDAgent, CwdAgentDefinitionConfig

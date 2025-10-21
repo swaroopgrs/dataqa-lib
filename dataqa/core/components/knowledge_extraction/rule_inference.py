@@ -1,9 +1,8 @@
 from langchain_core.runnables.config import RunnableConfig
-from pydantic import BaseModel, Field, model_validator
-from typing import List, Dict
+from pydantic import BaseModel, Field
+from typing import List
 
 from dataqa.llm.openai import AzureOpenAI
-from dataqa.memory import Memory
 from dataqa.utils.prompt_utils import build_prompt, prompt_type
 from dataqa.utils.langgraph_utils import (
     CONFIGURABLE,

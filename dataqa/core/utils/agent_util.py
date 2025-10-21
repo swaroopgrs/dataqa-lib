@@ -419,7 +419,7 @@ class AgentResponseParser:
 
     def pretty_print_output(self):
         print("\n".join(self.process_events("terminal")))
-        print(f"\nRun statistics:")
+        print("\nRun statistics:")
         for k, v in self.run_statistics.items():
             print(f"\t{k}: {v}") if k != "llm_stat" else print(
                 indented(f"{k}:\n{v}")

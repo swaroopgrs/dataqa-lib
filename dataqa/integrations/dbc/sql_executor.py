@@ -1,6 +1,5 @@
 # dataqa/integrations/dbc/sql_executor.py
 from typing import Callable, Dict
-import pandas as pd
 import uuid
 
 from dataqa.core.components.base_component import ComponentConfig

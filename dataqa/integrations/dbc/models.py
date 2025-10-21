@@ -1,5 +1,5 @@
 # dataqa/integrations/dbc/models.py
-from typing import List, Optional, Set
+from typing import List, Optional
 from pydantic import BaseModel, Field
 from enum import StrEnum, auto
 import uuid

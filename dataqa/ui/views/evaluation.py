@@ -4,7 +4,6 @@ import pandas as pd
 from pathlib import Path
 import sys
 import os
-import subprocess
 import threading
 import time
 
@@ -118,9 +117,9 @@ def show():
                     selected_item = next(item for item in test_items if item['id'] == selected_id)
                     with st.expander(f"Details for {selected_id}", expanded=True):
                         st.markdown(f"**Question:** {selected_item.get('question', '')}")
-                        st.markdown(f"**Ground Truth Output:**")
+                        st.markdown("**Ground Truth Output:**")
                         st.code(selected_item.get('ground_truth_output', {}).get('language', 'text'))
-                        st.markdown(f"**Solution:**")
+                        st.markdown("**Solution:**")
                         sql = selected_item['solution'][0].get('function_arguments', {}).get('sql', '')
                         st.code(sql, language='sql')
         except Exception as e:
@@ -292,7 +291,7 @@ def show_detailed_test_result(results_dir: Path, test_id: str):
                         st.markdown(f"**Latency:** {pred.get('latency', 0):.2f}s")
                     
                     with col2:
-                        st.markdown(f"**LLM Judge Output:**")
+                        st.markdown("**LLM Judge Output:**")
                         st.markdown(f"**Score:** {pred.get('evaluation', {}).get('llm_judge_output', {}).get('SCORE', 'N/A')}")
                         st.markdown(f"**Reason:** {pred.get('evaluation', {}).get('llm_judge_output', {}).get('REASON', 'N/A')}")
                     

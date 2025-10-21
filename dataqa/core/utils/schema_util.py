@@ -1,9 +1,7 @@
 from typing import Dict, List, Optional, Union
 
-import yaml
 
 from dataqa.core.data_models.asset_models import (
-    ResourceType,
     RetrievedAsset,
     TableSchema,
     VectorSchema,

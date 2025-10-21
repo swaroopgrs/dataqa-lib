@@ -3,8 +3,6 @@ import asyncio
 import os
 import sys
 from pathlib import Path
-import pandas as pd
-import yaml
 import traceback
 
 # Add parent directory to path

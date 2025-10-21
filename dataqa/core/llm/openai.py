@@ -1,7 +1,7 @@
 import logging
 import random
 import time
-from typing import Any, Dict, Optional
+from typing import Optional
 
 import openai
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
@@ -92,7 +92,7 @@ class AzureOpenAI(BaseLLM):
         generation = ""
         metadata = None
         error = None
-        logger.info(f"invoking llm with retry...")
+        logger.info("invoking llm with retry...")
         error_msgs = []
         # attempts to catch common exceptions raised that occur when invoking Azure
         for i in range(max_retry):

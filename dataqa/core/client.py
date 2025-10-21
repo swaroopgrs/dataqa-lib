@@ -1,10 +1,11 @@
-# dataqa/core/client.py
 from abc import ABC, abstractmethod
 from typing import List
+
 import pandas as pd
 from pydantic import BaseModel, Field
 
 # --- Core Data Contracts ---
+
 
 class CoreConversationTurn(BaseModel):
     """A single, generic turn in a conversation's history."""

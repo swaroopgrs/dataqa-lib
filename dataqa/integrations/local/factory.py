@@ -6,7 +6,6 @@ import yaml
 
 from dataqa.core.agent.cwd_agent.builder import CWDAgentBuilder
 from dataqa.core.agent.cwd_agent.cwd_agent import CWDAgent, CwdAgentDefinitionConfig
-from dataqa.core.agent.cwd_agent.config import CwdAgentLLMReferences
 from dataqa.core.components.code_executor.in_memory_code_executor import InMemoryCodeExecutor
 from dataqa.core.components.resource_manager.resource_manager import ResourceManager
 from dataqa.core.llm.base_llm import BaseLLM

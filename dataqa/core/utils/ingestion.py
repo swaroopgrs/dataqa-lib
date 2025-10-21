@@ -7,9 +7,7 @@ from pydantic import BaseModel, Field
 from tqdm import tqdm
 
 from dataqa.core.data_models.asset_models import (
-    ColumnSchema,
     DatabaseSchema,
-    TableSchema,
 )
 from dataqa.core.llm.openai import OpenAIEmbedding
 

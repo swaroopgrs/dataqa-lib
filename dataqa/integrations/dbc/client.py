@@ -1,8 +1,6 @@
 # dataqa/integrations/dbc/client.py
-from typing import Callable, Set
-import pandas as pd
+from typing import Callable
 
-from dataqa.core.client import DataQAClient, CoreRequest, CoreResponse, CoreStep, CoreConversationTurn
 from dataqa.core.agent.cwd_agent.cwd_agent import CWDState
 from dataqa.integrations.dbc.models import DBCRequest, DBCResponse, StepResponse, UsecaseConfig, FileType
 from dataqa.integrations.dbc.factory import DBC_CWDAgentFactory

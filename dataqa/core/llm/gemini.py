@@ -3,7 +3,7 @@ from typing import Any, List
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from pydantic import Field, BaseModel, ValidationError
+from pydantic import Field, ValidationError
 
 from dataqa.core.llm.base_llm import (
     BaseLLM,

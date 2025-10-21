@@ -1,8 +1,6 @@
-import asyncio
 import unittest
 import pandas as pd
-import yaml
-from unittest.mock import MagicMock, AsyncMock, call
+from unittest.mock import MagicMock, AsyncMock
 
 # Add the project root to the path to allow imports from `dataqa`
 import sys

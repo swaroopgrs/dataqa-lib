@@ -1,9 +1,6 @@
 import streamlit as st
 import os
-import sys
 from pathlib import Path
-from typing import Dict, Any
-import shutil
 
 def show():
     st.header("Project Manager")

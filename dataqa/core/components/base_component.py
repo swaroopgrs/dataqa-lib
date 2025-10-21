@@ -7,7 +7,6 @@ from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel, Field
 
 from dataqa.core.components.base_utils import get_field
-from dataqa.core.pipelines.constants import INPUT_FROM_STATE
 
 logger = logging.getLogger(__name__)
 
