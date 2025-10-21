@@ -9,8 +9,8 @@ use_case_config:
     cwd_config: "examples/cdao_dia/agent/cwd_agent_prompt_template.yaml"
     test_data_file: "examples/cdao_dia/examples.yml"
   - name: cib_mp
-    cwd_config: "examples/cib_mp/agent/cwd_agent_prompt_template.yaml"
-    test_data_file: "examples/cib_mp/examples.yaml"
+    cwd_config: "use_cases/cib_mp/agent/cwd_agent_prompt_template.yaml"
+    test_data_file: "use_cases/cib_mp/benchmark.yaml"
   - name: cib_tp
     cwd_config: "examples/cib_tp/agent/cwd_agent_prompt_template.yaml"
     test_data_file: "examples/cib_tp/examples.yaml"

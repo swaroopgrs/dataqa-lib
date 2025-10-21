@@ -274,7 +274,7 @@ class TestPipeline:
 
         # Load images
         for i, img_bytes in enumerate(response.output_images):
-            img_name = f"output_image_{i + 1}.jpg"
+            img_name = f"output_image_{i + 1}.png"
             fn_img = run_path / TEST_RESULT_IMAGE / img_name
             if not os.path.isfile(fn_img):
                 self.logger.warning(f"Image {img_name} is not found.")
@@ -282,8 +282,8 @@ class TestPipeline:
             try:
                 with open(fn_img, "rb") as f:
                     img_data = f.read()
-                text += f"\n{image_to_llm_judge_string(img_name, img_data)}"
                 # Assuming image_to_llm_judge_string can handle image data
+                text += f"\n{image_to_llm_judge_string(img_name, img_data)}"
             except Exception as e:
                 self.logger.warning(f"Failed to load image from {fn_img} : {e}")
                 text += f"\nimage: {img_name}\nFailed to load data"
@@ -334,7 +334,7 @@ class TestPipeline:
                     self.logger.debug(f"final_response: {final_response}")
 
                     self.logger.debug(
-                        f"Test question {{idx}} run {run_id} response: {repr(response.text)}"
+                        f"Test question ({idx}) run {run_id} response: {repr(response.text)}"
                     )
 
                     summary = ""
@@ -378,7 +378,7 @@ class TestPipeline:
             elif self.config.solution_type == "pipeline":
                 base_dir = os.environ.get("BASE_DIR", ".")
                 config_path = os.path.join(base_dir, config.cwd_config)
-                pipeline_config = yaml.safe_load(
+                pipeline_config = (
                     open(config_path).read().format(BASE_DIR=base_dir)
                 )
                 pipeline_config = yaml.safe_load(pipeline_config)
@@ -496,7 +496,7 @@ class TestPipeline:
         
         if test_result is None:
             self.logger.warning(
-                f"Skip LLM-judg evaluation for test example {data.id}."
+                f"Skip LLM-judge evaluation for test example {data.id}."
             )
             return
         
@@ -529,12 +529,12 @@ class TestPipeline:
                     api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
                     if api_key == "":
                         print(
-                            "Running Standard LLM Azure API Subscription....."
+                            "Running Standard LLM Azure API Subscription........"
                         )
                         api_key = get_az_token_using_cert()[0]
                     else:
                         print(
-                            "Running Multi-Tenant LLM Azure API Subscription....."
+                            "Running Multi-Tenant LLM Azure API Subscription........"
                         )
                         token = get_az_token_using_cert()[0]
                     api_args = {

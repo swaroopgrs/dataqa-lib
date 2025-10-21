@@ -22,7 +22,7 @@ def extract_test_results(base_dir):
                 ground_truth_output = test_result["input_data"][
                     "ground_truth_output"
                 ]
-                ground_truth_sql = test_result["input_data"]["solution"][0][test_result][
+                ground_truth_sql = test_result["input_data"]["solution"][0][
                     "function_arguments"
                 ]["sql"]
 
