@@ -22,6 +22,9 @@ class CoreRequest(BaseModel):
     user_query: str = Field(
         ..., description="The current natural language query from the user."
     )
+    question_id: str = Field(
+        ..., description="A unique identifier for the question."
+    )
     conversation_id: str = Field(
         ..., description="A unique identifier for the conversation session."
     )
@@ -40,6 +43,15 @@ class CoreStep(BaseModel):
     content: str = Field(
         default="", description="Content or details of the step."
     )
+
+
+class CoreStatus(BaseModel):
+    """A generic representation for the status of the core agent during inference."""
+
+    name: str = Field(
+        ..., description="Name or identifier of the processing step."
+    )
+    message: str = Field(..., description="A text message to be streamed.")
 
 
 class CoreResponse(BaseModel):

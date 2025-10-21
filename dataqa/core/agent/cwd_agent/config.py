@@ -2,6 +2,9 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
+from dataqa.core.components.code_excutor.api_executor import (
+    ApiCodeExecutorConfig,
+)
 from dataqa.core.components.code_executor.in_memory_code_executor import (
     InMemoryCodeExecutorConfig,
 )
@@ -25,17 +28,14 @@ class CwdAgentPromptsConfig(BaseModel):
     plot_prompt: CwdAgentPromptValue
 
 
-# class InMemorySqlExecutorConfig(BaseModel):
-#     data_files: Any = Field(
-#         description="List of data files to load into the in-memory SQL database."
-#     )
-#     backend: str = Field(
-#         default="duckdb",
-#     )
-
-
 class RetrievalWorkerConfig(BaseModel):
-    sql_execution_config: InMemoryCodeExecutorConfig
+    type: str = Field(
+        description="type of sql executor - ApiCodeExecutor or InMemoryCodeExecutor",
+        default="InMemoryCodeExecutor",
+    )
+    sql_execution_config: Union[
+        InMemoryCodeExecutorConfig, ApiCodeExecutorConfig
+    ]
 
 
 class AnalyticsWorkerConfig(BaseModel):
@@ -58,7 +58,7 @@ class CwdAgentWorkersModulesConfig(BaseModel):
 
 class LLMSelectionConfig(BaseModel):
     type: str = Field(
-        description="Fully qualified class name for the LLM (e.g., 'dataqa.llm.openai.AzureOpenAI')."
+        description="Fully qualified class name for the LLM (e.g., 'dataqa.core.llm.openai.AzureOpenAI')."
     )
     config: Dict[str, Any] = Field(
         description="Configuration dictionary for the chosen LLM type (e.g., model, api_key, base_url)."
@@ -73,6 +73,11 @@ class ResourceManagerConfig(BaseModel):
 class RetrieverSelectionConfig(BaseModel):
     type: str
     config: Dict[str, Any]
+
+
+class DialectConfig(BaseModel):
+    value: str = "sqlite"
+    functions: str = ""
 
 
 class CwdAgentPromptTemplateConfig(BaseModel):
@@ -144,15 +149,21 @@ class CwdAgentDefinitionConfig(BaseModel):
     llm: CwdAgentLLMReferences
     resource_manager_config: ResourceManagerConfig
     retriever_config: RetrieverSelectionConfig
+    fallback_retriever_config: Optional[RetrieverSelectionConfig] = None
     workers: CwdAgentWorkersModulesConfig
     max_tasks: int = Field(
-        description="Maximum number of tasks that can be executed before termination.",
+        description="The maximum number of tasks that can be executed before termination.",
+        default=10,
+    )
+    max_react_recursion: int = Field(
+        description="The maximum number of recursions for react workers.",
         default=10,
     )
     timeout: int = Field(
         description="timeout in seconds for running agent on inputs",
         default=300,
     )
+    dialect: DialectConfig
 
     class Config:
         extra = "forbid"

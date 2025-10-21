@@ -1,3 +1,4 @@
+import logging
 from typing import Dict, List, Union
 
 import pandas as pd
@@ -11,13 +12,15 @@ from dataqa.core.utils.langgraph_utils import (
     THREAD_ID,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class Memory:
     # TODO memory management
     # remove variables
     # summary
     dataframes: Dict[str, Dict[str, pd.DataFrame]]
-    images: Dict[str, Dict[str, List[Union[str, pd.DataFrame]]]]
+    images: Dict[str, Dict[str, List[Union[bytes, pd.DataFrame]]]]
 
     def __init__(self):
         self.dataframes = {}
@@ -51,16 +54,24 @@ class Memory:
     ):
         self.get_dataframes(config)[name] = df
 
-    def get_image(self, name: str, config: RunnableConfig):
-        return self.get_images(config).get(name)[0]
+    def get_image(self, name: str, config: RunnableConfig) -> bytes:
+        images = self.get_images(config).get(name)
+        if not images:
+            logger.warning(f"Retrieve the image {name} that does NOT exist.")
+            return None
+        return images[0]
 
-    def get_image_data(self, name: str, config: RunnableConfig):
-        return self.get_images(config).get(name)[1]
+    def get_image_data(self, name: str, config: RunnableConfig) -> pd.DataFrame:
+        images = self.get_images(config).get(name)
+        if not images:
+            logger.warning(f"Retrieve the image {name} that does NOT exist.")
+            return None
+        return images[1]
 
     def put_image(
         self,
         name: str,
-        img: List[Union[str, pd.DataFrame]],
+        img: List[Union[bytes, pd.DataFrame]],
         config: RunnableConfig,
     ):
         self.get_images(config)[name] = img
