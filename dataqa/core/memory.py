@@ -19,7 +19,7 @@ class Memory:
     # TODO memory management
     # remove variables
     # summary
-    dataframes: Dict[str, Dict[str, pd.DataFrame]]
+    dataframes: Dict[str, Dict[str, List[Union[pd.DataFrame, str]]]]
     images: Dict[str, Dict[str, List[Union[bytes, pd.DataFrame]]]]
 
     def __init__(self):
