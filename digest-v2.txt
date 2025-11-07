@@ -17,7 +17,18 @@ Directory structure:
         │   │       ├── config.py
         │   │       ├── cwd_agent.py
         │   │       ├── error_message.py
-        │   │       └── prompt.py
+        │   │       ├── prompt.py
+        │   │       └── templates/
+        │   │           ├── analytics_worker.jinja
+        │   │           ├── constants.jinja
+        │   │           ├── description.jinja
+        │   │           ├── instruction.jinja
+        │   │           ├── planner.jinja
+        │   │           ├── plot_worker.jinja
+        │   │           ├── replanner.jinja
+        │   │           ├── sql_generation.jinja
+        │   │           ├── sql_validation.jinja
+        │   │           └── summarization.jinja
         │   ├── components/
         │   │   ├── __init__.py
         │   │   ├── base_component.py
@@ -33,9 +44,7 @@ Directory structure:
         │   │   │   ├── data_scanner.py
         │   │   │   ├── infer_metadata.py
         │   │   │   ├── rule_inference.py
-        │   │   │   ├── rule_inference_batch_test.py
-        │   │   │   ├── rule_inference_components.py
-        │   │   │   └── rule_inference_pipeline.py
+        │   │   │   └── rule_inference_batch_test.py
         │   │   ├── langgraph_conditional_edge/
         │   │   │   ├── __init__.py
         │   │   │   ├── base_conditional_edge.py
@@ -61,13 +70,8 @@ Directory structure:
         │   │   │   ├── __init__.py
         │   │   │   └── resource_manager.py
         │   │   └── retriever/
-        │   │       ├── README.md
         │   │       ├── __init__.py
         │   │       ├── base_retriever.py
-        │   │       ├── dbc_opensearch_mapping.json
-        │   │       ├── opensearch_mapping.json
-        │   │       ├── opensearch_retriever.py
-        │   │       ├── opensearch_util.py
         │   │       ├── tag_retriever.py
         │   │       └── vector_retriever.py
         │   ├── data_models/
@@ -124,7 +128,6 @@ Directory structure:
         │       ├── client.py
         │       └── factory.py
         └── templates/
-            ├── cwd_agent_structure_template.yml
             ├── default_graph_config.yml
             ├── examples.yml
             ├── rules.yml
@@ -749,7 +752,6 @@ class CwdAgentDefinitionConfig(BaseModel):
     llm: CwdAgentLLMReferences
     resource_manager_config: ResourceManagerConfig
     retriever_config: RetrieverSelectionConfig
-    fallback_retriever_config: Optional[RetrieverSelectionConfig] = None
     workers: CwdAgentWorkersModulesConfig
     max_tasks: int = Field(
         description="The maximum number of tasks that can be executed before termination.",
@@ -833,7 +835,8 @@ from dataqa.core.components.resource_manager.resource_manager import (
 )
 from dataqa.core.llm.base_llm import BaseLLM
 from dataqa.core.memory import Memory
-from dataqa.core.services.storage import LocalFileDataSource
+
+# from dataqa.core.services.storage import LocalFileDataSource
 from dataqa.core.tools import (
     get_analytics_tools_and_descriptions,
     get_plot_tools_and_descriptions,
@@ -848,7 +851,9 @@ from dataqa.core.utils.langgraph_utils import (
     THREAD_ID,
     TOKEN,
 )
-from dataqa.core.utils.prompt_utils import build_prompt, prompt_type
+from dataqa.core.utils.prompt_utils import build_prompt
+
+# from dataqa.core.utils.prompt_utils import prompt_type
 from dataqa.core.utils.utils import cls_from_str
 
 logger = logging.getLogger(__name__)
@@ -896,7 +901,6 @@ class CWDState(PlanExecuteState):
     plot_worker_rule: str = ""
     plot_worker_schema: str = ""
     plot_worker_example: str = ""
-    schema_fallback_level: str = ""
     error: str = ""
     total_time: float = 0
 
@@ -974,22 +978,6 @@ class CWDAgent(Agent):
         for field in self.retriever.output_base_model.__fields__:
             retriever_output[field] = field
         self.retriever.output_mapping = retriever_output
-
-        # 3.1 Instantiate fall back retriever
-        if config.fallback_retriever_config is not None:
-            self.fallback_retriever = cls_from_str(
-                config.fallback_retriever_config.type
-            )(
-                config=config.fallback_retriever_config.config,
-                resource_manager=self.resource_manager,
-            )
-            self.fallback_retriever.set_input_mapping(dict(query="query"))
-            retriever_output = {}
-            for field in self.fallback_retriever.output_base_model.__fields__:
-                retriever_output[field] = field
-            self.fallback_retriever.output_mapping = retriever_output
-        else:
-            self.fallback_retriever = None
 
         # 4. Finalize initialization by calling the parent constructor
         super().__init__(memory=memory, llm=self.llms["default"])
@@ -1107,7 +1095,6 @@ class CWDAgent(Agent):
             llm=llm,
             config=config,
             sql_executor=self.sql_executor,
-            fallback_schema_retriever=self.fallback_retriever,
         )
         worker.set_input_mapping(
             dict(
@@ -1115,7 +1102,6 @@ class CWDAgent(Agent):
                 rule="retrieval_worker_rule",
                 schema="retrieval_worker_schema",
                 example="retrieval_worker_example",
-                schema_fallback_level="schema_fallback_level",
             )
         )
         worker.output_mapping = dict(
@@ -1315,7 +1301,7 @@ class CWDAgent(Agent):
             timeout = self.config.timeout
             start_time = time.monotonic()
             logger.info(
-                f"Conversation ID: {thread_id}; question ID: {question_id}. - Starting to run agent graph."
+                f"Conversation ID: {thread_id}; question ID: {question_id}. Starting to run agent graph."
             )
             async with asyncio.timeout(timeout):
                 async for name, message in stream():
@@ -1325,7 +1311,7 @@ class CWDAgent(Agent):
 
             state.total_time = time.monotonic() - start_time
             logger.info(
-                f"Conversation ID: {thread_id}; question ID: {question_id}. - Finished running agent graph in {round(state.total_time, 2)} seconds."
+                f"Conversation ID: {thread_id}; question ID: {question_id}. Finished running agent graph in {round(state.total_time, 2)} seconds."
             )
             yield state, all_events
 
@@ -1348,7 +1334,7 @@ class CWDAgent(Agent):
             )
             state.error = f"{repr(e)}\n{call_stack}"
             logger.error(
-                f"Conversation ID: {thread_id}; question ID: {question_id}. Error: Agent failed with error:\n{state.error}"
+                f"Conversation ID: {thread_id}; question ID: {question_id}. Error: agent failed with error:\n{state.error}"
             )
             yield state, all_events
 
@@ -1359,16 +1345,19 @@ FILE: dataqa/core/agent/cwd_agent/error_message.py
 ================================================
 from typing import Optional
 from pydantic import BaseModel, Field
+
 from dataqa.core.utils.agent_util import NodeName
 
+
 agent_error_log = []
+
 
 class Error(BaseModel):
     message: str
     source: str
-    cause: Optional[str] = None
-    fix_suggestion: Optional[str] = None
-    # code: Optional[int] # TODO: define error code for all error messages that will be consumed by CWD agent
+    cause: Optional[str]
+    fix_suggestion: Optional[str]
+    # code: Optional[int]  # TODO: define error code for all error messages that will be consumed by CWD agent
 
     def message_to_agent(self) -> str:
         msg = self.message
@@ -1379,12 +1368,14 @@ class Error(BaseModel):
         # agent_error_log.append(msg)
         return msg
 
+
 InternalDataframeError = Error(
     message="Internal data set is referenced in the SQL, but cannot be used by remote database.",
     source=f"{NodeName.retrieval_worker}.{NodeName.sql_executor}",
     cause="When the internal data set is referenced in the SQL, need to replace it with a subquery that can be used by remote database. No such subquery can be generated.",
     fix_suggestion="Please regenerate the SQL with a subquery that can be used by remote database by using tables available in the remote database and defined in the schema.",
 )
+
 
 class SqlExecutionError(Error):
     message: str = Field(default="Failed to execute SQL on remote database.")
@@ -1395,12 +1386,14 @@ class SqlExecutionError(Error):
         default="Please regenerate the SQL and fix the SQL execution error. If needed, please adjust the plan and try different way to solve the problem."
     )
 
+
 ColumnNamingError = Error(
     message="SQL is executed successfully on remote database, but the column name in the output table is not unique.",
     source=f"{NodeName.retrieval_worker}.{NodeName.sql_generator}",
     cause="If column names in the output table are not unique, it will cause downstream to_json operation failed.",
     fix_suggestion="Please regenerate the SQL and name the columns using alias so that the column names in the output table are unique.",
 )
+
 
 
 ================================================
@@ -1438,7 +1431,7 @@ AGENTS_DESCRIPTION = f"""This AI Assistant is equipped with five agents: {PLANNE
 WORKER_DESCRIPTION = f"""{RETRIEVAL_WORKER} is responsible for data retrieval by generating and executing SQL queries.
 {RETRIEVAL_WORKER} has access to database tables only. {RETRIEVAL_WORKER} can not access intermediate dataframes stored in memory.
 Intermediate dataframes stored in memory can only be used by {ANALYTICS_WORKER} and {PLOT_WORKER}.
-DO NOT generate plan for {RETRIEVAL_WORKER} that requires access to intermediate dataframes stored in memory.
+Do NOT generate plan for {RETRIEVAL_WORKER} that requires access to intermediate dataframes stored in memory.
 {ANALYTICS_WORKER} is equipped with the following tools:
 {{analytics_worker_tool_description}}
 {PLOT_WORKER} is equipped with the following tools:
@@ -1596,7 +1589,7 @@ FUNCTIONS = """
 """
 SQL_GENERATOR_PROMPT_TEMPLATE = f"""
 You are a coding assistant focused on generating SQL queries for data analysis. Your primary task is to assist users in extracting insights from structured databases. You will write SQL to query this data and perform necessary calculations. Your goal is to provide accurate, efficient, and user-friendly solutions to complex data queries.
-When naming the output dataframe, try to include filter condition in the name so that it wil be unique and easily identifiable.
+When naming the output dataframe, try to include filter condition in the name so that it will be unique and easily identifiable.
 -------------------------------------------------
 KEY RESPONSIBILITIES:
 
@@ -1772,7 +1765,7 @@ def instantiate_replanner_prompt_by_use_case_jinja(
     use_case_description: str,
     analytics_worker_tool_description: str,
     plot_worker_tool_description: str,
-) -> str:
+) -> Dict[Literal["action_prompt", "planner_prompt"], str]:
     env = Environment(
         loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
         trim_blocks=True,
@@ -1785,12 +1778,433 @@ def instantiate_replanner_prompt_by_use_case_jinja(
         use_case_description=use_case_description.strip(),
         analytics_worker_tool_description=analytics_worker_tool_description.rstrip(),
         plot_worker_tool_description=plot_worker_tool_description.rstrip(),
+        end_check=True
     )
 
-    prompt = template.render(context)
+    action_prompt = template.render(context)
 
-    return prompt
+    context["end_check"] = False
 
+    plan_prompt = template.render(context)
+
+    return {"action_prompt": action_prompt, "plan_prompt": plan_prompt}
+
+
+def instantiate_sql_generator_prompt_by_use_case_jinja(
+    dialect: str = "snowflake", functions: str = ""
+):
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("sql_generation.jinja")
+    return template.render(dialect=dialect, functions=functions)
+
+
+def instantiate_analytics_worker_prompt_by_use_case_jinja(
+    use_case_name: str,
+    use_case_description: str,
+    analytics_worker_tool_description: str,
+):
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("analytics_worker.jinja")
+    return template.render(
+        use_case_name=use_case_name.strip(),
+        use_case_description=use_case_description.strip(),
+        analytics_worker_tool_description=analytics_worker_tool_description.rstrip(),
+    )
+
+
+def instantiate_plot_worker_prompt_by_use_case_jinja(
+    use_case_name: str,
+    use_case_description: str,
+    plot_worker_tool_description: str,
+):
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("plot_worker.jinja")
+    return template.render(
+        use_case_name=use_case_name.strip(),
+        use_case_description=use_case_description.strip(),
+        plot_worker_tool_description=plot_worker_tool_description.rstrip(),
+    )
+
+
+def instantiate_summarization_prompt_by_use_case_jinja(
+    use_case_name: str,
+    use_case_description: str,
+    analytics_worker_tool_description: str,
+    plot_worker_tool_description: str,
+) -> Dict[Literal["action_prompt", "plan_prompt"], str]:
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("summarization.jinja")
+
+    return template.render(
+        use_case_name=use_case_name.strip(),
+        use_case_description=use_case_description.strip(),
+        analytics_worker_tool_description=analytics_worker_tool_description.rstrip(),
+        plot_worker_tool_description=plot_worker_tool_description.rstrip(),
+    )
+
+
+def instantiate_sql_validation_prompt_jinja():
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("sql_validation.jinja")
+    return template.render()
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/analytics_worker.jinja
+================================================
+{% import 'constants.jinja' as const %}
+{% import 'description.jinja' as description %}
+{% import 'instruction.jinja' as instruction %}
+{{ description.OVERALL_DESCRIPTION(const.ANALYTICS_WORKER) }}
+
+{{ description.AGENT_DESCRIPTION() }}
+
+You are working on a use case called {{ use_case_name }}
+- {{ use_case_description}}
+
+Your ```{{ const.JOB }}``` is to complete a single {{ const.TASK }} from the {{ const.PLAN }}.
+
+**INSTRUCTIONS**
+{{ instruction.GENERAL_WORKER_INSTRUCTION() }}{use_case_analytics_worker_instruction}
+
+You are equipped with the following tools:
+{{ analytics_worker_tool_description }}
+
+{dataframe_summary}
+
+Given the previously completed TASKS:
+{past_steps}
+and, for the following PLAN:
+{plan}
+
+You are tasked with executing TASK 1: {task}
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/constants.jinja
+================================================
+{% set USER_OBJECTIVE = "USER OBJECTIVE" %}
+{% set PLANNER = "Planner" %}
+{% set REPLANNER = "Replanner" %}
+{% set WORKER = "Worker" %}
+{% set RETRIEVAL_WORKER = "Retrieval Worker" %}
+{% set ANALYTICS_WORKER = "Analytics Worker" %}
+{% set PLOT_WORKER = "Plot Worker" %}
+{% set SUMMARIZATION = "Summarization" %}
+{% set JOB = "JOB" %}
+{% set TASK = "TASK" %}
+{% set TASKS = "TASKS" %}
+{% set TOOLS = "TOOLS" %}
+{% set PLAN = "PLAN" %}
+{% set TASK_REJECTED = "TASK REJECTED" %}
+{% set HISTORY = "HISTORY" %}
+
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/description.jinja
+================================================
+{% import 'constants.jinja' as const %}
+
+{% macro AGENT_DESCRIPTION()%}
+This AI Assistant is equipped with five agents: {{ const.PLANNER}}, {{ const.REPLANNER}}, {{ const.RETRIEVAL_WORKER}}, {{ const.ANALYTICS_WORKER }}, and {{ const.PLOT_WORKER }}. These agents work collaboratively to achieve the {{ const.USER_OBJECTIVE }}:
+The designated {{ const.WORKER }} agent executes the first {{ const.TASK }} from the {{ const.PLAN }}.
+{{ const.RETRIEVAL_WORKER }} agent handles data retrieval {{ const.TASKS }} by generating and executing SQL queries to access the database.
+{{ const.ANALYTICS_WORKER }} agent performs data analysis {{ const.TASKS }} using available {{ const.TOOLS }} on existing data.
+{{ const.PLOT_WORKER }} agent creates visualizations based on existing data using available {{ const.TOOLS }}.
+After executing a {{ const.TASK }}, the {{ const.REPLANNER }} evaluates the results to determine if the {{ const.USER_OBJECTIVE }} is complete, adjusts the {{ const.PLAN }} if necessary, and provides the updated {{ const.PLAN }} to the {{ const.WORKER }}.{% endmacro %}
+
+{% macro OVERALL_DESCRIPTION(agent_name) %}
+You are a {{ agent_name}} agent working within a professional AI Assistant for Data Question Answering.{% endmacro %}
+
+{% macro WORKER_DESCRIPTION(analytics_worker_tool_description, plot_worker_tool_description) %}
+{{ const.RETRIEVAL_WORKER }} is responsible for data retrieval by generating and executing SQL queries.
+{{ const.RETRIEVAL_WORKER }} has access to database tables only. {{ const.RETRIEVAL_WORKER }} can not access intermediate dataframes stored in memory.
+Intermediate dataframes stored in memory can only be used by {{ const.ANALYTICS_WORKER }} and {{ const.PLOT_WORKER }}.
+Do NOT generate plan for {{ const.RETRIEVAL_WORKER }} that requires access to intermediate dataframes stored in memory.
+{{ const.ANALYTICS_WORKER }} is equipped with the following tools:
+{{ analytics_worker_tool_description }}
+{{ const.PLOT_WORKER }} is equipped with the following tools:
+{{ plot_worker_tool_description }}{% endmacro %}
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/instruction.jinja
+================================================
+{% import 'constants.jinja' as const %}
+{% macro GENERAL_WORKER_INSTRUCTION()%}
+{% endmacro %}
+
+{% macro PLAN_INSTRUCTION()%}
+- In your {{ const.PLAN }}, ensure each {{ const.TASK }} is assigned to ONE {{ const.WORKER }}. Do NOT create a {{ const.TASK }} that requires multiple {{ const.WORKER }}.
+- Clearly describe the target of each {{ const.TASK }}.
+- Ensure each {{ const.TASK}} includes all necessary information-do not skip steps.
+- If an analytics {{ const.TASK }} can be efficiently achieved in the {{ const.RETRIEVAL_WORKER}} step, do NOT assign it to {{ const.ANALYTICS_WORKER }}. Examples include tasks like min, max, average, count, group by, order by using SQL.
+- When an analytics {{ const.TASK }} is too complex for {{ const.RETRIEVAL_WORKER}}, assign it to {{ const.ANALYTICS_WORKER }}.
+- DO NOT mention specific tools in the {{ const.TASK }}-formulate the {{ const.TASK }} in English without referencing tools.
+- The combined outcomes of all {{ const.TASKS }} should fully address the {{ const.USER_OBJECTIVE }}.{% endmacro %}
+
+{% macro CHAT_SAFETY_INSTRUCTION()%}
+{% endmacro %}
+
+{% macro DATA_SAFETY_INSTRUCTION()%}
+**System Tables Restriction**: Reject queries that attempt to access system tables, metadata tables, or information schema tables (e.g., INFORMATION_SCHEMA, sys.*, pg_catalog, etc.).
+**Read-Only Operations**: You only have read access. Avoid generating queries with operations such as DELETE, INSERT, UPDATE, ALTER, DROP, CREATE, or any DDL/DML statements.
+**Query Optimization**: To avoid retrieving large datasets, avoid SELECT (*). Instead, specify only the necessary columns and include appropriate WHERE clauses.
+**Metadata Requests**: If users ask for table schemas, column information, or database structure:
+- Politely explain that you cannot provide metadata or schema information
+- Suggest they consult their use case administrator or documentation
+- Offer to help with specific data queries if they provide the table and column names
+**Error Handling**: If a query fails due to permissions or restrictions, explain the limitation without revealing system details.{% endmacro %}
+
+{% macro PLANNER_GENERAL_INSTRUCTION()%}
+Your```{{ const.JOB }}``` is to generate a step-by-step {{ const.PLAN }} for solving the {{ const.USER_OBJECTIVE }} related to the underlying database.
+**INSTRUCTIONS**:
+{{ PLAN_INSTRUCTION() }}{% endmacro %}
+
+{% macro DISAMBIGUATE_GENERAL_INSTRUCTION()%}
+Your```{{ const.JOB }}``` is to check if you can address {{ const.USER_OBJECTIVE }} before generating a step-by-step {{ const.PLAN }}. Specifically, please check:
+- if {{ const.USER_OBJECTIVE }} contains any ambiguity.
+- if you have sufficient information and tools to address the USER OBJECTIVE.
+- if {{ const.USER_OBJECTIVE }} brings any safety concerns.
+**INSTRUCTIONS**:
+- Please identify ambiguity in the user question. If there is any ambiguity, please DO 'NOT' generate plan but respond to user asking for clarification.
+Possible source of ambiguity:
+- Please check the term, entity, and token mentioned in the user question. If there are multiple ways to interpret it with equal confidence, the question is ambiguous.
+- Please check the intent of the question. If there are multiple ways to understand the intent of the question, the question is ambiguous.
+**CHAT SAFETY GUIDELINES**:
+{{ CHAT_SAFETY_INSTRUCTION() }}
+**DATA SAFETY GUIDELINES**
+{{ DATA_SAFETY_INSTRUCTION()}}{% endmacro %}
+
+{% macro REPLANNER_GENERAL_INSTRUCTION()%}
+Your```{{ const.JOB }}``` is to evaluate the progress of solving the {{ const.USER_OBJECTIVE }} and generate a {{ const.PLAN }} for the remaining {{ const.TASKS }}.
+**INSTRUCTIONS**:
+{{ PLAN_INSTRUCTION()}}
+Do not repeat {{ const.TASKS }} that have been completed.
+If the {{ const.PLAN }} includes a plot {{ const.TASK }}, do not terminate before executing the plot {{ const.TASK }}.
+Carefully review completed {{ const.TASKS }} and update your {{ const.PLAN }} accordingly. If no more {{ const.TASKS }} are needed and you can return to the user, then respond with that. Otherwise, fill out the {{ const.PLAN }}.
+- Only add {{ const.TASKS }} to the {{ const.PLAN }} that still NEED to be done. Do not add previously successfully completed {{ const.TASKS }} as part of the {{ const.PLAN }}.
+If possible, assign calculation as {{ const.TASKS }} to workers. DO NOT do calculation yourself.
+Pay attention if any Completed Tasks say that {{ const.TASK }} could not be completed it will contain code {{ const.TASK_REJECTED }}
+then try to adjust the plan by breaking down the TASK that was not completed into simpler/smaller TASKS that can be executed given available TOOLS.{% endmacro %}
+
+{% macro END_CHECK_GENERAL_INSTRUCTION() %}
+Your {{ const.JOB }}``` is to evaluate the progress of solving the {{ const.USER_OBJECTIVE }} and check:
+- If you have obtained the final results and are ready to return the final response message to the user.
+- If you are facing a bloker and can NOT continue on solving the {{ const.USER_OBJECTIVE }}.
+**INSTRUCTIONS**:
+Carefully review completed {{ const.TASKS }} and evaluate if you should continue. If no more {{ const.TASKS }} are needed and you can return to the user, then respond with that. Otherwise, fill out the {{ const.PLAN }}.
+If possible, assign calculation as {{ const.TASKS }} to workers. DO 'NOT' do calculation yourself.
+Pay attention if any Completed Tasks say that task could not be completed it will contain code {{ const.TASK_REJECTED }}
+then try to adjust the plan by breaking down the {{ const.TASK }} that was not completed into simpler/smaller {{ const.TASKS }} that can be executed given available {{ const.TOOLS }}.
+If no more {{ const.TASKS }} needed, please generate the response return to the user.
+- If the answer is contained in existing tables or plots, please direct the user to check the tables and plots directly. DO NOT repeat the results in tables in English.
+- If a part of the answer cannot be directly read from tables or plots, present the answer in the response.
+**CHAT SAFETY GUIDELINES**:
+{{ CHAT_SAFETY_INSTRUCTION()}}
+**DATA SAFETY GUIDELINES**
+{{ DATA_SAFETY_INSTRUCTION()}}{% endmacro %}
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/planner.jinja
+================================================
+{% import 'constants.jinja' as const %}
+{% import 'description.jinja' as description %}
+{% import 'instruction.jinja' as instruction %}
+
+{{ description.OVERALL_DESCRIPTION(const.PLANNER) }}
+
+{{ description.AGENT_DESCRIPTION() }}
+
+{{ description.WORKER_DESCRIPTION(analytics_worker_tool_description, plot_worker_tool_description) }}
+
+You are working on a use case called {{ use_case_name }}
+{{ use_case_description }}
+
+{% if disambiguate %}{{ instruction.DISAMBIGUATE_GENERAL_INSTRUCTION() }}{% else %}{{ instruction.PLANNER_GENERAL_INSTRUCTION()}}{% endif %}
+
+{use_case_schema}
+
+{use_case_planner_instruction}
+
+Respond a JSON with the structure of {% if disambiguate %}Feasibility{% else %}Plan{% endif %}
+Respond only with strict JSON, no JSON markers, no conversation formatting, no surrounding text.
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/plot_worker.jinja
+================================================
+{% import 'constants.jinja' as const %}
+{% import 'description.jinja' as description %}
+{% import 'instruction.jinja' as instruction %}
+
+{{ description.OVERALL_DESCRIPTION(const.PLOT_WORKER) }}
+
+{{ description.AGENT_DESCRIPTION() }}
+
+{{ description.WORKER_DESCRIPTION(analytics_worker_tool_description, plot_worker_tool_description) }}
+
+You are working on a use case called {{ use_case_name }}
+{{ use_case_description }}
+
+Your ```{{ const.JOB }}``` is to complete a single {{ const.TASK }} from the {{ const.PLAN }}.
+
+```INSTRUCTION```:
+{{ instruction.GENERAL_WORKER_INSTRUCTION() }}{{use_case_plot_worker_instruction}}
+
+You are equipped with the following tools:
+{{ plot_worker_tool_description }}
+
+{{dataframe_summary}}
+
+Given the previously completed TASKS:
+{{past_steps}}
+and, for the following PLAN:
+{{plan}}
+
+You are tasked with executing TASK 1: {{task}}
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/replanner.jinja
+================================================
+{% import 'constants.jinja' as const %}
+{% import 'description.jinja' as description %}
+{% import 'instruction.jinja' as instruction %}
+
+{{ description.OVERALL_DESCRIPTION(const.REPLANNER) }}
+
+{{ description.AGENT_DESCRIPTION() }}
+
+{{ description.WORKER_DESCRIPTION(analytics_worker_tool_description, plot_worker_tool_description) }}
+
+You are working on a use case called {{ use_case_name }}
+{{ use_case_description }}
+
+{% if end_check %}{{ instruction.END_CHECK_GENERAL_INSTRUCTION() }}{% else %}{{ instruction.REPLANNER_GENERAL_INSTRUCTION() }}{% endif %}
+
+{use_case_schema}
+
+{use_case_replanner_instruction}
+
+{history}
+
+Respond a JSON with the structure of {% if end_check %}EndCheck{% else %}Plan{% endif %}
+Respond only with strict JSON, no JSON markers, no conversation formatting, no surrounding text.
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/sql_generation.jinja
+================================================
+{% import 'instruction.jinja' as instruction %}
+You are a coding assistant focused on generating SQL queries for data analysis. Your primary task is to assist users in extracting insights from structured databases. You will write SQL to query this data and perform necessary calculations. Your goal is to provide accurate, efficient, and user-friendly solutions to complex data queries.
+When naming the output dataframe, please use "df_" as prefix and try to include filter condition and or group by condition in the name so that it will be unique and easily identifiable.
+
+KEY RESPONSIBILITIES:
+
+- Interpret User Queries: Generate SQL queries that accurately retrieve data from the specified tables.
+
+SCHEMA:
+
+Find the list of tables and their schema below. The schema lists all column names, their data types, their descriptions, and some example values if applicable.
+{{use_case_schema}}
+
+DIALECT AND FUNCTIONS:
+
+Use {{ dialect }} for SQL generation. The following functions are available for calculations:
+{{functions}}
+
+RULES AND GUIDELINES:
+
+**IMPORTANT INSTRUCTIONS**:
+- Every response must include a <reasoning> section explaining the logic.
+- Every response must include an <output> section with the dataframe name in snake_case.
+- Every response must include a <sql> section for the generated SQL code, using uppercase for SQL keywords.
+- Filter condition columns in the WHERE clause should be included in the SELECT clause.
+- If there's confusion in the user question, the task should be rejected, and candidates provided in the reasoning section.
+
+{{ instruction.GENERAL_WORKER_INSTRUCTION() }}
+
+**DATA SAFETY INSTRUCTIONS**:
+{{ instruction.DATA_SAFETY_INSTRUCTION()}}{use_case_sql_instruction}
+
+EXAMPLES:
+{use_case_sql_example}
+
+Can you write the code for the below query
+Q: {query}
+A:
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/sql_validation.jinja
+================================================
+You are an expert in SQL security. Your task is to analyze the following SQL statement and determine if it is unsafe.
+
+**Unsafe SQL Cases to Detect**
+
+**SQL Injection Risks**: Use of unsanitized user inputs and unrestricted UPDATE statements.
+
+**Operations Beyond READ access**: Detecting non-SELECT queries (e.g., INSERT, UPDATE, DELETE, TRUNCATE, DROP, ALTER, CREATE, GRANT, REVOKE, EXEC, MERGE) or commands modifying data, schema, or permissions.
+
+**Schema Discovery and Metadata Exposure**: Statements revealing database schema or metadata (e.g., DESCRIBE, SHOW TABLES, SHOW DATABASES, SHOW COLUMNS, INFORMATION_SCHEMA queries), with an instruction to explain why this is a security risk.
+
+**Privilege Escalation**: Statements granting excessive privileges or accessing/modifying system tables.
+
+**Resource Abuse**: Use of EXEC, xp_cmdshell, or commands executing system-level operations, and statements bypassing authentication/authorization checks.
+
+**Instructions**
+- Clearly explain why each detected unsafe case is unsafe and how it could be exploited.
+- Do not execute or modify the SQL statement; only analyze and comment.
+- Be thorough and concise in the analysis.
+
+Input SQL Statement: {sql_statement}
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/summarization.jinja
+================================================
+{% import 'constants.jinja' as const %}
+{% import 'description.jinja' as description%}
+
+{{description.OVERALL_DESCRIPTION(const.SUMMARIZATION) }}
+{{description.AGENT_DESCRIPTION() }}
+{{description.WORKER_DESCRIPTION(analytics_worker_tool_description, plot_worker_tool_description) }}
+
+You are working on a use case called {{ use_case_name}}
+{{ use_case_description }}
+
+Your {{ const.JOB }}``` is to analysize and summarize the agent working trajectory, provide a concise interpretation to the user on how you generate the final answer to address {{ const.USER_OBJECTIVE }}.
+
+You must follow the following instructions:
+- Format your summary in strict and easy-to-read 'Markdown.
+- Explain step-by-step on how the user query was handled. Structure the summary in multiple bullet points, one step per bullet point.
+- Skip the steps that failed or have no contribution to the final response.
+- Keep your summary concise and interpreable.
+- If one step contains SQL query, be sure to include them in the summary. Wrap SQL query in the following format with lowercase 'sql' keyword: sql SQL query
+- Briefly explain in English how the SQL query works.
+
+Please generate your Summary below:
 
 
 ================================================
@@ -1803,6 +2217,7 @@ FILE: dataqa/core/components/__init__.py
 FILE: dataqa/core/components/base_component.py
 ================================================
 import logging
+import time
 import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Type, Union
@@ -1811,6 +2226,11 @@ from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel, Field
 
 from dataqa.core.components.base_utils import get_field
+from dataqa.core.utils.langgraph_utils import (
+    CONFIGURABLE,
+    QUESTION_ID,
+    THREAD_ID,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -2029,8 +2449,8 @@ FILE: dataqa/core/components/code_executor/api_executor.py
 FILE: dataqa/core/components/code_executor/base_code_executor.py
 ================================================
 from abc import ABC, abstractmethod
-from enum import Enum
 from typing import Any, List
+from enum import Enum
 
 from pydantic import BaseModel, Field
 
