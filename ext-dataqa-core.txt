@@ -17,7 +17,18 @@ Directory structure:
         │   │       ├── config.py
         │   │       ├── cwd_agent.py
         │   │       ├── error_message.py
-        │   │       └── prompt.py
+        │   │       ├── prompt.py
+        │   │       └── templates/
+        │   │           ├── analytics_worker.jinja
+        │   │           ├── constants.jinja
+        │   │           ├── description.jinja
+        │   │           ├── instruction.jinja
+        │   │           ├── planner.jinja
+        │   │           ├── plot_worker.jinja
+        │   │           ├── replanner.jinja
+        │   │           ├── sql_generation.jinja
+        │   │           ├── sql_validation.jinja
+        │   │           └── summarization.jinja
         │   ├── components/
         │   │   ├── __init__.py
         │   │   ├── base_component.py
@@ -33,9 +44,7 @@ Directory structure:
         │   │   │   ├── data_scanner.py
         │   │   │   ├── infer_metadata.py
         │   │   │   ├── rule_inference.py
-        │   │   │   ├── rule_inference_batch_test.py
-        │   │   │   ├── rule_inference_components.py
-        │   │   │   └── rule_inference_pipeline.py
+        │   │   │   └── rule_inference_batch_test.py
         │   │   ├── langgraph_conditional_edge/
         │   │   │   ├── __init__.py
         │   │   │   ├── base_conditional_edge.py
@@ -61,13 +70,8 @@ Directory structure:
         │   │   │   ├── __init__.py
         │   │   │   └── resource_manager.py
         │   │   └── retriever/
-        │   │       ├── README.md
         │   │       ├── __init__.py
         │   │       ├── base_retriever.py
-        │   │       ├── dbc_opensearch_mapping.json
-        │   │       ├── opensearch_mapping.json
-        │   │       ├── opensearch_retriever.py
-        │   │       ├── opensearch_util.py
         │   │       ├── tag_retriever.py
         │   │       └── vector_retriever.py
         │   ├── data_models/
@@ -124,7 +128,6 @@ Directory structure:
         │       ├── client.py
         │       └── factory.py
         └── templates/
-            ├── cwd_agent_structure_template.yml
             ├── default_graph_config.yml
             ├── examples.yml
             ├── rules.yml
@@ -335,13 +338,21 @@ class Memory:
     def list_dataframes(self, config: RunnableConfig):
         return list(self.get_dataframes(config).keys())
 
-    def get_dataframe(self, name: str, config: RunnableConfig):
-        return self.get_dataframes(config).get(name)
+    def get_dataframe(
+        self, name: str, config: RunnableConfig, with_sql: bool = False
+    ):
+        if with_sql:
+            return self.get_dataframes(config).get(name, [None, None])
+        return self.get_dataframes(config).get(name, [None])[0]
 
     def put_dataframe(
-        self, name: str, df: pd.DataFrame, config: RunnableConfig
+        self,
+        name: str,
+        df: pd.DataFrame,
+        config: RunnableConfig,
+        sql: str = None,
     ):
-        self.get_dataframes(config)[name] = df
+        self.get_dataframes(config)[name] = [df, sql]
 
     def get_image(self, name: str, config: RunnableConfig) -> bytes:
         images = self.get_images(config).get(name)
@@ -388,7 +399,7 @@ class Memory:
             f"You have access to the following {len(dataframes)} dataframes:"
         ]
         for k, v in dataframes.items():
-            message.append(self.summarize_one_dataframe(k, v))
+            message.append(self.summarize_one_dataframe(k, v[0]))
         return "\n\n".join(message)
 
     def summarize(self, name):
@@ -741,7 +752,6 @@ class CwdAgentDefinitionConfig(BaseModel):
     llm: CwdAgentLLMReferences
     resource_manager_config: ResourceManagerConfig
     retriever_config: RetrieverSelectionConfig
-    fallback_retriever_config: Optional[RetrieverSelectionConfig] = None
     workers: CwdAgentWorkersModulesConfig
     max_tasks: int = Field(
         description="The maximum number of tasks that can be executed before termination.",
@@ -825,6 +835,8 @@ from dataqa.core.components.resource_manager.resource_manager import (
 )
 from dataqa.core.llm.base_llm import BaseLLM
 from dataqa.core.memory import Memory
+
+# from dataqa.core.services.storage import LocalFileDataSource
 from dataqa.core.tools import (
     get_analytics_tools_and_descriptions,
     get_plot_tools_and_descriptions,
@@ -840,6 +852,8 @@ from dataqa.core.utils.langgraph_utils import (
     TOKEN,
 )
 from dataqa.core.utils.prompt_utils import build_prompt
+
+# from dataqa.core.utils.prompt_utils import prompt_type
 from dataqa.core.utils.utils import cls_from_str
 
 logger = logging.getLogger(__name__)
@@ -887,7 +901,6 @@ class CWDState(PlanExecuteState):
     plot_worker_rule: str = ""
     plot_worker_schema: str = ""
     plot_worker_example: str = ""
-    schema_fallback_level: str = ""
     error: str = ""
     total_time: float = 0
 
@@ -966,21 +979,7 @@ class CWDAgent(Agent):
             retriever_output[field] = field
         self.retriever.output_mapping = retriever_output
 
-        # 3.1 Instantiate fall back retriever
-        if config.fallback_retriever_config is not None:
-            self.fallback_retriever = cls_from_str(
-                config.fallback_retriever_config.type
-            )(
-                config=config.fallback_retriever_config.config,
-                resource_manager=self.resource_manager,
-            )
-            self.fallback_retriever.set_input_mapping(dict(query="query"))
-            retriever_output = {}
-            for field in self.fallback_retriever.output_base_model.__fields__:
-                retriever_output[field] = field
-            self.fallback_retriever.output_mapping = retriever_output
-        else:
-            self.fallback_retriever = None
+
 
         # 4. Finalize initialization by calling the parent constructor
         super().__init__(memory=memory, llm=self.llms["default"])
@@ -1098,7 +1097,6 @@ class CWDAgent(Agent):
             llm=llm,
             config=config,
             sql_executor=self.sql_executor,
-            fallback_schema_retriever=self.fallback_retriever,
         )
         worker.set_input_mapping(
             dict(
@@ -1106,7 +1104,6 @@ class CWDAgent(Agent):
                 rule="retrieval_worker_rule",
                 schema="retrieval_worker_schema",
                 example="retrieval_worker_example",
-                schema_fallback_level="schema_fallback_level",
             )
         )
         worker.output_mapping = dict(
@@ -1306,7 +1303,7 @@ class CWDAgent(Agent):
             timeout = self.config.timeout
             start_time = time.monotonic()
             logger.info(
-                f"Conversation ID: {thread_id}; question ID: {question_id}. - Starting to run agent graph."
+                f"Conversation ID: {thread_id}; question ID: {question_id}. Starting to run agent graph."
             )
             async with asyncio.timeout(timeout):
                 async for name, message in stream():
@@ -1316,7 +1313,7 @@ class CWDAgent(Agent):
 
             state.total_time = time.monotonic() - start_time
             logger.info(
-                f"Conversation ID: {thread_id}; question ID: {question_id}. - Finished running agent graph in {round(state.total_time, 2)} seconds."
+                f"Conversation ID: {thread_id}; question ID: {question_id}. Finished running agent graph in {round(state.total_time, 2)} seconds."
             )
             yield state, all_events
 
@@ -1339,7 +1336,7 @@ class CWDAgent(Agent):
             )
             state.error = f"{repr(e)}\n{call_stack}"
             logger.error(
-                f"Conversation ID: {thread_id}; question ID: {question_id}. Error: Agent failed with error:\n{state.error}"
+                f"Conversation ID: {thread_id}; question ID: {question_id}. Error: agent failed with error:\n{state.error}"
             )
             yield state, all_events
 
@@ -1348,7 +1345,30 @@ class CWDAgent(Agent):
 ================================================
 FILE: dataqa/core/agent/cwd_agent/error_message.py
 ================================================
-[Empty file]
+from typing import Optional
+from pydantic import BaseModel, Field
+
+from dataqa.core.utils.agent_util import NodeName
+
+agent_error_log = []
+
+
+class ColumnNamingError(Exception):
+    """Raised when there's an error with column naming."""
+
+    pass
+
+
+class SqlExecutionError(Exception):
+    """Raised when SQL execution fails."""
+
+    pass
+
+
+class InternalDataframeError(Exception):
+    """Raised when there's an error with internal dataframe references."""
+
+    pass
 
 
 ================================================
@@ -1386,7 +1406,7 @@ AGENTS_DESCRIPTION = f"""This AI Assistant is equipped with five agents: {PLANNE
 WORKER_DESCRIPTION = f"""{RETRIEVAL_WORKER} is responsible for data retrieval by generating and executing SQL queries.
 {RETRIEVAL_WORKER} has access to database tables only. {RETRIEVAL_WORKER} can not access intermediate dataframes stored in memory.
 Intermediate dataframes stored in memory can only be used by {ANALYTICS_WORKER} and {PLOT_WORKER}.
-DO NOT generate plan for {RETRIEVAL_WORKER} that requires access to intermediate dataframes stored in memory.
+Do NOT generate plan for {RETRIEVAL_WORKER} that requires access to intermediate dataframes stored in memory.
 {ANALYTICS_WORKER} is equipped with the following tools:
 {{analytics_worker_tool_description}}
 {PLOT_WORKER} is equipped with the following tools:
@@ -1544,7 +1564,7 @@ FUNCTIONS = """
 """
 SQL_GENERATOR_PROMPT_TEMPLATE = f"""
 You are a coding assistant focused on generating SQL queries for data analysis. Your primary task is to assist users in extracting insights from structured databases. You will write SQL to query this data and perform necessary calculations. Your goal is to provide accurate, efficient, and user-friendly solutions to complex data queries.
-When naming the output dataframe, try to include filter condition in the name so that it wil be unique and easily identifiable.
+When naming the output dataframe, try to include filter condition in the name so that it will be unique and easily identifiable.
 -------------------------------------------------
 KEY RESPONSIBILITIES:
 
@@ -1740,6 +1760,421 @@ def instantiate_replanner_prompt_by_use_case_jinja(
     return prompt
 
 
+def instantiate_sql_generator_prompt_by_use_case_jinja(
+    dialect: str = "snowflake", functions: str = ""
+):
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("sql_generation.jinja")
+    return template.render(dialect=dialect, functions=functions)
+
+
+def instantiate_analytics_worker_prompt_by_use_case_jinja(
+    use_case_name: str,
+    use_case_description: str,
+    analytics_worker_tool_description: str,
+):
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("analytics_worker.jinja")
+    return template.render(
+        use_case_name=use_case_name.strip(),
+        use_case_description=use_case_description.strip(),
+        analytics_worker_tool_description=analytics_worker_tool_description.rstrip(),
+    )
+
+
+def instantiate_plot_worker_prompt_by_use_case_jinja(
+    use_case_name: str,
+    use_case_description: str,
+    plot_worker_tool_description: str,
+):
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("plot_worker.jinja")
+    return template.render(
+        use_case_name=use_case_name.strip(),
+        use_case_description=use_case_description.strip(),
+        plot_worker_tool_description=plot_worker_tool_description.rstrip(),
+    )
+
+
+def instantiate_summarization_prompt_by_use_case_jinja(
+    use_case_name: str,
+    use_case_description: str,
+    analytics_worker_tool_description: str,
+    plot_worker_tool_description: str,
+) -> Dict[Literal["action_prompt", "plan_prompt"], str]:
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("summarization.jinja")
+    return template.render(
+        use_case_name=use_case_name.strip(),
+        use_case_description=use_case_description.strip(),
+        analytics_worker_tool_description=analytics_worker_tool_description.rstrip(),
+        plot_worker_tool_description=plot_worker_tool_description.rstrip(),
+    )
+
+
+def instantiate_sql_validation_prompt_jinja():
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("sql_validation.jinja")
+    return template.render()
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/constants.jinja
+================================================
+{% set USER_OBJECTIVE = "USER OBJECTIVE" %}
+{% set PLANNER = "Planner" %}
+{% set REPLANNER = "Replanner" %}
+{% set WORKER = "Worker" %}
+{% set RETRIEVAL_WORKER = "Retrieval Worker" %}
+{% set ANALYTICS_WORKER = "Analytics Worker" %}
+{% set PLOT_WORKER = "Plot Worker" %}
+{% set SUMMARIZATION = "Summarization" %}
+{% set JOB = "JOB" %}
+{% set TASK = "TASK" %}
+{% set TASKS = "TASKS" %}
+{% set TOOLS = "TOOLS" %}
+{% set PLAN = "PLAN" %}
+{% set TASK_REJECTED = "TASK REJECTED" %}
+{% set HISTORY = "HISTORY" %}
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/description.jinja
+================================================
+{% import 'constants.jinja' as const %}
+
+{% macro AGENT_DESCRIPTION()%}
+This AI Assistant is equipped with five agents: {{ const.PLANNER}}, {{ const.REPLANNER}}, {{ const.RETRIEVAL_WORKER}}, {{ const.ANALYTICS_WORKER }}, and {{ const.PLOT_WORKER }}. These agents work collaboratively to achieve the {{ const.USER_OBJECTIVE }}:
+The designated {{ const.WORKER }} agent executes the first {{ const.TASK }} from the {{ const.PLAN }}.
+{{ const.RETRIEVAL_WORKER }} agent handles data retrieval {{ const.TASKS }} by generating and executing SQL queries to access the database.
+{{ const.ANALYTICS_WORKER }} agent performs data analysis {{ const.TASKS }} using available {{ const.TOOLS }} on existing data.
+{{ const.PLOT_WORKER }} agent creates visualizations based on existing data using available {{ const.TOOLS }}.
+After executing a {{ const.TASK }}, the {{ const.REPLANNER }} evaluates the results to determine if the {{ const.USER_OBJECTIVE }} is complete, adjusts the {{ const.PLAN }} if necessary, and provides the updated {{ const.PLAN }} to the {{ const.WORKER }}.{% endmacro %}
+
+{% macro OVERALL_DESCRIPTION(agent_name) %}
+You are a {{ agent_name}} agent working within a professional AI Assistant for Data Question Answering.{% endmacro %}
+
+{% macro WORKER_DESCRIPTION(analytics_worker_tool_description, plot_worker_tool_description) %}
+{{ const.RETRIEVAL_WORKER }} is responsible for data retrieval by generating and executing SQL queries.
+{{ const.RETRIEVAL_WORKER }} has access to database tables only. {{ const.RETRIEVAL_WORKER }} can not access intermediate dataframes stored in memory.
+Intermediate dataframes stored in memory can only be used by {{ const.ANALYTICS_WORKER }} and {{ const.PLOT_WORKER }}.
+Do NOT generate plan for {{ const.RETRIEVAL_WORKER }} that requires access to intermediate dataframes stored in memory.
+{{ const.ANALYTICS_WORKER }} is equipped with the following tools:
+{{ analytics_worker_tool_description }}
+{{ const.PLOT_WORKER }} is equipped with the following tools:
+{{ plot_worker_tool_description }}{% endmacro %}
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/instruction.jinja
+================================================
+{% import 'constants.jinja' as const %}
+{% macro GENERAL_WORKER_INSTRUCTION()%}
+{% endmacro %}
+
+{% macro PLAN_INSTRUCTION()%}
+- In your {{ const.PLAN }}, ensure each {{ const.TASK }} is assigned to ONE {{ const.WORKER }}. Do NOT create a {{ const.TASK }} that requires multiple {{ const.WORKER }}.
+- Clearly describe the target of each {{ const.TASK }}.
+- Ensure each {{ const.TASK}} includes all necessary information-do not skip steps.
+- If an analytics {{ const.TASK }} can be efficiently achieved in the {{ const.RETRIEVAL_WORKER}} step, do NOT assign it to {{ const.ANALYTICS_WORKER }}. Examples include tasks like min, max, average, count, group by, order by using SQL.
+- When an analytics {{ const.TASK }} is too complex for {{ const.RETRIEVAL_WORKER}}, assign it to {{ const.ANALYTICS_WORKER }}.
+- DO NOT mention specific tools in the {{ const.TASK }}-formulate the {{ const.TASK }} in English without referencing tools.
+- The combined outcomes of all {{ const.TASKS }} should fully address the {{ const.USER_OBJECTIVE }}.{% endmacro %}
+
+{% macro CHAT_SAFETY_INSTRUCTION()%}
+{% endmacro %}
+
+{% macro DATA_SAFETY_INSTRUCTION()%}
+**System Tables Restriction**: Reject queries that attempt to access system tables, metadata tables, or information schema tables (e.g., INFORMATION_SCHEMA, sys.*, pg_catalog, etc.).
+**Read-Only Operations**: You only have read access. Avoid generating queries with operations such as DELETE, INSERT, UPDATE, ALTER, DROP, CREATE, or any DDL/DML statements.
+**Query Optimization**: To avoid retrieving large datasets, avoid SELECT (*). Instead, specify only the necessary columns and include appropriate WHERE clauses.
+**Metadata Requests**: If users ask for table schemas, column information, or database structure:
+- Politely explain that you cannot provide metadata or schema information
+- Suggest they consult their use case administrator or documentation
+- Offer to help with specific data queries if they provide the table and column names
+**Error Handling**: If a query fails due to permissions or restrictions, explain the limitation without revealing system details.{% endmacro %}
+
+{% macro PLANNER_GENERAL_INSTRUCTION()%}
+Your```{{ const.JOB }}``` is to generate a step-by-step {{ const.PLAN }} for solving the {{ const.USER_OBJECTIVE }} related to the underlying database.
+**INSTRUCTIONS**:
+{{ PLAN_INSTRUCTION() }}{% endmacro %}
+
+{% macro DISAMBIGUATE_GENERAL_INSTRUCTION()%}
+Your```{{ const.JOB }}``` is to check if you can address {{ const.USER_OBJECTIVE }} before generating a step-by-step {{ const.PLAN }}. Specifically, please check:
+- if {{ const.USER_OBJECTIVE }} contains any ambiguity.
+- if you have sufficient information and tools to address the USER OBJECTIVE.
+- if {{ const.USER_OBJECTIVE }} brings any safety concerns.
+**INSTRUCTIONS**:
+- Please identify ambiguity in the user question. If there is any ambiguity, please DO 'NOT' generate plan but respond to user asking for clarification.
+Possible source of ambiguity:
+- Please check the term, entity, and token mentioned in the user question. If there are multiple ways to interpret it with equal confidence, the question is ambiguous.
+- Please check the intent of the question. If there are multiple ways to understand the intent of the question, the question is ambiguous.
+**CHAT SAFETY GUIDELINES**:
+{{ CHAT_SAFETY_INSTRUCTION() }}
+**DATA SAFETY GUIDELINES**
+{{ DATA_SAFETY_INSTRUCTION()}}{% endmacro %}
+
+{% macro REPLANNER_GENERAL_INSTRUCTION()%}
+Your```{{ const.JOB }}``` is to evaluate the progress of solving the {{ const.USER_OBJECTIVE }} and generate a {{ const.PLAN }} for the remaining {{ const.TASKS }}.
+**INSTRUCTIONS**:
+{{ PLAN_INSTRUCTION()}}
+Do not repeat {{ const.TASKS }} that have been completed.
+If the {{ const.PLAN }} includes a plot {{ const.TASK }}, do not terminate before executing the plot {{ const.TASK }}.
+Carefully review completed {{ const.TASKS }} and update your {{ const.PLAN }} accordingly. If no more {{ const.TASKS }} are needed and you can return to the user, then respond with that. Otherwise, fill out the {{ const.PLAN }}.
+- Only add {{ const.TASKS }} to the {{ const.PLAN }} that still NEED to be done. Do not add previously successfully completed {{ const.TASKS }} as part of the {{ const.PLAN }}.
+If possible, assign calculation as {{ const.TASKS }} to workers. DO NOT do calculation yourself.
+Pay attention if any Completed Tasks say that {{ const.TASK }} could not be completed it will contain code {{ const.TASK_REJECTED }}
+then try to adjust the plan by breaking down the TASK that was not completed into simpler/smaller TASKS that can be executed given available TOOLS.{% endmacro %}
+
+{% macro END_CHECK_GENERAL_INSTRUCTION() %}
+Your {{ const.JOB }}``` is to evaluate the progress of solving the {{ const.USER_OBJECTIVE }} and check:
+- If you have obtained the final results and are ready to return the final response message to the user.
+- If you are facing a bloker and can NOT continue on solving the {{ const.USER_OBJECTIVE }}.
+**INSTRUCTIONS**:
+Carefully review completed {{ const.TASKS }} and evaluate if you should continue. If no more {{ const.TASKS }} are needed and you can return to the user, then respond with that. Otherwise, fill out the {{ const.PLAN }}.
+If possible, assign calculation as {{ const.TASKS }} to workers. DO 'NOT' do calculation yourself.
+Pay attention if any Completed Tasks say that task could not be completed it will contain code {{ const.TASK_REJECTED }}
+then try to adjust the plan by breaking down the {{ const.TASK }} that was not completed into simpler/smaller {{ const.TASKS }} that can be executed given available {{ const.TOOLS }}.
+If no more {{ const.TASKS }} needed, please generate the response return to the user.
+- If the answer is contained in existing tables or plots, please direct the user to check the tables and plots directly. DO NOT repeat the results in tables in English.
+- If a part of the answer cannot be directly read from tables or plots, present the answer in the response.
+**CHAT SAFETY GUIDELINES**:
+{{ CHAT_SAFETY_INSTRUCTION()}}
+**DATA SAFETY GUIDELINES**
+{{ DATA_SAFETY_INSTRUCTION()}}{% endmacro %}
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/planner.jinja
+================================================
+{% import 'constants.jinja' as const %}
+{% import 'description.jinja' as description %}
+{% import 'instruction.jinja' as instruction %}
+
+{{ description.OVERALL_DESCRIPTION(const.PLANNER) }}
+
+{{ description.AGENT_DESCRIPTION() }}
+
+{{ description.WORKER_DESCRIPTION(analytics_worker_tool_description, plot_worker_tool_description) }}
+
+You are working on a use case called {{ use_case_name }}
+{{ use_case_description }}
+
+{% if disambiguate %}{{ instruction.DISAMBIGUATE_GENERAL_INSTRUCTION() }}{% else %}{{ instruction.PLANNER_GENERAL_INSTRUCTION()}}{% endif %}
+
+{use_case_schema}
+
+{use_case_planner_instruction}
+
+Respond a JSON with the structure of {% if disambiguate %}Feasibility{% else %}Plan{% endif %}
+Respond only with strict JSON, no JSON markers, no conversation formatting, no surrounding text.
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/replanner.jinja
+================================================
+{% import 'constants.jinja' as const %}
+{% import 'description.jinja' as description %}
+{% import 'instruction.jinja' as instruction %}
+
+{{ description.OVERALL_DESCRIPTION(const.REPLANNER) }}
+
+{{ description.AGENT_DESCRIPTION() }}
+
+{{ description.WORKER_DESCRIPTION(analytics_worker_tool_description, plot_worker_tool_description) }}
+
+You are working on a use case called {{ use_case_name }}
+{{ use_case_description }}
+
+{% if end_check %}{{ instruction.END_CHECK_GENERAL_INSTRUCTION() }}{% else %}{{ instruction.REPLANNER_GENERAL_INSTRUCTION() }}{% endif %}
+
+{use_case_schema}
+
+{use_case_replanner_instruction}
+
+{history}
+
+Respond a JSON with the structure of {% if end_check %}EndCheck{% else %}Plan{% endif %}
+Respond only with strict JSON, no JSON markers, no conversation formatting, no surrounding text.
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/sql_generation.jinja
+================================================
+{% import 'instruction.jinja' as instruction %}
+You are a coding assistant focused on generating SQL queries for data analysis. Your primary task is to assist users in extracting insights from structured databases. You will write SQL to query this data and perform necessary calculations. Your goal is to provide accurate, efficient, and user-friendly solutions to complex data queries.
+When naming the output dataframe, please use "df_" as prefix and try to include filter condition and or group by condition in the name so that it will be unique and easily identifiable.
+
+KEY RESPONSIBILITIES:
+
+- Interpret User Queries: Generate SQL queries that accurately retrieve data from the specified tables.
+
+SCHEMA:
+
+Find the list of tables and their schema below. The schema lists all column names, their data types, their descriptions, and some example values if applicable.
+{{use_case_schema}}
+
+DIALECT AND FUNCTIONS:
+
+Use {{ dialect }} for SQL generation. The following functions are available for calculations:
+{{functions}}
+
+RULES AND GUIDELINES:
+
+**IMPORTANT INSTRUCTIONS**:
+- Every response must include a <reasoning> section explaining the logic.
+- Every response must include an <output> section with the dataframe name in snake_case.
+- Every response must include a <sql> section for the generated SQL code, using uppercase for SQL keywords.
+- Filter condition columns in the WHERE clause should be included in the SELECT clause.
+- If there's confusion in the user question, the task should be rejected, and candidates provided in the reasoning section.
+
+{{ instruction.GENERAL_WORKER_INSTRUCTION() }}
+
+**DATA SAFETY INSTRUCTIONS**:
+{{ instruction.DATA_SAFETY_INSTRUCTION()}}{use_case_sql_instruction}
+
+EXAMPLES:
+{use_case_sql_example}
+
+Can you write the code for the below query
+Q: {query}
+A:
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/sql_validation.jinja
+================================================
+You are an expert in SQL security. Your task is to analyze the following SQL statement and determine if it is unsafe.
+
+**Unsafe SQL Cases to Detect**
+
+**SQL Injection Risks**: Use of unsanitized user inputs and unrestricted UPDATE statements.
+
+**Operations Beyond READ access**: Detecting non-SELECT queries (e.g., INSERT, UPDATE, DELETE, TRUNCATE, DROP, ALTER, CREATE, GRANT, REVOKE, EXEC, MERGE) or commands modifying data, schema, or permissions.
+
+**Schema Discovery and Metadata Exposure**: Statements revealing database schema or metadata (e.g., DESCRIBE, SHOW TABLES, SHOW DATABASES, SHOW COLUMNS, INFORMATION_SCHEMA queries), with an instruction to explain why this is a security risk.
+
+**Privilege Escalation**: Statements granting excessive privileges or accessing/modifying system tables.
+
+**Resource Abuse**: Use of EXEC, xp_cmdshell, or commands executing system-level operations, and statements bypassing authentication/authorization checks.
+
+**Instructions**
+- Clearly explain why each detected unsafe case is unsafe and how it could be exploited.
+- Do not execute or modify the SQL statement; only analyze and comment.
+- Be thorough and concise in the analysis.
+
+Input SQL Statement: {sql_statement}
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/analytics_worker.jinja
+================================================
+{% import 'constants.jinja' as const %}
+{% import 'description.jinja' as description %}
+{% import 'instruction.jinja' as instruction %}
+
+{{ description.OVERALL_DESCRIPTION(const.ANALYTICS_WORKER) }}
+{{description.AGENT_DESCRIPTION() }}
+
+You are working on a use case called {{ use_case_name }}
+
+Your {{ const.JOB }}``` is to complete a single {{ const.TASK }} from the {{ const.PLAN }}.
+
+***INSTRUCTIONS**
+{{ instruction.GENERAL_WORKER_INSTRUCTION() }}{use_case_analytics_worker_instruction}
+
+You are equipped with the following tools:
+{{ analytics_worker_tool_description }}
+
+{dataframe_summary}
+
+Given the previously completed TASKS:
+{past_steps}
+and, for the following PLAN:
+{plan}
+
+You are tasked with executing TASK 1: {task}
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/plot_worker.jinja
+================================================
+{% import 'constants.jinja' as const %}
+{% import 'description.jinja' as description %}
+{% import 'instruction.jinja' as instruction %}
+
+{{ description.OVERALL_DESCRIPTION(const.PLOT_WORKER) }}
+
+{{ description.AGENT_DESCRIPTION() }}
+
+{{ description.WORKER_DESCRIPTION(analytics_worker_tool_description, plot_worker_tool_description) }}
+
+You are working on a use case called {{ use_case_name }}
+{{ use_case_description }}
+
+Your ```{{ const.JOB }}``` is to complete a single {{ const.TASK }} from the {{ const.PLAN }}.
+
+```INSTRUCTION```:
+{{ instruction.GENERAL_WORKER_INSTRUCTION() }}{{use_case_plot_worker_instruction}}
+
+You are equipped with the following tools:
+{{ plot_worker_tool_description }}
+
+{{dataframe_summary}}
+
+Given the previously completed TASKS:
+{{past_steps}}
+and, for the following PLAN:
+{{plan}}
+
+You are tasked with executing TASK 1: {{task}}
+
+
+================================================
+FILE: dataqa/core/agent/cwd_agent/templates/summarization.jinja
+================================================
+{% import 'constants.jinja' as const %}
+{% import 'description.jinja' as description%}
+
+{{description.OVERALL_DESCRIPTION(const.SUMMARIZATION) }}
+{{description.AGENT_DESCRIPTION() }}
+{{description.WORKER_DESCRIPTION(analytics_worker_tool_description, plot_worker_tool_description) }}
+
+You are working on a use case called {{ use_case_name}}
+{{ use_case_description }}
+
+Your {{ const.JOB }}``` is to analysize and summarize the agent working trajectory, provide a concise interpretation to the user on how you generate the final answer to address {{ const.USER_OBJECTIVE }}.
+
+You must follow the following instructions:
+- Format your summary in strict and easy-to-read 'Markdown.
+- Explain step-by-step on how the user query was handled. Structure the summary in multiple bullet points, one step per bullet point.
+- Skip the steps that failed or have no contribution to the final response.
+- Keep your summary concise and interpreable.
+- If one step contains SQL query, be sure to include them in the summary. Wrap SQL query in the following format with lowercase 'sql' keyword: sql SQL query
+- Briefly explain in English how the SQL query works.
+
+Please generate your Summary below:
+
 
 ================================================
 FILE: dataqa/core/components/__init__.py
@@ -1759,6 +2194,11 @@ from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel, Field
 
 from dataqa.core.components.base_utils import get_field
+from dataqa.core.utils.langgraph_utils import (
+    CONFIGURABLE,
+    QUESTION_ID,
+    THREAD_ID,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1891,8 +2331,29 @@ class Component(ABC):
 
         input_data = self.input_base_model(**input_data)
 
+        thread_id = config.get(CONFIGURABLE, {}).get(THREAD_ID, None)
+        question_id = config.get(CONFIGURABLE, {}).get(QUESTION_ID, None)
+
+        logger.debug(
+            f"Component {self.config.name} (type: {self.component_type}) - Input data: {input_data}"
+        )
+        logger.info(
+            f"Component {self.config.name} (type: {self.component_type}) - Starting execution. Thread ID: {thread_id}, Question ID: {question_id}"
+        )
+
+        import time
+        start_time = time.time()
+
         # run
         response = await self.run(input_data=input_data, config=config)
+
+        execution_time = time.time() - start_time
+        logger.info(
+            f"Component {self.config.name} (type: {self.component_type}) - Execution completed in {execution_time:.2f}s. Thread ID: {thread_id}, Question ID: {question_id}"
+        )
+        logger.debug(
+            f"Component {self.config.name} (type: {self.component_type}) - Output: {response}"
+        )
 
         # validate output and update state
         assert isinstance(response, self.output_base_model)
@@ -1970,13 +2431,108 @@ FILE: dataqa/core/components/code_executor/__init__.py
 ================================================
 FILE: dataqa/core/components/code_executor/api_executor.py
 ================================================
-[Empty file]
+import logging
+from typing import Any, Dict, Union
+
+import pandas as pd
+from pydantic import BaseModel, Field
+
+from dataqa.core.components.code_executor.base_code_executor import (
+    CodeExecutor,
+    CodeExecutorConfig,
+    CodeExecutorOutput,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class ApiCodeExecutorConfig(CodeExecutorConfig):
+    backend: str = Field(
+        default="redshift",
+        description="The backend to use for execution, either 'redshift' or 'snowflake'",
+    )
+    connect_args: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Connection arguments for the database",
+    )
+    timeout: int = Field(
+        description="Timeout in seconds for the database connection",
+        default=[],
+    )
+
+
+class APICodeExecutorInput(BaseModel):
+    code: str
+
+
+class ApiCodeExecutor(CodeExecutor):
+    """
+    API Code Executor connects to databases via SQLAlchemy and executes SQL queries.
+    It supports any SQLAlchemy database type.
+    """
+
+    component_type = "ApiCodeExecutor"
+    config_base_model = ApiCodeExecutorConfig
+    input_base_model = APICodeExecutorInput
+    output_base_model = CodeExecutorOutput
+    config: ApiCodeExecutorConfig
+
+    def __init__(self, config: Union[ApiCodeExecutorConfig, Dict], **kwargs):
+        super().__init__(config=config, **kwargs)
+        self.engine = None
+        self._initialize_engine()
+
+    def _initialize_engine(self):
+        try:
+            if self.config.backend == "snowflake":
+                import snowflake.connector
+
+                self.engine = snowflake.connector.connect(
+                    **self.config.connect_args
+                )
+            elif self.config.backend == "redshift":
+                import redshift_connector
+
+                self.engine = redshift_connector.connect(
+                    **self.config.connect_args
+                )
+            else:
+                raise ValueError(
+                    f"Unsupported backend: {self.config.backend}. Use 'snowflake' or 'redshift'."
+                )
+        except Exception as e:
+            logger.error(f"Failed to initialize engine: {e}")
+            raise Exception(f"Failed to initialize engine: {e}")
+
+    def display(self):
+        logger.info(f"Component Name: {self.config.name}")
+        logger.info(f"Component Type: {self.component_type}")
+        logger.info(f"Connection String: {self.config.connect_args}")
+        logger.info(f"Input BaseModel: {self.input_base_model.model_fields}")
+        logger.info(f"Output BaseModel: {self.output_base_model.model_fields}")
+
+    async def run(
+        self, input_data: APICodeExecutorInput, config={}
+    ) -> CodeExecutorOutput:
+        sql_code = input_data.code
+        # print(sql_code)
+        cursor = self.engine.cursor()
+        cursor.execute(sql_code)
+        result = cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description]
+        df = pd.DataFrame(result, columns=columns)
+        return CodeExecutorOutput(
+            code=sql_code,
+            dataframe=[df.to_json(orient="records")],
+            error="",
+        )
 
 
 ================================================
 FILE: dataqa/core/components/code_executor/base_code_executor.py
 ================================================
 from abc import ABC, abstractmethod
+from enum import Enum
 from typing import Any, List
 
 from pydantic import BaseModel, Field
@@ -1985,6 +2541,16 @@ from dataqa.core.components.base_component import (
     Component,
     ComponentConfig,
 )
+
+
+class DatabaseType(Enum):
+    duckdb = "duckdb"
+    pyspark = "pyspark"
+    sqlite = "sqlite"
+    snowflake = "snowflake"
+    redshift = "redshift"
+    sqlserver = "sqlserver"
+    databricks = "databricks"
 
 
 class CodeExecutorOutput(BaseModel):
@@ -2017,13 +2583,14 @@ class CodeExecutor(Component, ABC):
 FILE: dataqa/core/components/code_executor/in_memory_code_executor.py
 ================================================
 import logging
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 import duckdb
 import pandas as pd
 from pydantic import BaseModel, Field
 from pyspark.sql import SparkSession
 
+from dataqa.core.agent.cwd_agent.error_message import ColumnNamingError
 from dataqa.core.components.base_component import (
     OutputVariable,
     Variable,
@@ -2032,6 +2599,7 @@ from dataqa.core.components.code_executor.base_code_executor import (
     CodeExecutor,
     CodeExecutorConfig,
     CodeExecutorOutput,
+    DatabaseType,
 )
 from dataqa.core.utils.component_utils import build_base_model_from_parameters
 
@@ -2054,9 +2622,13 @@ class InMemoryCodeExecutorConfig(CodeExecutorConfig):
     output: List[OutputVariable] = Field(
         description="the schema of output parameters", default=[]
     )
-    backend: str = Field(
-        default="duckdb",
-        description="The backend to use for execution, either 'duckdb' or 'pyspark'",
+    backend: DatabaseType = Field(
+        default=DatabaseType.duckdb,
+        description="The backend to use for execution, either 'duckdb', 'pyspark', or 'sqlite'",
+    )
+    execution_parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional parameters for execution",
     )
 
 
@@ -2075,18 +2647,28 @@ class InMemoryCodeExecutor(CodeExecutor):
             base_model_name=f"{self.config.name}_input",
             parameters=self.config.input,
         )
-        self.backend = self.config.backend.lower()
-        if self.backend == "duckdb":
-            self.connection = duckdb.connect(database=":memory:")
-        elif self.backend == "pyspark":
+        if isinstance(self.config.backend, str):
+            self.backend = DatabaseType(self.config.backend.lower())
+        else:
+            self.backend = self.config.backend
+        
+        if self.backend == DatabaseType.duckdb:
+            db_file_path = self.config.execution_parameters.get("db_file_path", ":memory:")
+            read_only = self.config.execution_parameters.get("read_only", False)
+            self.connection = duckdb.connect(database=db_file_path, read_only=read_only)
+        elif self.backend == DatabaseType.pyspark:
             self.spark = SparkSession.builder.appName(
                 "InMemoryCodeExecutor"
             ).getOrCreate()
+        elif self.backend == DatabaseType.sqlite:
+            import sqlite3
+            db_file_path = self.config.execution_parameters.get("db_file_path", ":memory:")
+            self.connection = sqlite3.connect(db_file_path)
         else:
             raise ValueError(
-                "Unsupported backend specified. Use 'duckdb' or 'pyspark'."
+                f"Unsupported backend specified: {self.backend}. Use 'duckdb', 'pyspark', or 'sqlite'."
             )
-        print("Using backend:", self.backend)
+        logger.info(f"Using backend: {self.backend.value}")
         self.load_data_into_backend()
 
     def display(self):
@@ -2097,7 +2679,7 @@ class InMemoryCodeExecutor(CodeExecutor):
 
     def load_dataframe(self, path: str, date_columns: List[str]):
         if path.endswith("csv"):
-            df = pd.read_csv(path)
+            df = pd.read_csv(path, low_memory=False)
         elif path.endswith("xlsx"):
             df = pd.read_excel(path)
         else:
@@ -2146,13 +2728,611 @@ FILE: dataqa/core/components/knowledge_extraction/__init__.py
 ================================================
 FILE: dataqa/core/components/knowledge_extraction/data_scanner.py
 ================================================
-[Empty file]
+import argparse
+import asyncio
+import io
+import logging
+import random
+import sys
+from typing import Any, Dict, List, Optional, Union
+
+import pandas as pd
+import yaml
+from pydantic import BaseModel, Field, create_model
+
+from dataqa.core.components.code_executor.in_memory_code_executor import (
+    InMemoryCodeExecutor,
+)
+from dataqa.core.data_models.asset_models import (
+    CategoricalValue,
+    ColumnSchema,
+    DatabaseSchema,
+    TableSchema,
+)
+from dataqa.core.utils.component_utils import build_base_model_from_parameters
+from dataqa.scripts.azure_token import get_az_token_using_cert
+
+logger = logging.getLogger(__name__)
+
+TESTED_DATABASES = ["sqlite", "duckdb", "snowflake", "redshift"]
+
+DATA_SCANNER_SQL = {
+    "sqlite": {
+        "get_tables": 'SELECT name FROM sqlite_master WHERE type="table"',
+        "get_columns": 'PRAGMA table_info("{table_name}")',
+    },
+    "duckdb": {
+        "get_tables": "SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'main'",
+        "get_columns": 'SELECT column_name as name, data_type as type, CASE WHEN is_nullable = "YES" THEN 0 ELSE 1 END as pk FROM information_schema.columns WHERE table_name = "{table_name}"',
+    },
+    "snowflake": {
+        "get_tables": "SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'PUBLIC'",
+        "get_columns": 'SELECT column_name as name, data_type as type, CASE WHEN is_nullable = "YES" THEN 0 ELSE 1 END as pk FROM information_schema.columns WHERE table_name = "{table_name}"',
+    },
+    "redshift": {
+        "get_tables": "SELECT table_name as name FROM information_schema.tables WHERE table_schema = 'public'",
+        "get_columns": 'SELECT column_name as name, data_type as type, CASE WHEN is_nullable = "YES" THEN 0 ELSE 1 END as pk FROM information_schema.columns WHERE table_name = "{table_name}"',
+    },
+}
+
+
+def get_llm_and_run_config():
+    import os
+
+    api_key = get_az_token_using_cert()[0]
+    base_url = os.environ["OPENAI_API_BASE"]
+    config = {
+        "configurable": {
+            "api_key": api_key,
+            "base_url": base_url,
+        }
+    }
+
+    llm_config = {
+        "model": "gpt-4o-2024-08-06",
+        "api_version": "2024-08-01-preview",
+        "api_type": "azure_ad",
+        "temperature": 0,
+        "num_response": 1,
+        "azure_model_params": {"model_name": "gpt-4o"},
+    }
+    from dataqa.core.llm.openai import AzureOpenAI
+
+    llm = AzureOpenAI(**llm_config)
+    return llm, config
+
+
+class DataScanner:
+    def __init__(self, config: Union[Dict, str]):
+        if isinstance(config, str):
+            with open(config, "r") as f:
+                config = yaml.safe_load(f)
+        self.config = config
+        self.executor = InMemoryCodeExecutor(config["executor_config"])
+        self.database_type = config["database_type"]
+        self.database_schema = None
+        self.inferred_schema = None
+
+    def get_column_information_for_table(self, table_name: str) -> str:
+        """
+        Return a markdown formatted string of the column information for a given table.
+        """
+        if self.database_schema is None:
+            raise ValueError("Database schema is not set. Please run extract_schema() first.")
+        
+        table = None
+        for t in self.database_schema.tables:
+            if t.table_name == table_name:
+                table = t
+                break
+        
+        if table is None:
+            raise ValueError(f"Table {table_name} not found in database schema.")
+        
+        column_list = []
+        for column in table.columns:
+            example_values_str = ", ".join([f"[{v}]" for v in column.example_values[:5]])
+            column_list.append([
+                column.name,
+                column.type,
+                example_values_str,
+                column.distinct_count,
+                column.null_count,
+            ])
+        
+        df = pd.DataFrame(
+            column_list,
+            columns=["column_name", "column_type", "example_values", "distinct_count", "null_count"],
+        )
+        return df.to_markdown()
+
+    async def prepare_infer_metadata_input(self, table_name: str) -> Dict:
+        """
+        Prepares the input data for the infer_metadata method.
+        """
+        if self.database_schema is None:
+            raise ValueError("Database schema is not set. Please run extract_schema() first.")
+        
+        table = None
+        for t in self.database_schema.tables:
+            if t.table_name == table_name:
+                table = t
+                break
+        
+        if table is None:
+            raise ValueError(f"Table {table_name} not found in database schema.")
+        
+        table_shape = (table.row_count, len(table.columns))
+        num_rows = min(50, table.row_count)
+        sample_rows = await self.get_n_rows(table_name, num_rows)
+        logger.info(f"Extracted {len(sample_rows)} sample rows for table {table_name}")
+        
+        sample_rows_markdown = sample_rows.to_markdown() if sample_rows is not None else ""
+        column_info = self.get_column_information_for_table(table_name)
+        
+        output = {
+            "table_name": table_name,
+            "table_shape": table_shape,
+            "sample_rows": sample_rows_markdown,
+            "column_info": column_info,
+        }
+        return output
+
+    async def execute_sql(self, sql: str) -> Optional[pd.DataFrame]:
+        """
+        Executes the given SQL query and returns the result as a pandas DataFrame.
+        Returns None if the query execution fails.
+        """
+        SqlInput = create_model("SqlInput", code=(str, Field(default="")))
+        executor_input = SqlInput(code=sql)
+        result = await self.executor.run(executor_input)
+        
+        if result.error and not result.dataframe:
+            logger.error(f"SQL execution failed: {result.error}")
+            return None
+        
+        result_df = result.dataframe[0]
+        df = pd.read_json(io.StringIO(result_df))
+        return df
+
+    async def get_list_of_tables(self) -> Optional[pd.DataFrame]:
+        """
+        Retrieves a list of tables from the database.
+        """
+        if self.database_type not in TESTED_DATABASES:
+            raise ValueError(f"Unsupported database type: {self.database_type}")
+        
+        sql = DATA_SCANNER_SQL[self.database_type]["get_tables"]
+        return await self.execute_sql(sql)
+
+    async def get_columns_info_of_table(self, table_name: str) -> Optional[pd.DataFrame]:
+        """
+        Fetches information about the columns within a specified table.
+        """
+        if self.database_type not in TESTED_DATABASES:
+            raise ValueError(f"Unsupported database type: {self.database_type}")
+        
+        sql = DATA_SCANNER_SQL[self.database_type]["get_columns"].format(
+            table_name=table_name
+        )
+        return await self.execute_sql(sql)
+
+    async def get_example_values(self, table_name: str, column_name: str) -> List[Any]:
+        """
+        Retrieves example values for a specific column in a table.
+        """
+        sql = f'SELECT DISTINCT "{column_name}" AS unique_values FROM "{table_name}" LIMIT 50'
+        df = await self.execute_sql(sql)
+        
+        if df is None or df.empty:
+            return []
+        
+        values = df["unique_values"].tolist()
+        max_examples = self.config.get("parameters", {}).get("column_example_value_count", 5)
+        
+        if len(values) > max_examples:
+            values = random.sample(values, max_examples)
+        
+        return values
+
+    async def get_distinct_value(self, table_name: str, column_name: str) -> List:
+        """
+        Retrieves distinct values from a specified column in a table.
+        """
+        sql = f'SELECT DISTINCT "{column_name}" as unique_values FROM "{table_name}"'
+        df = await self.execute_sql(sql)
+        
+        if df is None or df.empty:
+            return []
+        
+        return df["unique_values"].tolist()
+
+    async def get_null_count(self, table_name: str, column_name: str) -> Optional[int]:
+        """
+        Counts the number of null values in a specified column.
+        """
+        sql = f'SELECT COUNT(*) as null_count FROM "{table_name}" WHERE "{column_name}" IS NULL'
+        df = await self.execute_sql(sql)
+        
+        if df is None or df.empty:
+            return None
+        
+        return int(df["null_count"].iloc[0])
+
+    async def get_row_count(self, table_name: str) -> Optional[int]:
+        """
+        Counts the total number of rows in a table.
+        """
+        sql = f'SELECT COUNT(*) as row_count FROM "{table_name}"'
+        df = await self.execute_sql(sql)
+        
+        if df is None or df.empty:
+            return None
+        
+        return int(df["row_count"].iloc[0])
+
+    async def get_n_rows(self, table_name: str, n: int) -> Optional[pd.DataFrame]:
+        """
+        Retrieves the first 'n' rows of a table.
+        """
+        sql = f'SELECT * FROM "{table_name}" LIMIT {n}'
+        return await self.execute_sql(sql)
+
+    async def extract_schema(self) -> Optional[DatabaseSchema]:
+        """
+        Extracts the schema of the database by scanning the tables and columns.
+        Returns:
+            Optional[DatabaseSchema]: The extracted schema of the database.
+            Returns None if the schema extraction fails.
+        """
+        logger.info("Extracting schema by scanning database through executor...")
+        table_list = []
+        df_table_names = await self.get_list_of_tables()
+        if df_table_names is None:
+            logger.error("Failed to get table list")
+            return None
+        
+        for table_name in df_table_names["name"]:
+            logger.info(f"Scanning table: {table_name}")
+            if table_name in [
+                "sqlite_sequence",
+                "sqlite_stat1",
+                "sqlite_stat2",
+            ]:
+                continue
+            
+            row_count = await self.get_row_count(table_name=table_name)
+            df_columns: pd.DataFrame = await self.get_columns_info_of_table(
+                table_name=table_name
+            )
+            if df_columns is None:
+                logger.error(
+                    f"Failed to get column list of table: {table_name}"
+                )
+                continue
+            
+            column_list = []
+            for column_name, column_type, is_pk in zip(
+                df_columns["name"], df_columns["type"], df_columns["pk"]
+            ):
+                logger.info(f"Scanning column: {column_name} of table: {table_name}")
+                
+                if not isinstance(is_pk, bool):
+                    if isinstance(is_pk, int):
+                        if is_pk == 1:
+                            is_pk = True
+                        elif is_pk == 0:
+                            is_pk = False
+                    else:
+                        logger.warning(
+                            f"Unrecognized is_primary_key value: {is_pk}"
+                        )
+                        is_pk = None
+                else:
+                    logger.warning(
+                        f"Unrecognized is_primary_key type: {type(is_pk)}"
+                    )
+                    is_pk = None
+                
+                example_values = await self.get_example_values(
+                    table_name=table_name, column_name=column_name
+                )
+                distinct_values = await self.get_distinct_value(
+                    table_name=table_name, column_name=column_name
+                )
+                distinct_count = (
+                    len(distinct_values) if distinct_values else None
+                )
+                null_count = await self.get_null_count(
+                    table_name=table_name, column_name=column_name
+                )
+                is_categorical = column_name in self.config.get(
+                    "categorical_columns", {}
+                ).get(table_name, [])
+                categorical_values = (
+                    [
+                        CategoricalValue(value=str(value))
+                        for value in distinct_values
+                    ]
+                    if is_categorical
+                    else []
+                )
+                column_schema = ColumnSchema(
+                    name=column_name,
+                    type=column_type,
+                    example_values=example_values,
+                    distinct_count=distinct_count,
+                    null_count=null_count,
+                    is_primary_key=is_pk,
+                    values=categorical_values,
+                )
+                column_list.append(column_schema)
+            
+            table_schema = TableSchema(
+                table_name=table_name, columns=column_list, row_count=row_count
+            )
+            table_list.append(table_schema)
+        
+        database_schema = DatabaseSchema(tables=table_list)
+        self.database_schema = database_schema
+        output_file = f"{self.config.get('output_path')}/schema_extracted.yaml"
+        with open(output_file, "w") as f:
+            yaml.safe_dump(
+                self.database_schema.model_dump(),
+                f,
+                sort_keys=False,
+                default_flow_style=False,
+            )
+        logger.info(
+            f"Schema extraction completed. Output file saved: {output_file}"
+        )
+        return database_schema
+
+    async def infer_metadata(self) -> None:
+        """
+        Infers metadata for each table in the database schema.
+        This method iterates over each table in the database schema and
+        prepares the input for the 'MetaInference' class. The input is
+        generated using the 'prepare_infer_metadata_input method. The
+        'MetaInference' class is then used to infer the metadata for each
+        table.
+        Returns:
+            None
+        """
+        logger.info("Inferring metadata using LLM...")
+        llm, config = get_llm_and_run_config()
+        from dataqa.core.components.knowledge_extraction.infer_metadata import (
+            MetaInference,
+            meta_inference_prompt,
+        )
+        
+        metadata_inference = MetaInference(
+            llm=llm, prompt=meta_inference_prompt
+        )
+        inferred_schema = {}
+        for table in self.database_schema.tables:
+            table_name = table.table_name
+            logger.info(f"Inferring metadata for table: {table_name}")
+            input = await self.prepare_infer_metadata_input(
+                table_name=table_name
+            )
+            inferred_metadata = await metadata_inference(
+                table_name=table_name,
+                table_shape=input["table_shape"],
+                sample_rows=input["sample_rows"],
+                column_info=input["column_info"],
+                config=config,
+            )
+            inferred_schema[table_name] = inferred_metadata
+        
+        self.inferred_schema = inferred_schema
+        self.fill_in_metadata()
+        output_file = f"{self.config.get('output_path')}/schema_inferred.yaml"
+        with open(output_file, "w") as f:
+            yaml.safe_dump(
+                self.database_schema.model_dump(),
+                f,
+                sort_keys=False,
+                default_flow_style=False,
+            )
+        logger.info(
+            f"Metadata inference completed. Output file saved: {output_file}"
+        )
+
+    def fill_in_metadata(self) -> None:
+        """
+        Populates the descriptions of tables and columns within the database schema
+        using the metadata previously inferred by the MetaInference class.
+        """
+        for table_name, inferred_metadata in self.inferred_schema.items():
+            table = None
+            for t in self.database_schema.tables:
+                if t.table_name == table_name:
+                    table = t
+                    break
+            
+            if table is None:
+                continue
+            
+            if table.description is None:
+                table.description = inferred_metadata.get("table_description")
+            
+            for column in table.columns:
+                if column.description is None:
+                    column.description = inferred_metadata.get("column_descriptions", {}).get(column.name)
+
+
+def run_data_scanner(config):
+    data_scanner = DataScanner(config)
+    asyncio.run(data_scanner.extract_schema())
+    asyncio.run(data_scanner.infer_metadata())
+    print(
+        yaml.dump(
+            data_scanner.database_schema.model_dump(),
+            sort_keys=False,
+            default_flow_style=False,
+        )
+    )
+
+
+def compare_schemas(schema_file_1, schema_file_2):
+    schema1 = yaml.safe_load(open(schema_file_1, "r"))
+    schema2 = yaml.safe_load(open(schema_file_2, "r"))
+    schema1 = DatabaseSchema(**schema1)
+    schema2 = DatabaseSchema(**schema2)
+    schema1_output = []
+    schema2_output = []
+    for table in schema1.tables:
+        table_name = table.table_name
+        table_description = table.description
+        sort_key = f"{table_name}"
+        schema1_output.append(
+            [sort_key, "table", table_name, table_description]
+        )
+        for column in table.columns:
+            column_name = column.name
+            column_description = column.description
+            sort_key = f"{table_name}.{column_name}"
+            schema1_output.append(
+                [sort_key, "column", column_name, column_description]
+            )
+    for table in schema2.tables:
+        table_name = table.table_name
+        table_description = table.description
+        sort_key = f"{table_name}"
+        schema2_output.append(
+            [sort_key, "table", table_name, table_description]
+        )
+        for column in table.columns:
+            column_name = column.name
+            column_description = column.description
+            sort_key = f"{table_name}.{column_name}"
+            schema2_output.append(
+                [sort_key, "column", column_name, column_description]
+            )
 
 
 ================================================
 FILE: dataqa/core/components/knowledge_extraction/infer_metadata.py
 ================================================
-[Empty file]
+from typing import List, Literal
+
+from langchain_core.runnables.config import RunnableConfig
+from pydantic import BaseModel, Field
+
+from dataqa.core.llm.openai import AzureOpenAI
+from dataqa.core.utils.langgraph_utils import (
+    API_KEY,
+    BASE_URL,
+    CONFIGURABLE,
+    TOKEN,
+)
+from dataqa.core.utils.prompt_utils import build_prompt, prompt_type
+
+
+class MetaData(BaseModel):
+    """Metadata for the database"""
+
+    level: Literal["table", "column"]
+    name: str
+    description: str
+
+
+class MetaDataList(BaseModel):
+    """Metadata for the database"""
+
+    metadata: List[MetaData] = Field(default_factory=list)
+
+
+meta_inference_prompt = """You are an AI assistant specialized in generating descriptions and inferring data structure for SQL tables and columns.
+
+Here are some tasks you can perform:
+1. Generate description of the table. In the description, you should also provide
+   - The data structure of the table
+   - What each row in the table represents
+   - The relationships between rows and columns
+2. Generate description of each column in the table. In the description, you should also provide
+   - What each column represents
+   - The function type of the column. The function type can be one of the following:
+     - IDENTIFIER: A unique identifier for a row (e.g., customer_id, order_id)
+     - CATEGORICAL VALUE: A categorical value that can take on a limited set of values (e.g., status, type, category)
+     - NUMERICAL VALUE: A numerical value that can be used for calculations (e.g., price, quantity, amount)
+     - TEXT: A text value that contains descriptive information (e.g., name, description, comment)
+     - DATETIME: A date or time value (e.g., created_at, updated_at, timestamp)
+     - BOOLEAN: A boolean value (e.g., is_active, is_deleted)
+
+Table information:
+- Table name: {table_name}
+- Table shape: {table_shape}
+- Sample rows:
+{sample_rows}
+- Column info:
+{column_info}
+
+Please generate metadata for the table and each column. The output should be a list of metadata objects, each with the following structure:
+{{"level": "", "name": "", "description": ""}}
+
+where level must be either "table" or "column".
+"""
+
+
+class MetaInference:
+    name = "meta_inference"
+    num_reties: int = 5
+
+    def __init__(self, llm: AzureOpenAI, prompt: prompt_type):
+        self.prompt = build_prompt(prompt)
+        self.llm = llm
+
+    async def __call__(
+        self,
+        table_name: str,
+        table_shape: tuple,
+        sample_rows: str,
+        column_info: str,
+        config: RunnableConfig,
+    ):
+        """
+        Infers metadata for a table and its columns.
+        Args:
+            table_name: The name of the table
+            table_shape: The shape of the table (rows, columns)
+            sample_rows: Sample rows from the table in markdown format
+            column_info: Column information in markdown format
+            config: RunnableConfig for the LLM call
+        Returns:
+            Dict containing metadata and llm_output
+        """
+        messages = self.prompt.invoke(
+            dict(
+                table_name=table_name,
+                table_shape=table_shape,
+                sample_rows=sample_rows,
+                column_info=column_info,
+            )
+        )
+        api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
+        token = config.get(CONFIGURABLE, {}).get(TOKEN, "")
+        base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
+        responses = []
+        for _ in range(self.num_reties):
+            response = await self.llm.ainvoke(
+                messages=messages,
+                api_key=api_key,
+                token=token,
+                base_url=base_url,
+                from_component=self.name,
+                with_structured_output=MetaDataList,
+            )
+            responses.append(response)
+            metadata = response.generation
+            if isinstance(metadata, MetaDataList):
+                break
+        if not isinstance(metadata, MetaDataList):
+            raise Exception(
+                f"Failed to generate MetaDataList after {self.num_reties} retries"
+            )
+        return dict(metadata=metadata, llm_output=responses)
 
 
 ================================================
@@ -2163,13 +3343,14 @@ from typing import List
 from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel, Field
 
-from dataqa.llm.openai import AzureOpenAI
-from dataqa.utils.langgraph_utils import (
+from dataqa.core.llm.openai import AzureOpenAI
+from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
     CONFIGURABLE,
+    TOKEN,
 )
-from dataqa.utils.prompt_utils import build_prompt, prompt_type
+from dataqa.core.utils.prompt_utils import build_prompt, prompt_type
 
 prompt_example = """
 As an AI assistant, your task is to infer business rules based on below information.
@@ -3515,6 +4696,8 @@ from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
     CONFIGURABLE,
+    PROMPT_BACK,
+    TOKEN,
 )
 from dataqa.core.utils.prompt_utils import (
     build_prompt,
@@ -3740,6 +4923,8 @@ from pydantic import BaseModel, Field
 from dataqa.core.components.base_component import Component, ComponentConfig
 from dataqa.core.components.plan_execute.schema import (
     Action,
+    EndCheck,
+    Feasibility,
     Plan,
     PlannerAct,
     Response,
@@ -3751,6 +4936,8 @@ from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
     CONFIGURABLE,
+    PROMPT_BACK,
+    TOKEN,
 )
 from dataqa.core.utils.prompt_utils import build_prompt, prompt_type
 
@@ -3758,7 +4945,8 @@ logger = logging.getLogger(__name__)
 
 
 class PlannerConfig(ComponentConfig):
-    prompt: prompt_type
+    action_prompt: prompt_type
+    plan_prompt: prompt_type
     num_retries: int = Field(
         description="the number of retries to counter output format errors",
         default=5,
@@ -3805,7 +4993,8 @@ class Planner(Component):
     ):
         super().__init__(config=config, **kwargs)
         self.memory = memory
-        self.prompt = build_prompt(self.config.prompt)
+        self.action_prompt = build_prompt(self.config.action_prompt)
+        self.plan_prompt = build_prompt(self.config.plan_prompt)
         self.llm = llm
 
     @classmethod
@@ -3819,9 +5008,9 @@ class Planner(Component):
         logger.info(f"Output BaseModel: {self.output_base_model.__fields__}")
 
     def validate_llm_input(self):
-        for field in self.prompt.input_schema.__annotations__:
+        for field in self.action_prompt.input_schema.__annotations__:
             assert field in self.input_base_model.__annotations__, (
-                f"The prompt of {self.config.name} requires the field '{field}' as input, but it is not defined in the input BaseModel"
+                f"The prompt of {self.config.name} requires {field}' as input, but it is not defined the input BaseModel"
             )
 
     async def run(self, input_data: PlannerInput, config: RunnableConfig):
@@ -3829,23 +5018,68 @@ class Planner(Component):
 
         rule = input_data.rule
         if rule:
-            rule = f"\n\n``Use Case Instruction``:\n{rule.strip()}"
+            rule = f"\n\n**USE CASE INSTRUCTIONS**:\n{rule.strip()}"
 
-        messages = self.prompt.invoke(
+        configurable = config.get(CONFIGURABLE, {})
+        api_key = configurable.get(API_KEY, "")
+        token = configurable.get(TOKEN, "")
+        base_url = configurable.get(BASE_URL, "")
+        prompt_back = configurable.get(PROMPT_BACK, "")
+
+        responses = []
+
+        # Check feasibility if prompt_back is enabled
+        if prompt_back:
+            messages = self.action_prompt.invoke(
+                dict(
+                    query=input_data.query,
+                    history="\n".join(input_data.history),
+                    dataframe_summary=self.memory.summarize_dataframe(
+                        config=config
+                    ),
+                    use_case_planner_instruction=rule,
+                    use_case_schema=input_data.schema,
+                )
+            )
+            for _ in range(self.config.num_retries):
+                response = await self.llm.ainvoke(
+                    messages=messages,
+                    api_key=api_key,
+                    token=token,
+                    base_url=base_url,
+                    from_component=self.config.name,
+                    with_structured_output=Feasibility,
+                )
+                responses.append(response)
+                if isinstance(response.generation, Feasibility):
+                    break
+
+            if not isinstance(response.generation, Feasibility):
+                raise Exception(
+                    f"Planner failed to generate Feasibility. Raw LLM output: {response.generation}"
+                )
+
+            if not response.generation.solvable:
+                return PlannerOutput(
+                    final_response=Response(
+                        response=response.generation.prompt_back,
+                        output_df_name=[],
+                        output_img_name=[],
+                    ),
+                    llm_output=responses if self.config.llm_output_required else [],
+                )
+        else:
+            logger.info("Skip action prompt in planner")
+
+        # solvable, generate the plan
+        messages = self.plan_prompt.invoke(
             dict(
                 query=input_data.query,
                 history="\n".join(input_data.history),
-                dataframe_summary=self.memory.summarize_dataframe(
-                    config=config
-                ),
-                use_case_planner_instruction=rule,
                 use_case_schema=input_data.schema,
             )
         )
-        api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
-        base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
 
-        responses = []
         for _ in range(self.config.num_retries):
             response = await self.llm.ainvoke(
                 messages=messages,
@@ -3911,6 +5145,8 @@ from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
     CONFIGURABLE,
+    PROMPT_BACK,
+    TOKEN,
 )
 from dataqa.core.utils.prompt_utils import (
     build_prompt,
@@ -3932,6 +5168,9 @@ class PlotWorkerConfig(ComponentConfig):
         default=None,
     )
     worker_state_required: bool = True
+    max_recursion: int = Field(
+        description="The maximum number of recursions for react workers.", default=10
+    )
 
 
 class PlotWorkerInput(BaseModel):
@@ -3973,22 +5212,25 @@ class PlotWorker(Component):
         self.tools = get_plot_tools_and_descriptions(
             memory=memory, tool_names=tool_names
         )[0]
-        self.workflow = self.build_workflow(memory=self.memory, llm=self.llm)
+        self.workflow = None
 
     def build_workflow(
-        self, memory: Memory, llm: AzureOpenAI, **kwargs
+        self, memory: Memory, llm: AzureOpenAI, api_key: str = "", base_url: str = "", **kwargs
     ) -> CompiledGraph:
         return create_react_agent(
-            model=llm._get_model(**kwargs), tools=self.tools
+            model=llm._get_model(api_key=api_key, base_url=base_url, **kwargs), tools=self.tools
         )
 
     async def run(self, input_data: PlotWorkerInput, config: RunnableConfig):
+        from langchain_core.messages import SystemMessage
+        from langgraph.errors import GraphRecursionError
+
         task = input_data.plan[-1].tasks[0].task_description
         worker = input_data.plan[-1].tasks[0].worker
 
         rule = input_data.rule
         if rule:
-            rule = f"\n\n``Use Case Instruction``:\n{rule.strip()}"
+            rule = f"\n\n**USE CASE INSTRUCTIONS**:\n{rule.strip()}"
 
         messages = self.prompt.invoke(
             dict(
@@ -4001,15 +5243,31 @@ class PlotWorker(Component):
                 use_case_plot_worker_instruction=rule,
             )
         )
-        api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
-        base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
+        configurable = config.get(CONFIGURABLE, {})
+        api_key = configurable.get(API_KEY, "")
+        token = configurable.get(TOKEN, "")
+        base_url = configurable.get(BASE_URL, "")
+        thread_id = configurable.get(THREAD_ID, DEFAULT_THREAD)
         self.workflow = self.build_workflow(
-            memory=self.memory, llm=self.llm, api_key=api_key, base_url=base_url
+            memory=self.memory,
+            llm=self.llm,
+            api_key=api_key,
+            token=token,
+            base_url=base_url,
         )
-        response = await self.workflow.ainvoke(
-            {"messages": messages.to_messages()}
-        )
-
+        input_messages = {"messages": messages.to_messages()}
+        try:
+            response = await self.workflow.ainvoke(
+                input=input_messages,
+                config={
+                    CONFIGURABLE: {THREAD_ID: thread_id},
+                    RECURSION_LIMIT: self.config.max_recursion,
+                },
+            )
+        except GraphRecursionError:
+            msg = f"Reach the maxmimum number of ReAct steps. The task cannot be completed after {self.config.max_recursion} steps."
+            response = input_messages
+            input_messages["messages"].append(SystemMessage(content=msg))
         return PlotWorkerOutput(
             worker_response=WorkerResponse(
                 task_response=[
@@ -4048,8 +5306,8 @@ from dataqa.core.components.plan_execute.planner import (
 )
 from dataqa.core.components.plan_execute.schema import (
     Action,
+    EndCheck,
     Plan,
-    ReplannerAct,
     Response,
     WorkerResponse,
 )
@@ -4057,6 +5315,10 @@ from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
     CONFIGURABLE,
+    DEFAULT_THREAD,
+    RECURSION_LIMIT,
+    THREAD_ID,
+    TOKEN,
 )
 
 logger = logging.getLogger(__name__)
@@ -4107,9 +5369,16 @@ class Replanner(Planner):
 
         rule = input_data.rule
         if rule:
-            rule = f"\n\n``Use Case Instruction``:\n{rule.strip()}"
+            rule = f"\n\n**USE CASE INSTRUCTIONS**:\n{rule.strip()}"
 
-        messages = self.prompt.invoke(
+        configurable = config.get(CONFIGURABLE, {})
+        api_key = configurable.get(API_KEY, "")
+        token = configurable.get(TOKEN, "")
+        base_url = configurable.get(BASE_URL, "")
+        thread_id = configurable.get(THREAD_ID, DEFAULT_THREAD)
+        end_check = configurable.get("end_check", False)
+
+        messages = self.action_prompt.invoke(
             dict(
                 query=input_data.query,
                 history="\n".join(input_data.history),
@@ -4122,34 +5391,90 @@ class Replanner(Planner):
                 use_case_replanner_instruction=rule,
             )
         )
-        api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
-        base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
 
         responses = []
         for _ in range(self.config.num_retries):
             response = await self.llm.ainvoke(
                 messages=messages,
                 api_key=api_key,
+                token=token,
                 base_url=base_url,
                 from_component=self.config.name,
-                with_structured_output=ReplannerAct,
+                with_structured_output=EndCheck if end_check else Plan,
             )
             responses.append(response)
-            if isinstance(response.generation, ReplannerAct):
+            if isinstance(response.generation, (EndCheck if end_check else Plan)):
                 break
 
-        if not isinstance(response.generation, ReplannerAct):
+        if not isinstance(response.generation, (EndCheck if end_check else Plan)):
             raise Exception(
-                f"Replanner failed to generate an Act. Raw LLM output: {response.generation}"
+                f"Replanner failed to generate {'EndCheck' if end_check else 'Plan'}. Raw LLM output: {response.generation}"
             )
 
         llm_output = responses if self.config.llm_output_required else []
 
-        if response.generation.action == Action.Return:
-            return PlannerOutput(
-                final_response=response.generation.response,
-                llm_output=llm_output,
-            )
+        if end_check:
+            end_check_result = response.generation
+            if not end_check_result.should_continue:
+                return PlannerOutput(
+                    final_response=Response(
+                        response=end_check_result.output_message,
+                        output_df_name=end_check_result.output_df_name,
+                        output_img_name=end_check_result.output_img_name,
+                    ),
+                    llm_output=llm_output,
+                )
+            else:
+                # Generate a new plan
+                plan_messages = self.plan_prompt.invoke(
+                    dict(
+                        query=input_data.query,
+                        history="\n".join(input_data.history),
+                        plan=input_data.plan[-1].summarize(),
+                        past_steps=input_data.worker_response.summarize(),
+                        dataframe_summary=self.memory.summarize_dataframe(
+                            config=config
+                        ),
+                        use_case_schema=input_data.schema,
+                        use_case_replanner_instruction=rule,
+                    )
+                )
+                for _ in range(self.config.num_retries):
+                    plan_response = await self.llm.ainvoke(
+                        messages=plan_messages,
+                        api_key=api_key,
+                        base_url=base_url,
+                        from_component=self.config.name,
+                        with_structured_output=Plan,
+                    )
+                    responses.append(plan_response)
+                    if isinstance(plan_response.generation, Plan):
+                        break
+
+                if not isinstance(plan_response.generation, Plan):
+                    raise Exception(
+                        f"Replanner failed to generate Plan. Raw LLM output: {plan_response.generation}"
+                    )
+
+                llm_output = responses if self.config.llm_output_required else []
+
+                # check if reach the max_tasks
+                if (
+                    len(input_data.worker_response.task_response)
+                    >= self.config.max_tasks
+                ):
+                    return PlannerOutput(
+                        final_response=Response(
+                            response="Reach the maximum number of steps. No final response generated.",
+                            output_df_name=[],
+                            output_img_name=[],
+                        ),
+                        llm_output=llm_output,
+                    )
+
+                return PlannerOutput(
+                    plan=[plan_response.generation], llm_output=llm_output
+                )
         else:
             # continue with a new plan
             # check if reach the max_tasks
@@ -4167,7 +5492,7 @@ class Replanner(Planner):
                 )
 
             return PlannerOutput(
-                plan=[response.generation.plan], llm_output=llm_output
+                plan=[response.generation], llm_output=llm_output
             )
 
 
@@ -4185,6 +5510,10 @@ from pydantic import BaseModel, Field
 
 from dataqa.core.agent.cwd_agent.prompt import TASK_REJECTED
 from dataqa.core.components.base_component import Component, ComponentConfig
+from dataqa.core.components.code_executor.base_code_executor import (
+    CodeExecutor,
+    CodeExecutorConfig,
+)
 from dataqa.core.components.code_executor.in_memory_code_executor import (
     InMemoryCodeExecutor,
     InMemoryCodeExecutorConfig,
@@ -4202,6 +5531,8 @@ from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
     CONFIGURABLE,
+    PROMPT_BACK,
+    TOKEN,
 )
 from dataqa.core.utils.prompt_utils import build_prompt, prompt_type
 
@@ -4218,17 +5549,28 @@ class SQLGeneratorOutput(BaseModel):
     )
 
 
+class SQLValidatorOutput(BaseModel):
+    unsafe: bool = Field(
+        description="True if SQL statement has safety concerns. Otherwise False."
+    )
+    safety_concern: str = Field(
+        description="If SQL is unsafe, explain in English what is the safety concern."
+    )
+
+
 class SQLExecutorOutput(BaseModel):
     sql: str
     dataframe: str = ""
     error: str = ""
+    time: float = 0.0
 
 
 class RetrievalWorkerState(BaseModel):
     task: str
     sql_generator_output: SQLGeneratorOutput = None
+    sql_validator_output: SQLValidatorOutput = None
     sql_executor_output: SQLExecutorOutput = None
-    llm_output: Annotated[List[LLMOutput], None] = Field(
+    llm_output: Annotated[List[LLMOutput], add] = Field(
         default_factory=list,
         description="the list of llm calls triggered by planner and replanner",
     )
@@ -4238,6 +5580,47 @@ class RetrievalWorkerState(BaseModel):
 
 
 class SQLGenerator:
+    def __init__(self, llm: AzureOpenAI, prompt: prompt_type, memory: Memory):
+        self.llm = llm
+        self.prompt = build_prompt(prompt)
+        self.memory = memory
+
+    async def __call__(
+        self, state: RetrievalWorkerState, config: RunnableConfig
+    ):
+        import time
+
+        logger.info("Starting SQL generation...")
+        start_time = time.time()
+        messages = self.prompt.invoke(
+            dict(
+                query=state.task,
+                use_case_schema=state.schema,
+                use_case_sql_instruction=state.rule,
+                use_case_sql_example=state.example,
+                dataframe_summary=self.memory.summarize_dataframe(config=config),
+            )
+        )
+        api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
+        token = config.get(CONFIGURABLE, {}).get(TOKEN, "")
+        base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
+        response = await self.llm.ainvoke(
+            messages=messages,
+            api_key=api_key,
+            token=token,
+            base_url=base_url,
+            from_component="sql_generator",
+            with_structured_output=SQLGeneratorOutput,
+        )
+        execution_time = time.time() - start_time
+        logger.info(f"SQL generation completed in {execution_time:.2f}s")
+        return {
+            "sql_generator_output": response.generation,
+            "llm_output": [response],
+        }
+
+
+class SQLValidator:
     def __init__(self, llm: AzureOpenAI, prompt: prompt_type):
         self.llm = llm
         self.prompt = build_prompt(prompt)
@@ -4245,76 +5628,126 @@ class SQLGenerator:
     async def __call__(
         self, state: RetrievalWorkerState, config: RunnableConfig
     ):
-        messages = self.prompt.invoke(
-            dict(
-                query=state.task,
-                use_case_schema=state.schema,
-                use_case_sql_instruction=state.rule,
-                use_case_sql_example=state.example,
-            )
-        )
+        import time
+
+        sql = state.sql_generator_output.sql
+        logger.info("Starting SQL validation...")
+        start_time = time.time()
+        if not sql or sql == TASK_REJECTED:
+            error_msg = f"SQL Validation skipped, as SQL Generation task is rejected due to the following reason: {state.sql_generator_output.reasoning}"
+            response = SQLValidatorOutput(unsafe=False, safety_concern=error_msg)
+            return {"sql_validator_output": response}
+
+        messages = self.prompt.invoke(dict(sql_statement=sql))
         api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
+        token = config.get(CONFIGURABLE, {}).get(TOKEN, "")
         base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
         response = await self.llm.ainvoke(
             messages=messages,
             api_key=api_key,
+            token=token,
             base_url=base_url,
-            with_structured_output=SQLGeneratorOutput,
+            from_component="sql_validator",
+            with_structured_output=SQLValidatorOutput,
         )
+        execution_time = time.time() - start_time
+        logger.info(f"SQL validation completed in {execution_time:.2f}s")
         return {
-            "sql_generator_output": response.generation,
+            "sql_validator_output": response.generation,
             "llm_output": [response],
         }
 
 
-class SQLExecutor(InMemoryCodeExecutor):
-    def __init__(
-        self,
-        config: Union[InMemoryCodeExecutorConfig, Dict],
-        memory: Memory,
-        **kwargs,
-    ):
-        super().__init__(config=config, **kwargs)
+class SQLExecutor:
+    def __init__(self, executor: CodeExecutor, memory: Memory):
+        from dataqa.core.components.code_executor.base_code_executor import (
+            CodeExecutor,
+        )
+
+        self.executor = executor
         self.memory = memory
 
     async def __call__(
         self, state: RetrievalWorkerState, config: RunnableConfig
     ):
+        import json
+        import time
+
+        from dataqa.core.agent.cwd_agent.error_message import SqlExecutionError
+        from dataqa.core.utils.utils import clean_sql
+        from pydantic import create_model
+
         sql = state.sql_generator_output.sql
         df_name = state.sql_generator_output.output
+        thread_id = config.get(CONFIGURABLE, {}).get(THREAD_ID, None)
+        question_id = config.get(CONFIGURABLE, {}).get(QUESTION_ID, None)
+
+        logger.info(
+            f"Starting SQL execution. Thread ID: {thread_id}, Question ID: {question_id}"
+        )
+
+        if not sql:
+            error_msg = "No SQL statement found in sql_generator_output"
+            logger.error(error_msg)
+            response = SQLExecutorOutput(sql="", error=error_msg)
+            return {"sql_executor_output": response}
+
         if sql == TASK_REJECTED or df_name == TASK_REJECTED:
             error_msg = f"SQL Execution skipped, as SQL Generation task is rejected due to the following reason: {state.sql_generator_output.reasoning}"
+            logger.warning(error_msg)
             response = SQLExecutorOutput(sql=sql, error=error_msg)
             return {"sql_executor_output": response}
-        try:
-            # We call the generic 'run' method which is implemented by both
-            # the local InMemoryCodeExecutor and our DBCSQLExecutor adapter.
-            # This requires a small change to how we pass input.
-            from pydantic import create_model
 
-            InputModel = create_model("SqlInput", code=(str, ...))
-            executor_output = await self.run(
-                InputModel(code=sql), config=config
+        if state.sql_validator_output.unsafe:
+            error_msg = f"SQL Execution skipped, as SQL statement has safety concerns: {state.sql_validator_output.safety_concern}"
+            logger.error(error_msg)
+            response = SQLExecutorOutput(sql=sql, error=error_msg)
+            return {"sql_executor_output": response}
+
+        try:
+            run_time = 0
+            executor_config = self.executor.config
+            sql_clean = clean_sql(sql, self.memory, config, executor_config)
+            if sql_clean is None:
+                from dataqa.core.agent.cwd_agent.error_message import (
+                    InternalDataframeError,
+                )
+
+                error_msg = "Failed to clean SQL - internal dataframe reference could not be resolved"
+                logger.error(error_msg)
+                raise InternalDataframeError(error_msg)
+            sql = sql_clean
+
+            SqlInput = create_model("SqlInput", code=(str, Field(default="")))
+            executor_input = SqlInput(code=sql)
+            logger.debug(f"SQL executor input: {executor_input}")
+
+            start_time = time.monotonic()
+            executor_output = await self.executor.run(executor_input, config=config)
+            run_time = time.monotonic() - start_time
+
+            logger.info(
+                f"SQL execution completed in {run_time:.2f}s. Thread ID: {thread_id}, Question ID: {question_id}"
             )
 
             if executor_output.error:
-                raise Exception(executor_output.error)
+                raise SqlExecutionError(executor_output.error)
 
             # The output dataframe is a JSON string, need to deserialize
-            import json
-
             import pandas as pd
 
             result_df = pd.DataFrame(json.loads(executor_output.dataframe[0]))
-            self.memory.put_dataframe(name=df_name, df=result_df, config=config)
-            response = SQLExecutorOutput(sql=sql, dataframe=df_name)
+            self.memory.put_dataframe(name=df_name, df=result_df, sql=sql, config=config)
+            response = SQLExecutorOutput(sql=sql, dataframe=df_name, time=run_time)
         except Exception as e:
+            logger.error(f"SQL execution failed: {e}")
             response = SQLExecutorOutput(sql=sql, error=repr(e))
         return {"sql_executor_output": response}
 
 
 class RetrievalWorkerConfig(ComponentConfig):
-    sql_prompt: prompt_type
+    sql_generation_prompt: prompt_type
+    sql_validation_prompt: prompt_type
     sql_execution_config: InMemoryCodeExecutorConfig
     worker_state_required: bool = True
 
@@ -4347,35 +5780,45 @@ class RetrievalWorker(Component):
         memory: Memory,
         llm: AzureOpenAI,
         config: Union[RetrievalWorkerConfig, Dict] = None,
-        sql_executor: InMemoryCodeExecutor = None,
+        sql_executor: CodeExecutor = None,
         **kwargs,
     ):
         super().__init__(config=config, **kwargs)
         self.llm = llm
         self.memory = memory
-        if sql_executor:
-            self.sql_executor = sql_executor
-        else:
-            self.sql_executor = SQLExecutor(
-                config=self.config.sql_execution_config, memory=memory
-            )
+        self.sql_executor = sql_executor
+        logger.info(
+            f"Component {self.config.name} of type {self.component_type} initialized."
+        )
+        self.workflow = self.build_workflow()
 
-        self.workflow = self.build_workflow(memory=self.memory, llm=self.llm)
+    def build_workflow(self) -> CompiledGraph:
+        from dataqa.core.components.code_executor.base_code_executor import (
+            CodeExecutor,
+        )
 
-    def build_workflow(self, memory: Memory, llm: AzureOpenAI) -> CompiledGraph:
         workflow = StateGraph(RetrievalWorkerState)
 
         workflow.add_node(
             "sql_generator",
-            SQLGenerator(llm=llm, prompt=self.config.sql_prompt),
+            SQLGenerator(
+                llm=self.llm,
+                prompt=self.config.sql_generation_prompt,
+                memory=self.memory,
+            ),
+        )
+        workflow.add_node(
+            "sql_validator",
+            SQLValidator(llm=self.llm, prompt=self.config.sql_validation_prompt),
         )
         workflow.add_node(
             "sql_executor",
-            self.sql_executor,
+            SQLExecutor(executor=self.sql_executor, memory=self.memory),
         )
 
         workflow.add_edge(START, "sql_generator")
-        workflow.add_edge("sql_generator", "sql_executor")
+        workflow.add_edge("sql_generator", "sql_validator")
+        workflow.add_edge("sql_validator", "sql_executor")
         workflow.add_edge("sql_executor", END)
 
         return workflow.compile()
@@ -4520,6 +5963,33 @@ class Response(BaseModel):
 class Action(Enum):
     Continue = "continue"
     Return = "return"
+
+
+class Feasibility(BaseModel):
+    """Check if USER OBJECTIVE has no ambiguaty and is solvable."""
+
+    solvable: bool = Field(
+        description="If USER OBJECTIVE can be solved and has no ambiguaty."
+    )
+    prompt_back: str = Field(
+        description="A prompt back message to the user if UESR OBJECTIVE is not solvable.",
+        default="",
+    )
+
+
+class EndCheck(BaseModel):
+    """Evaluate if the final results have been obtained for solving USER OBJECTIVE. If so, generate the output as text, datafranes and images."""
+
+    should_continue: bool = Field(
+        description="If continue on solving USER OBJECTIVE"
+    )
+    output_message: str = Field(description="Text response to the user.")
+    output_df_name: List[str] = Field(
+        description="The names of a list of datafranes to be displayed to the user."
+    )
+    output_img_name: List[str] = Field(
+        description="The names of a list of images to displayed to the user."
+    )
 
 
 class PlannerAct(BaseModel):
@@ -5792,8 +7262,8 @@ class VectorSchemaRecordType(Enum):
 
 
 class CategoricalValue(BaseModel):
-    value: str
-    description: Optional[str] = None
+    value: Any
+    description: str = Field(default="")
 
 
 class ForeignKey(BaseModel):
@@ -5922,17 +7392,17 @@ from pydantic import BaseModel, Field
 
 _BM = TypeVar("_BM", bound=BaseModel)
 _DictOrPydanticClass = Union[Dict[str, Any], Type[_BM]]
-_StrOrDictOrPydantic = Union[str, Dict[str, Any], Type[_BM], List]
+_StrOrDictOrPydantic = Union[str, Dict, _BM]
 
 
 class LLMConfig(BaseModel):
     model: str = Field(
-        description="The model name, such as deployment_name for oai llm, such as `gpt-4o-2024-05-06`, but NOT model_name like `gpt-4o`"
+        description="The model name, such as deployment_name for oai llm, such as 'gpt-4o-2024-08-06', but NOT model_name like 'gpt-4o'"
     )
     with_structured_output: Optional[Union[None, _DictOrPydanticClass]] = Field(
         default=None,
         description="""
-        Parse raw llm generations to structured output.
+        Parse raw lim generations to structured output.
         The input is a dict or a BaseModel class.
         """,
     )
@@ -5943,7 +7413,7 @@ class LLMMetaData(BaseModel):
     request_id: str = Field(
         description="A unique identifier for this LLM call. Usually provided by the LLM provider."
     )
-    model: str = Field(description="The model name used in this LLM call.")
+    model: str = Field(description="The LLM model.")
     num_generations: int = Field(
         default=1,
         description="The number of generations requested in this LLM call.",
@@ -5953,7 +7423,7 @@ class LLMMetaData(BaseModel):
     )
     start_timestamp: Union[None, str] = Field(
         default=None,
-        description="The timestamp to send request. The preferred format is `%a, %d %b %Y %H:%M:%S %Z`, e.g. `Tue, 04 Mar 2025 20:54:30 GMT`",
+        description="The timestamp to send request. The preferred format is %a, %d %b %Y %H:%M:%S %Z, e.g. 'Tue, 04 Mar 2025 16:06:22 GMT'",
     )
     end_timestamp: Union[None, str] = Field(
         default=None,
@@ -5999,11 +7469,11 @@ class LLMError(BaseModel):
 
 
 class LLMOutput(BaseModel):
-    prompt: _StrOrDictOrPydantic = Field(description="The input prompt")
-    generation: _StrOrDictOrPydantic = Field(
+    prompt: List = Field(description="The input prompt")
+    generation: _DictOrPydantic = Field(
         default="",
         description="""
-        The LLM generations.
+        The raw LLM generations.
         Parsed to Dict or Pydantic BaseModel is the structured output is required.
         """,
     )
@@ -6296,12 +7766,15 @@ class AzureOpenAI(BaseLLM):
         error = None
         logger.info("invoking llm with retry...")
         error_msgs = []
-        # attempts to catch common exceptions raised that occur when invoking Azure
+        """Attempts to catch common exceptions raised that occur when invoking Azure"""
         for i in range(max_retry):
             try:
                 response = await self._get_model(**kwargs).ainvoke(messages)
-                if not kwargs.get(
-                    "with_structured_output", self.config.with_structured_output
+                if (
+                    kwargs.get(
+                        "with_structured_output", self.config.with_structured_output
+                    )
+                    is not None
                 ):
                     if response["parsing_error"]:
                         generation = str(response)
@@ -6328,13 +7801,14 @@ class AzureOpenAI(BaseLLM):
                 ValueError,
                 openai.BadRequestError,
                 openai.AuthenticationError,
+                openai.APIConnectionError,
                 openai.PermissionDeniedError,
                 openai.APIError,
             ) as e:
                 logger.exception(f"error calling llm try {i + 1}", exc_info=e)
                 error_msgs.append(e)
                 error = LLMError(
-                    error_code=0, error_type="LLM Errrpor", error_message=str(e)
+                    error_code=0, error_type="LLM Error", error_message=str(e)
                 )
                 break
             except Exception as e:
@@ -6364,18 +7838,28 @@ class OpenAIEmbedding:
 
     def _get_model(self, **kwargs):
         if self.embedding_model_client is None:
-            llm = AzureOpenAIEmbeddings(
-                openai_api_key=kwargs.get("openai_api_key"),
-                openai_api_version=kwargs.get("openai_api_version"),
-                azure_endpoint=kwargs.get("azure_endpoint"),
-                model=kwargs.get("embedding_model_name"),
-            )
+            openai_api_token = kwargs.get("openai_api_token", "")
+            if openai_api_token:
+                llm = AzureOpenAIEmbeddings(
+                    openai_api_key=kwargs.get("openai_api_key"),
+                    openai_api_version=kwargs.get("openai_api_version"),
+                    azure_endpoint=kwargs.get("azure_endpoint"),
+                    model=kwargs.get("embedding_model_name"),
+                    default_headers={"Authorization": f"Bearer {openai_api_token}"},
+                )
+            else:
+                llm = AzureOpenAIEmbeddings(
+                    openai_api_key=kwargs.get("openai_api_key"),
+                    openai_api_version=kwargs.get("openai_api_version"),
+                    azure_endpoint=kwargs.get("azure_endpoint"),
+                    model=kwargs.get("embedding_model_name"),
+                )
             self.embedding_model_client = llm
         return self.embedding_model_client
 
     async def __call__(self, query: str, **kwargs):
-        response = await self._get_model(**kwargs).aembed_query(query)
-        return response
+        res = await self._get_model(**kwargs).aembed_query(query)
+        return res
 
 
 
@@ -6397,6 +7881,7 @@ COMPONENT_MARKER = "is_component"
 CONDITIONAL_EDGE_MARKER = "is_conditional_edge"
 INPUT_SOURCE = "input_source"
 INPUT_FROM_STATE = "input_from_state"
+OUTPUT_TO_STATE = "output_to_state"
 COMPONENT_OUTPUT_SUFFIX = "_output"
 PIPELINE_INPUT = "input"
 PIPELINE_OUTPUT = "output"
@@ -6406,30 +7891,37 @@ PIPELINE_OUTPUT = "output"
 ================================================
 FILE: dataqa/core/pipelines/pipeline.py
 ================================================
-from typing import Any, Dict, List, Optional, Type, Union
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import yaml
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.graph import CompiledGraph
-from pydantic import Field, create_model
+from pydantic import BaseModel, Field, create_model
+from pydantic.fields import FieldInfo
 
-from dataqa.errors import PipelineConfigError
-from dataqa.pipelines.constants import (
+from dataqa.core.components.base_component import Component
+from dataqa.core.errors import PipelineConfigError
+from dataqa.core.pipelines.constants import (
     COMP_PREFIX,
     COMPONENT_MARKER,
     COMPONENT_OUTPUT_SUFFIX,
     CONDITIONAL_EDGE_MARKER,
     FILE_PREFIX,
+    INPUT_FROM_STATE,
     INPUT_SOURCE,
+    OUTPUT_TO_STATE,
     PIPELINE_END,
     PIPELINE_INPUT,
     PIPELINE_START,
     STATE_GRAPH_TYPE,
 )
-from dataqa.pipelines.schema import PipelineConfig
-from dataqa.state import BasePipelineState
-from dataqa.utils.utils import cls_from_str, load_file
+from dataqa.core.pipelines.schema import PipelineConfig
+from dataqa.core.state import BasePipelineState
+from dataqa.core.utils.utils import cls_from_str, load_file
+
+# TODO: Add support for loading files from resource manager
 
 
 # TODO: Add support for loading files from resource manager
@@ -6520,9 +8012,41 @@ def update_input_mapping(mapping: Dict[str, str]) -> Dict[str, str]:
     return new_mapping
 
 
+def add_field(
+    fields: Dict[str, Tuple], model: Type[BaseModel], schema: Dict[str, Dict]
+):
+    for output_name, field_name in schema.get(OUTPUT_TO_STATE, {}).items():
+        if output_name not in model.model_fields:
+            raise ValueError(
+                f"Field {output_name} is not defined in the output of {schema['name']}."
+            )
+        field = model.model_fields[output_name]
+        # check annotation, default, default_factory, metadata
+        if field_name in fields:
+            cur_field: FieldInfo = fields[field_name][1]
+            # compare if two fields are consistent
+            if cur_field.annotation != field.annotation:
+                raise ValueError(
+                    f"Field {field_name} is defined multiple times with different annotations `{cur_field.annotation}` and `{field.annotation}`"
+                )
+            if cur_field.default != field.default:
+                raise ValueError(
+                    f"Field {field_name} is defined multiple times with different default values `{cur_field.default}` and `{field.default}`"
+                )
+            if cur_field.default_factory != field.default_factory:
+                raise ValueError(
+                    f"Field {field_name} is defined multiple times with different default values `{cur_field.default_factory}` and `{field.default_factory}`"
+                )
+            if set(cur_field.metadata) != set(field.metadata):
+                raise ValueError(
+                    f"Field {field_name} is defined multiple times with different metadata {cur_field.metadata} and {field.metadata}"
+                )
+        fields[field_name] = (field.annotation, field)
+
+
 def build_graph_from_config(
-    pipeline_schema: PipelineConfig, pipeline_name: Optional[str] = None
-) -> CompiledGraph:
+    pipeline_schema: PipelineConfig, pipeline_name: Optional[str] = None, config_dir: Optional[Path] = None
+) -> Tuple[CompiledGraph, Type[BaseModel]]:
     """
 
     :param pipeline_schema:
@@ -6540,17 +8064,23 @@ def build_graph_from_config(
     pipeline_state_fields = {}
 
     # First pass to initialize all the components and add their output state to pipeline state
-    for node_name in component_definitions.keys():
+    for node_name, schema in component_definitions.items():
         component_instance = load_or_get_component(
             node_name, component_definitions, components
         )
         if getattr(component_instance, COMPONENT_MARKER, False) and not getattr(
             component_instance, CONDITIONAL_EDGE_MARKER, False
         ):
-            pipeline_state_fields[f"{node_name}{COMPONENT_OUTPUT_SUFFIX}"] = (
-                component_instance.output_base_model,
-                Field(default=None, description=f"output of {node_name}"),
-            )
+            add_field(pipeline_state_fields, component_instance.output_base_model, schema)
+
+    # add default values
+    for field_name, (field_annotation, field) in pipeline_state_fields.items():
+        if field.default_factory is None and field.default is None:
+            if hasattr(field_annotation, "__origin__"):
+                if field_annotation.__origin__ is list:
+                    field.default_factory = list
+                elif field_annotation.__origin__ is dict:
+                    field.default_factory = dict
 
     pipeline_state_type = create_model(
         STATE_GRAPH_TYPE, __base__=BasePipelineState, **pipeline_state_fields
@@ -6596,25 +8126,31 @@ def build_graph_from_config(
                 )
 
             # set input mapping
-            if not component_definitions[node.name].get(INPUT_SOURCE, None):
+            input_mapping = component_definitions[node.name].get(INPUT_FROM_STATE, None)
+            if not input_mapping:
                 raise PipelineConfigError(
-                    f"`{INPUT_SOURCE}` is required for {node.name} to define a node or an conditional edge"
+                    f"`{INPUT_FROM_STATE}` is required for {node.name} to define a node or an conditional edge"
                 )
             mapping = {}
-            for field, mapped_field in component_definitions[node.name][
-                INPUT_SOURCE
-            ].items():
+            for field, mapped_field in input_mapping.items():
                 names = mapped_field.split(".")
+                # replace "START" to "input"
                 if names[0] != PIPELINE_START:
                     names[0] = f"{names[0]}{COMPONENT_OUTPUT_SUFFIX}"
                 else:
                     names[0] = PIPELINE_INPUT
                 mapping[field] = ".".join(names)
-            component_instance.set_input_mapping(
-                update_input_mapping(
-                    component_definitions[node.name][INPUT_SOURCE]
-                )
-            )
+                # check if field exists in the input_base_model
+                if field not in component_instance.input_base_model.model_fields:
+                    raise ValueError(
+                        f"Field {field} is not defined in the input of {node.name}."
+                    )
+                # check if mapped_field exists in the pipeline_state_type
+                if not hasattr(pipeline_state_type, mapping[field].split(".")[0]):
+                    raise ValueError(
+                        f"Field {mapping[field]} is not defined in the pipeline state."
+                    )
+            component_instance.set_input_mapping(mapping)
 
         elif node.name == PIPELINE_END:
             for parent_group in node.parent_groups:
@@ -6630,10 +8166,12 @@ def build_graph_from_config(
 def build_graph_from_yaml(
     pipeline_path: str, pipeline_name: Optional[str] = None
 ):
-    pipeline_config = yaml.safe_load(open(pipeline_path))
+    pipeline_config_path = Path(pipeline_path).resolve()
+    config_dir = pipeline_config_path.parent
+    pipeline_config = yaml.safe_load(open(pipeline_config_path, "r"))
     pipeline_schema = PipelineConfig(**pipeline_config)
 
-    return build_graph_from_config(pipeline_schema, pipeline_name)
+    return build_graph_from_config(pipeline_schema, pipeline_name, config_dir)
 
 
 
@@ -6652,7 +8190,14 @@ class PipelineComponent(BaseModel):
     name: str
     type: str
     params: Dict[str, Any]
-    input_source: Optional[Dict[str, str]] = None
+    input_from_state: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Mapping from component input fields to pipeline state fields",
+    )
+    output_to_state: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Mapping from component output fields to pipeline state fields",
+    )
 
 
 class ParentGroup(BaseModel):
@@ -9798,12 +11343,16 @@ FILE: dataqa/core/utils/langgraph_utils.py
 ================================================
 CONFIGURABLE = "configurable"
 THREAD_ID = "thread_id"
+QUESTION_ID = "question_id"
 DEFAULT_THREAD = "default_thread"
 API_KEY = "api_key"
+TOKEN = "token"
 BASE_URL = "base_url"
 METADATA = "metadata"
 DEBUG = "debug"
 TIMEOUT = "timeout"
+PROMPT_BACK = "prompt_back"
+RECURSION_LIMIT = "recursion_limit"
 MAX_TABLE_CHARACTERS = 8192
 
 
@@ -10129,6 +11678,53 @@ def string_list_to_prompt(
     else:
         new_list = [prefix[i] + s for i, s in enumerate(string_list)]
     return "\n".join(new_list)
+
+
+def clean_sql(
+    sql: str,
+    memory: Any,
+    config: Any,
+    executor_config: Any,
+) -> Optional[str]:
+    """
+    Clean SQL by replacing internal dataframe references with actual table names.
+
+    Args:
+        sql: The SQL query string that may contain internal dataframe references
+        memory: Memory object containing dataframe information
+        config: RunnableConfig containing thread/question IDs
+        executor_config: Executor configuration
+
+    Returns:
+        Cleaned SQL string with dataframe references replaced, or None if replacement fails
+    """
+    from dataqa.core.memory import Memory
+    from langchain_core.runnables.config import RunnableConfig
+
+    if not isinstance(memory, Memory):
+        return sql
+
+    # Get all dataframes from memory
+    dataframes = memory.get_dataframes(config)
+    if not dataframes:
+        return sql
+
+    # Replace dataframe references in SQL
+    # Look for patterns like "df_*" that match dataframe names in memory
+    import re
+
+    for df_name, df_info in dataframes.items():
+        if isinstance(df_info, list) and len(df_info) >= 1:
+            # Check if this dataframe has an associated SQL
+            if len(df_info) >= 2 and df_info[1]:
+                # Replace references to this dataframe with the actual SQL
+                # This is a simplified version - actual implementation may be more complex
+                pattern = rf"\b{re.escape(df_name)}\b"
+                # For now, just return the original SQL
+                # A more sophisticated implementation would parse and replace
+                pass
+
+    return sql
 
 
 
