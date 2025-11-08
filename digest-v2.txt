@@ -6507,29 +6507,6 @@ class AllRetriever(Retriever):
 
 
 
-================================================
-FILE: dataqa/core/components/retriever/dbc_opensearch_mapping.json
-================================================
-[Empty file]
-
-
-================================================
-FILE: dataqa/core/components/retriever/opensearch_mapping.json
-================================================
-[Empty file]
-
-
-================================================
-FILE: dataqa/core/components/retriever/opensearch_retriever.py
-================================================
-[Empty file]
-
-
-================================================
-FILE: dataqa/core/components/retriever/opensearch_util.py
-================================================
-[Empty file]
-
 
 ================================================
 FILE: dataqa/core/components/retriever/tag_retriever.py
@@ -6581,6 +6558,7 @@ class TagRetriever(Retriever):
 
         Returns:
             TagRetriever: A new instance of the TagRetriever class.
+
         """
         tag_retriever_config = RetrieverConfig.model_validate(config)
         super().__init__(tag_retriever_config)
@@ -6632,7 +6610,7 @@ class TagRetriever(Retriever):
             resource (Resource): The resource to retrieve assets from.
 
         Returns:
-            list[RetrievedAsset]: A list of retrieved assets.
+            List[RetrievedAsset]: A list of retrieved assets.
         """
         search_field = [r for r in self.input_base_model.model_fields]
         if isinstance(search_field, str):
@@ -6669,7 +6647,7 @@ class TagRetriever(Retriever):
         return all_retrieved
 
     @staticmethod
-    def validate(input_tag: list, asset_tag: List) -> bool:
+    def validate(input_tag: List, asset_tag: List) -> bool:
         """
         :param input_tag: list of input tags
         :param asset_tag: list of tags of the asset record
@@ -8043,7 +8021,12 @@ class PipelineComponent(BaseModel):
     name: str
     type: str
     params: Dict[str, Any]
-    input_source: Optional[Dict[str, str]] = None
+    input_from_state: Optional[Dict[str, str]] = Field(
+        description="Map component input to state", default_factory=dict
+    )
+    output_to_state: Optional[Dict[str, str]] = Field(
+        description="Map component output to state", default_factory=dict
+    )
 
 
 class ParentGroup(BaseModel):
@@ -10131,6 +10114,21 @@ def format_tool_calls(tool_calls: List) -> str:
         formatted_tool_calls.append(formatted_tool_call)
     return "\n".join(formatted_tool_calls)
 
+def process_tool_messages(tool_messages: List) -> str:
+    formatted_tool_messages = []
+    for msg in tool_messages:
+        if msg.get("type", "") == "ai":
+            if msg.get("content", "") != "":
+                formatted_tool_messages.append(msg.get("content", ""))
+            if len(msg.get("tool_calls", [])) > 0:
+                formatted_tool_messages.append("Tool calls:")
+                formatted_tool_messages.append(
+                    format_tool_calls(msg.get("tool_calls", []))
+                )
+        elif msg.get("type", "") == "tool":
+            formatted_tool_messages.append(msg.get("content", ""))
+    return "\n".join(formatted_tool_messages)
+
 
 def dataframe_to_llm_judge_string(df_name: str, df: pd.DataFrame):
     if df is None:
@@ -10205,6 +10203,7 @@ class AgentResponseParser:
             "step_count": count,
             "llm_info": None,
             "node": None,
+            "time": None,
         }
         formatted_output = []
         node_name = list(event[1].keys())[0]
