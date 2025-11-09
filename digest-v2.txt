@@ -1960,7 +1960,7 @@ FILE: dataqa/core/agent/cwd_agent/templates/instruction.jinja
 {% macro GENERAL_WORKER_INSTRUCTION() %}
 - Do NOT overwrite a dataframe that already exists.
 - If you can not execute the {{ const.TASK }} by yourself:
-    - Directly say task cannot be executed, use explicit code {{ const.TASK_REJECTED }} in your response so that {{ const.REPLANNER }} can change the {{ const.PLAN }} accordingl
+    - Directly say task cannot be executed, use explicit code {{ const.TASK_REJECTED }} in your response so that {{ const.REPLANNER }} can change the {{ const.PLAN }} accordingly
     - Explain why {{ const.TASK }} cannot be executed in <REASONING></REASONING> tag.{% endmacro %}
 
 
@@ -13069,31 +13069,20 @@ from logging import getLogger
 from typing import Any, Callable, Dict, List, Set, Union
 
 import pandas as pd
+
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
 
-from dataqa.core.agent.cwd_agent.cwd_agent import CWDState
-from dataqa.core.client import CoreRequest, CoreResponse, CoreStatus, CoreStep, DataQAClient
-from dataqa.core.data_models.asset_models import IngestionData
+from dataqa.core.agent.cwd_agent import CwdAgent, CwdState
 from dataqa.core.utils.dataframe_utils import df_to_markdown
-from dataqa.core.utils.langgraph_utils import (
-    API_KEY,
-    BASE_URL,
-    CONFIGURABLE,
-    PROMPT_BACK,
-    QUESTION_ID,
-    THREAD_ID,
-    TOKEN,
-)
-from dataqa.integrations.dbc.factory import DBC_CWDAgentFactory
+from dataqa.integrations.dbc.factory import DBCWdAgentFactory
 from dataqa.integrations.dbc.models import (
-    DBCRequest,
     DBCResponse,
     FileType,
-    StepResponse,
+    IngestionData,
+    StatusResponse,
     UsecaseConfig,
 )
-from dataqa.scripts.azure_token import get_az_token_using_cert
 
 logger = getLogger(__name__)
 
@@ -13107,9 +13096,9 @@ class DBCClient:
         self,
         usecase_config: UsecaseConfig,
         request: DBCRequest,
-        llm_callable: Callable[[str, List[BaseMessage], Any], BaseMessage],
-        s3_retrieval: Callable[[uuid.UUID, Set[FileType]], IngestionData],
-        sql_callable: Callable[[str], Dict[str, Union[pd.DataFrame, str]]],
+        llm_callable: Callable[[List[BaseMessage], Any], BaseMessage],
+        s3_retrieval: Callable[[str], IngestionData],
+        sql_callable: Callable[[str], str],
         storage_callable: Callable[[str, Union[pd.DataFrame, bytes]], None],
         os_retrieval: Callable[
             [str, uuid.UUID, Set[FileType], int],
@@ -13126,23 +13115,40 @@ class DBCClient:
         self.s3_retrieval = s3_retrieval
         self.sql_callable = sql_callable
         self.storage_callable = storage_callable
-        self.os_retrieval = os_retrieval
         self.retrieve_previous_data = retrieve_previous_data
+        self.os_retrieval = os_retrieval
 
     def construct_history(self, num_turns: int = 10) -> List[str]:
         """
         Construct conversation history from previous turns.
 
-        :param num_turns: Number of recent turns to include in history.
-        :return: List of formatted history strings.
+        Args:
+            num_turns: Number of previous turns to include (default: 10)
+
+        Returns:
+            List of formatted history strings
         """
-        recent_turns = self.request.conversation_history[-num_turns:]
         history = []
+        # Take the last num_turns from conversation history
+        recent_turns = (
+            self.request.conversation_history[-num_turns:]
+            if self.request.conversation_history
+            else []
+        )
+
         for turn in recent_turns:
-            history.append(f"User: {turn.query}")
-            history.append(f"Assistant: {turn.output_text}")
+            # Format: user query -> assistant response with dataframe names
+            user_part = f"USER: {turn.query}"
+            assistant_part = f"ASSISTANT: {turn.output_text}"
+
+            # Add dataframe names if they exist
             if turn.output_dataframes:
-                history.append(f"Dataframes: {', '.join(turn.output_dataframes)}")
+                df_names = ", ".join(turn.output_dataframes)
+                assistant_part = f"{assistant_part} (DataFrames: {df_names})"
+
+            history_entry = f"{user_part}\n{assistant_part}\n---\n"
+            history.append(history_entry)
+
         return history
 
     async def initialize_memory_from_history(
@@ -13151,82 +13157,98 @@ class DBCClient:
         """
         Initialize memory by loading dataframes from previous conversation turns.
 
-        :param num_turns: Number of recent turns to load dataframes from.
-        :param config: RunnableConfig for memory operations.
-        :return: Memory object with loaded dataframes.
+        Args:
+            num_turns: Number of previous turns to load dataframes from (default: 1)
+
+        Returns:
+            Memory object with loaded dataframes from conversation history
         """
         from dataqa.core.memory import Memory
 
         memory = Memory()
-        recent_turns = self.request.conversation_history[-num_turns:]
-        for turn in recent_turns:
-            for df_name in turn.output_dataframes:
-                try:
-                    df = await self.retrieve_previous_data(
-                        df_name, self.request.question_id
-                    )
-                    if df is not None:
-                        memory.put_dataframe(df_name, df, config=config)
-                        logger.info(
-                            f"Loaded dataframe {df_name} from previous turn. Question ID {self.request.question_id} Conversation ID {self.request.conversation_id}."
-                        )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to load dataframe {df_name} from previous turn due to {repr(e)}. Question ID {self.request.question_id} Conversation ID {self.request.conversation_id}."
-                    )
-        return memory
 
-    def get_streaming_message(self) -> CoreStatus:
-        """Get streaming message status."""
-        pass
+        # Get recent turns based on num_turns parameter
+        recent_turns = (
+            self.request.conversation_history[-num_turns:]
+            if self.request.conversation_history
+            else []
+        )
+
+        for turn in recent_turns:
+            if turn.output_dataframes:
+                for df_name in turn.output_dataframes:
+                    try:
+                        # Retrieve dataframe using name and question_id
+                        df = await self.retrieve_previous_data(
+                            df_name, turn.question_id
+                        )
+
+                        if df is not None:
+                            memory.put_dataframe(df_name, df, config)
+                            logger.info(
+                                f"Loaded dataframe {df_name} from question {turn.question_id}"
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to load dataframe {df_name} from question {turn.question_id}: {repr(e)}"
+                        )
+
+        return memory
 
     async def process_query(
         self,
-        streaming: bool = False,
-        summarize: bool = False,
+        summarize: bool = True,
+        stream: bool = True,
         num_history_turns: int = 10,
         num_memory_turns: int = 1,
-        prompt_back: bool = True,
-    ) -> Generator[Union[CoreStatus, CoreResponse], None, None]:
+    ) -> AsyncIterable[Union[StatusResponse, DBCResponse]]:
         """
         Main entry point to process a query from the DBC service.
 
-        :param streaming: Whether to stream responses.
-        :param summarize: Whether to include summary in response.
-        :param num_history_turns: Number of history turns to include.
-        :param num_memory_turns: Number of memory turns to load.
-        :param prompt_back: Whether to allow prompt back messages.
-        :return: Generator of CoreStatus or CoreResponse.
+        Args:
+            summarize: Whether to stream intermediate responses
+            num_history_turns: Number of previous turns to include in history
+            num_memory_turns: Number of previous turns to load dataframes from
         """
-        import uuid
 
         from dataqa.core.data_models.asset_models import (
             IngestionData as CoreIngestionData,
         )
-        from dataqa.core.memory import Memory
-        from dataqa.core.utils.agent_util import AgentResponseParser
+        from dataqa.core.utils.langraph_utils import (
+            CONFIGURABLE,
+            QUESTION_ID,
+            THREAD_ID,
+        )
+
+        # Use a unique ID for the runnable config to avoid state collision
+        runnable_config = {
+            CONFIGURABLE: {
+                THREAD_ID: self.request.conversation_id,
+                QUESTION_ID: self.request.question_id,
+            }
+        }
 
         # Load memory with previous dataframes
         memory = await self.initialize_memory_from_history(
-            num_turns=num_memory_turns
+            num_memory_turns, runnable_config
         )
 
-        # Prepare conversation history
-        history = self.construct_history(num_turns=num_history_turns)
+        # 1. Prepare conversation history for the agent
+        history = self.construct_history(num_history_turns)
 
-        # Fetch necessary assets for the use case
+        # 2. Fetch all necessary assets for the use case
         dbc_ingestion_data = await self.s3_retrieval(
             config_id=self.usecase_config.config_id,
             file_types={FileType.RULES, FileType.SCHEMA, FileType.EXAMPLES},
         )
 
-        # Translate DBC model to core library model
+        # 3. Translate DBC model to core library model
         core_ingestion_data = CoreIngestionData.model_validate(
             dbc_ingestion_data.model_dump()
         )
 
-        # Create the agent instance using the DBC factory
-        agent = DBC_CWDAgentFactory.create_agent(
+        # 4. Create the agent instance using the DBC factory
+        agent = DBCWdAgentFactory.create_agent(
             usecase_config=self.usecase_config,
             ingestion_data=core_ingestion_data,
             memory=memory,
@@ -13234,52 +13256,22 @@ class DBCClient:
             sql_callable=self.sql_callable,
         )
 
-        # Prepare runnable config with token handling
-        CERT_PATH = os.environ.get("CERT_PATH", "")
-        AZURE_OPENAI_API_KEY = os.environ.get("AZURE_OPENAI_API_KEY", "")
-        if "Standard LLM Azure API Subscription" in AZURE_OPENAI_API_KEY:
-            api_key = AZURE_OPENAI_API_KEY
-            token = ""
-        elif "Multi-Tenant LLM Azure API Subscription" in CERT_PATH:
-            token = get_az_token_using_cert()[0]
-            os.environ["AZURE_OPENAI_API_TOKEN"] = token
-            api_key = ""
-        else:
-            api_key = AZURE_OPENAI_API_KEY
-            token = ""
-
-        runnable_config = {
-            CONFIGURABLE: {
-                THREAD_ID: self.request.conversation_id + self.request.question_id,
-                QUESTION_ID: self.request.question_id,
-                TOKEN: token,
-                PROMPT_BACK: prompt_back,
-                API_KEY: api_key,
-                BASE_URL: os.environ.get("OPENAI_API_BASE", ""),
-            }
-        }
-
-        # Run the agent with streaming
-        initial_state = CWDState(query=self.request.user_query, history=history)
+        # 5. Run the agent
+        initial_state = CwdState(query=self.request.user_query, history=history)
         final_state = None
-        async for chunk in agent(initial_state, runnable_config):
-            if isinstance(chunk[0], CWDState):
-                final_state = chunk[0]
-                if streaming:
-                    yield CoreStatus(name="processing", message="Processing query...")
+        async for chunk in agent.astream(
+            state=initial_state,
+            config=runnable_config,
+            stream=stream,
+            summarize=summarize,
+        ):
+            if isinstance(chunk, CwdState):
+                final_state, _ = chunk
+            elif isinstance(chunk, StatusResponse):
+                yield StatusResponse(name=chunk[0], message=chunk[1])
 
-        if not final_state:
-            yield CoreResponse(
-                text="An error occurred, and no final response was generated.",
-                output_dataframes=[],
-                output_images=[],
-                steps=[],
-            )
-            return
-
-        # Process and persist final outputs
-        parser = AgentResponseParser([], memory, runnable_config)
-        final_response_obj = final_state.final_response
+        # 6. Process and persist final outputs
+        final_response_obj = final_state.final_response if final_state else None
         df_s3_names, img_s3_names = [], []
         text_response = (
             "An error occurred, and no final response was generated."
@@ -13297,14 +13289,14 @@ class DBCClient:
                         logger.info(
                             f"Store dataframe {name} to s3. Question ID {self.request.question_id} Conversation ID {self.request.conversation_id}."
                         )
-                        text_response += f"\n\nPlease check the table {name} below:\n{df_to_markdown(df=df, fold=True)}"
+                        text_response += f"\n\nPlease check the table {name} below:\n\n{df_to_markdown(df, fold=True)}"
                     except Exception as e:
                         logger.error(
                             f"Failed to save dataframe {name} to s3 due to {repr(e)}. Question ID {self.request.question_id} Conversation ID {self.request.conversation_id}."
                         )
 
             for name in final_response_obj.output_img_name:
-                img_bytes, _ = memory.get_image_data(name, runnable_config)
+                img_bytes = memory.get_image(name, runnable_config)
                 if img_bytes:
                     try:
                         await self.storage_callable(name=name, data=img_bytes)
@@ -13312,19 +13304,24 @@ class DBCClient:
                         logger.info(
                             f"Store image {name} to s3. Question ID {self.request.question_id} Conversation ID {self.request.conversation_id}."
                         )
-                    except Exception as er:
+                    except Exception as e:
                         logger.error(
-                            f"Failed to save image {name} to s3 due to {repr(er)}. Question ID {self.request.question_id} Conversation ID {self.request.conversation_id}."
+                            f"Failed to save image {name} to s3 due to {repr(e)}. Question ID {self.request.question_id} Conversation ID {self.request.conversation_id}."
                         )
 
         if summarize and final_state and final_state.summary:
-            text_response += f"\n\n--\n\nHere is a brief summary of how your question was being handled:\n\n{final_state.summary}"
+            text_response += f"\n\n---\n\nHere is a brief summary of how your question was being handled:\n\n{final_state.summary}"
 
         steps = []
-        steps = [
-            StepResponse(name=f"Step {i+1}", content=s.response)
-            for i, s in enumerate(final_state.worker_response.task_response)
-        ]
+        if (
+            final_state
+            and final_state.worker_response
+            and final_state.worker_response.task_response
+        ):
+            steps = [
+                StepResponse(name=f"Step {i + 1}", content=s.response)
+                for i, s in enumerate(final_state.worker_response.task_response)
+            ]
 
         yield DBCResponse(
             text=text_response,
@@ -13332,7 +13329,6 @@ class DBCClient:
             output_image_names=img_s3_names,
             steps=steps,
         )
-
 
 
 ================================================
@@ -13417,94 +13413,26 @@ class DBC_CWDAgentFactory:
 ================================================
 FILE: dataqa/integrations/dbc/llm.py
 ================================================
-# dataqa/integrations/dbc/llm.py
-import asyncio
-from typing import Any, Callable, List, Optional
+import types
+from typing import Any, Callable, Optional, Type
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
 )
-from langchain_core.language_models import BaseChatModel, SimpleChatModel
-from langchain_core.messages import BaseMessage
+# )
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from langchain_core.pydantic_v1 import Field
+
+from langchain_core.prompt_values import ChatPromptValue
+from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from langchain_openai import AzureChatOpenAI
+from pydantic import BaseModel
 
 from dataqa.core.llm.base_llm import BaseLLM, LLMConfig, LLMOutput
-from dataqa.core.utils.prompt_utils import messages_to_serializable
-
-
-class DBCProxyChatModel(SimpleChatModel):
-    """
-    A proxy LangChain Chat Model that wraps the DBC `llm_invoke_with_retries` function.
-    """
-
-    dbc_invoke_function: Callable = Field(
-        ..., description="The async llm_invoke_with_retries function from DBC."
-    )
-    model_name: str = "dbc-proxy-model"
-    delegate_model: BaseChatModel = Field(
-        ...,
-        description="A real chat model instance to delegate binding logic to.",
-    )
-
-    class Config:
-        arbitrary_types_allowed = True
-
-    @property
-    def _llm_type(self) -> str:
-        return "dbc-proxy-chat-model"
-
-    def _call(
-        self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[CallbackManagerForLLMRun] = None,
-        **kwargs: Any,
-    ) -> str:
-        """
-        THE FIX IS HERE: Implement the required synchronous _call method.
-        This method wraps the asynchronous _agenerate method.
-        """
-        # Create a new asyncio event loop to run the async code
-        # in this synchronous context.
-        result = asyncio.run(self._agenerate(messages, stop, None, **kwargs))
-        return result.generations[0].message.content
-
-    async def _agenerate(
-        self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[AsyncCallbackManagerForLLMRun] = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        """
-        The core async method that calls the DBC invocation function.
-        """
-        response_message = await self.dbc_invoke_function(
-            model=self.model_name,
-            messages=messages,
-        )
-        generation = ChatGeneration(message=response_message)
-        return ChatResult(generations=[generation])
-
-    def bind_tools(
-        self,
-        tools: List[BaseTool],
-        **kwargs: Any,
-    ) -> "DBCProxyChatModel":
-        """
-        Handles tool binding by delegating the complex logic to the internal delegate model.
-        """
-        tool_bound_delegate = self.delegate_model.bind_tools(tools, **kwargs)
-        new_proxy = self.copy(update={"delegate_model": tool_bound_delegate})
-        return new_proxy
-
-    @property
-    def _identifying_params(self) -> dict:
-        return {"model_name": self.model_name}
+from dataqa.core.utils.prompts import messages_to_serializable
 
 
 class DBCLLMAdapter(BaseLLM):
@@ -13512,66 +13440,127 @@ class DBCLLMAdapter(BaseLLM):
     The adapter that creates the DBCProxyChatModel.
     """
 
-    config_base_model = LLMConfig
+    @property
+    def config_base_model(self) -> Type[LLMConfig]:
+        return LLMConfig
 
-    def __init__(self, llm_callable: Callable, model_name: str = "dbc_model"):
-        super().__init__(config=LLMConfig(model=model_name))
-        self.llm_callable = llm_callable
-        self._proxy_model: Optional[DBCProxyChatModel] = None
+    def __init__(self, _config: LLMConfig, model_name: str = "dbc_model"):
+        super().__init__(_config=_config, model_name=model_name)
+        self._llm_callable = llm_callable
+        self._proxy_model: Optional[BaseChatModel] = None
 
     def _get_model(self, **kwargs) -> BaseChatModel:
-        """
-        Returns an instance of our custom DBCProxyChatModel.
-        """
+        """Returns an instance of our custom DBCProxyChatModel."""
+
         if self._proxy_model is None:
+            # The delegate is a real Langchain model. It's used to correctly
+            # format structured output calls, but its own `invoke`
+            # method will never be called
             delegate = AzureChatOpenAI(
-                model="placeholder",
-                api_key="placeholder",
+                model="gpt-4.1-2025-04-09",
+                openai_api_key="placeholder",
+                openai_api_base="https://placeholder.openai.azure.com",
+                temperature=0,
                 azure_endpoint="https://placeholder.openai.azure.com",
-                api_version="placeholder",
+                api_version="2024-08-01-preview",
             )
 
-            self._proxy_model = DBCProxyChatModel(
-                dbc_invoke_function=self.llm_callable,
-                model_name=self.config.model,
-                delegate_model=delegate,
+    async def _agenerate(
+        self, instance, messages, stop, run_manager, **kwargs
+    ):
+        try:
+            response_message = await self.llm_callable(
+                messages=messages,
+                model=self.instance.deployment_name,
+                **kwargs,
             )
-        return self._proxy_model
+            generation = ChatGeneration(message=response_message)
+            return ChatResult(generations=[generation])
+        except Exception as e:
+            print(f"{e}")
+            raise
+
+delegate._agenerate = types.MethodType(_custom_agenerate, delegate)
+
+    self._proxy_model = delegate
+    return self._proxy_model
 
     async def ainvoke(self, messages: Any, **kwargs) -> LLMOutput:
         """
-        For simple invocations (without tool binding).
+        Single unified method for all LLM calls. Uses the proxy model to handle everything consistently.
         """
+        t = time.time()
+        from_component = kwargs.pop("from_component", "")
         try:
-            response_message: BaseMessage = await self.llm_callable(
-                model=self.config.model, messages=messages
+            # get the base proxy model
+            model = self._get_model()
+            # dbc_kwargs = {k: v for k, v in kwargs.items() if k not in}
+
+            # apply structured output if requested for this specific call
+            with_structured_output = kwargs.pop(
+                "with_structured_output", self.config.with_structured_output
             )
-            generation = response_message.content
+
+            if with_structured_output:
+                model = model.with_structured_output(
+                    with_structured_output,
+                    include_raw=True,
+                    method="json_schema",
+                )
+
+            # invoke the model
+            response = await model.ainvoke(messages)
+            if isinstance(response, BaseMessage):
+                generation = response
+            elif hasattr(response, "tool_calls") and response.tool_calls:
+                generation = response.tool_calls[0]["args"]
+            else:
+                generation = response.content
+
+            # metadata = {
+            #    "request_id": response["raw"].id,
+            #    "model": response["raw"].response_metadata[
+            #        "model_name"
+            #    ],
+            #    "latency": time.time() - t,
+            #    "input_token": response["raw"].usage_metadata[
+            #        "input_tokens"
+            #    ],
+            #    "output_token": response["raw"].usage_metadata[
+            #        "output_tokens"
+            #    ],
+            # }
 
             return LLMOutput(
-                prompt=messages_to_serializable(messages), generation=generation
+                prompt=messages_to_serializable(messages),
+                generation=generation,
+                metadata=metadata,
+                from_component=from_component,
             )
+
         except Exception as e:
             return LLMOutput(
                 prompt=messages_to_serializable(messages),
+                generation="",
                 error={
                     "error_code": 500,
                     "error_type": type(e).__name__,
                     "error_message": str(e),
                 },
+                from_component=from_component,
             )
-
 
 
 ================================================
 FILE: dataqa/integrations/dbc/models.py
 ================================================
-# dataqa/integrations/dbc/models.py
 import uuid
 from enum import StrEnum, auto
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
+
+from dataqa.core.agent.cwd_agent.config import DialectConfig
 
 # Import the core asset models to use in IngestionData
 from dataqa.core.data_models.asset_models import DatabaseSchema, Examples, Rules
@@ -13587,7 +13576,7 @@ class FileType(StrEnum):
 
 class IngestionData(BaseModel):
     """
-    Defines the structured data object returned by the `asset_callable`.
+    Defines the structured data object returned by the `s3_retrieval`.
     """
 
     rules: Optional[Rules] = None
@@ -13604,9 +13593,13 @@ class UsecaseConfig(BaseModel):
     """
 
     config_id: uuid.UUID
-    tenant_id: str
+    tenant_id: uuid.UUID
     usecase_name: str
     usecase_description: str
+    sql_dialect: DialectConfig = Field(
+        default_factory=DialectConfig,
+        description="SQL dialect configuration for the use case.",
+    )
 
 
 class ConversationTurn(BaseModel):
@@ -13614,12 +13607,17 @@ class ConversationTurn(BaseModel):
     A single turn in the conversation history from a DBCRequest.
     """
 
+    question_id: uuid.UUID = Field(
+        ..., description="Unique identifier for this specific question."
+    )
     query: str = Field(
         ..., description="The user query from this conversation turn."
     )
     output_text: str = Field(
-        ...,
-        description="The final text response from the turn, including dataframe summaries.",
+        ..., description="The final text response from the turn."
+    )
+    output_dataframes: List[str] = Field(
+        default_factory=list, description="file names for the dataframes"
     )
 
 
@@ -13631,16 +13629,25 @@ class DBCRequest(BaseModel):
     user_query: str = Field(
         ..., description="The natural language query from the user."
     )
-    conversation_id: str = Field(
+    conversation_id: uuid.UUID = Field(
         ..., description="Unique identifier for the conversation session."
     )
-    question_id: str = Field(
+    question_id: uuid.UUID = Field(
         ..., description="Unique identifier for this specific question."
     )
     conversation_history: List[ConversationTurn] = Field(
         default_factory=list,
         description="Previous conversation turns for context.",
     )
+
+
+class StatusResponse(BaseModel):
+    """
+    An intermediate status and its streaming message in the agent's execution trace.
+    """
+
+    name: str = Field(..., description="Name of the processing step.")
+    message: str = Field(..., description="A text message to be streamed.")
 
 
 class StepResponse(BaseModel):
@@ -13908,7 +13915,6 @@ from dataqa.core.components.code_executor.in_memory_code_executor import (
 from dataqa.core.components.code_executor.api_executor import (
     ApiCodeExecutor,
 )
-
 from dataqa.core.components.resource_manager.resource_manager import (
     ResourceManager,
 )
