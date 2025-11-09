@@ -3097,6 +3097,7 @@ class DataScanner:
         Returns:
             Optional[pd.DataFrame]: The result of the query as a pandas DataFrame. If the query execution fails,
                 None is returned.
+
         """
         SqlInput = create_model("SqlInput", code=(str, ...))
         executor_input = SqlInput(code=sql)
@@ -3106,7 +3107,7 @@ class DataScanner:
                 f"Error execution SQL. \nSQL: {sql}\nError: {result.error}"
             )
             return None
-        result_df = result.dataframe[0]
+        result_df: str = result.dataframe[0]
         result_df = pd.read_json(io.StringIO(result_df))
         return result_df
 
@@ -3166,6 +3167,7 @@ class DataScanner:
 
         Returns:
             List[Any]: A list of example values.
+
         """
         num_values = self.config.get("parameters", {}).get(
             "column_example_value_count", 5
@@ -3314,12 +3316,12 @@ class DataScanner:
                                 f"Unrecognized is_primary_key value: {is_pk}"
                             )
                             is_pk = None
-
                     else:
                         logger.warning(
                             f"Unrecognized is_primary_key type: {type(is_pk)}"
                         )
                         is_pk = None
+
                 example_values = await self.get_example_values(
                     table_name=table_name, column_name=column_name
                 )
@@ -3392,7 +3394,6 @@ class DataScanner:
         metadata_inference = MetaInference(
             llm=llm, prompt=meta_inference_prompt
         )
-
         inferred_schema = {}
         for table in self.database_schema.tables:
             table_name = table.table_name
@@ -3468,7 +3469,7 @@ def run_data_scanner(config):
     )
 
 
-def compare_schema(schema_file_1, schema_file_2):
+def compare_schemas(schema_file_1, schema_file_2):
     schema1 = yaml.safe_load(open(schema_file_1, "r"))
     schema2 = yaml.safe_load(open(schema_file_2, "r"))
     schema1 = DatabaseSchema(**schema1)
@@ -3492,19 +3493,17 @@ def compare_schema(schema_file_1, schema_file_2):
     for table in schema2.tables:
         table_name = table.table_name
         table_description = table.description
-        sort_key = f"{table_name}.{column_name}"
+        sort_key = f"{table_name}"
         schema2_output.append(
             [sort_key, "table", table_name, table_description]
         )
-
         for column in table.columns:
             column_name = column.name
             column_description = column.description
-            sort_key = f"{table_name}.{column.name}"
+            sort_key = f"{table_name}.{column_name}"
             schema2_output.append(
                 [sort_key, "column", column_name, column_description]
             )
-
     schema1_output.sort(key=lambda x: x[0])
     schema2_output.sort(key=lambda x: x[0])
     if len(schema1_output) != len(schema2_output):
@@ -3544,6 +3543,7 @@ if __name__ == "__main__":
     run_data_scanner(config)
 
 
+
 ================================================
 FILE: dataqa/core/components/knowledge_extraction/infer_metadata.py
 ================================================
@@ -3563,7 +3563,7 @@ from dataqa.core.utils.prompt_utils import build_prompt, prompt_type
 
 
 class MetaData(BaseModel):
-    """Metadata for the database"""
+    """metadata for the database"""
 
     level: Literal["table", "column"] = Field(
         description="level of the metadata"
@@ -3585,14 +3585,14 @@ Your task is to generate description of the table, and infer how data is structu
 
 Here are some tasks you can perform:
 1. Generate description of the table. In the description, you should also provide
-    - how data is structured in the table
-    - what each row represents
-    - what is the relationship between each row
-    - what is the relationship between columns in the table, such as hierarchical relationship, derived relationship, etc.
-    If there is no relationship between columns in the table, In the description, you should also provide
+  - how data is structured in the table
+  - what each row represents
+  - what is the relationship between each row
+  - what is the relationship between columns in the table, such as hierarchical relationship, derived relationship, etc.
+  - If there is any relationship between columns in the table, In the description, you should also provide
 2. Generate description of each column in the table. In the description, you should also provide
-    - what each column represents
-    - what is the function type of each column. Here are list of function types:
+  - what each column represents
+  - what is the function type of each column. Here are list of function types:
         - IDENTIFIER
         - CATEGORICAL VALUE (such as gender, country, company name, etc.)
         - NUMERIC
@@ -3611,9 +3611,7 @@ Column information:
 {column_info}
 
 Please generate metadata of the table, and columns in the following format:
-```json
 {{"level": "", "name": "", "description": ""}}
-```
 Here level should be one of "table" or "column"
 """
 
@@ -3649,7 +3647,7 @@ class MetaInference:
         responses = []
         for _ in range(self.num_retries):
             response = await self.llm.ainvoke(
-                messages,
+                messages=messages,
                 api_key=api_key,
                 token=token,
                 base_url=base_url,
@@ -3661,8 +3659,9 @@ class MetaInference:
             if isinstance(metadata, MetaDataList):
                 break
         if not isinstance(metadata, MetaDataList):
-            raise Exception("Failed to infer metadata")
+            raise Exception("Failed to infer metadata.")
         return dict(metadata=metadata, llm_output=responses)
+
 
 
 ================================================
@@ -3799,7 +3798,6 @@ Generated SQL or Failed Reason:
 
 Expected SQL:
 {expected_sql}
-
 
 Please start comparing and reasoning, and infer business rules."""
 
@@ -4505,10 +4503,165 @@ class RuleInferenceExperiment:
         self, test_record: TestDataItem, current_rules: List[str]
     ):
         """
+        Updates the rules with the given test record.
+
+        Args:
+            test_record (TestDataItem): The test data item.
+            current_rules (List[str]): The list of current rules.
+
+        Returns:
+            List: The result of the test.
+
+        The result contains the following:
+            - The question.
+            - The number of iterations.
+            - The label of the LLM evaluation.
+            - The prompt of the extracted rules.
+            - The expected SQL.
+            - The generated SQL.
+            - The original generated SQL.
+            - The ground truth output.
+            - The answer.
         """
+        expected_sql = test_record.solution[0].function_arguments["sql"]
+        self.logger.info(f"Question: {test_record.question}")
+        self.logger.info(f"Ground truth SQL: {expected_sql}")
+        if test_record.ground_truth_output:
+            self.logger.info(f"Ground truth output:\n{test_record.ground_truth_output}")
+
+        current_rule_prompt = ""
+        for idx, rule in enumerate(current_rules):
+            current_rule_prompt += f"{idx}. {rule}\n"
+        self.logger.info(f"Current rules: \n{current_rule_prompt}")
+        answer, sql = await self.run_question(
+            test_record.question, current_rule_prompt
+        )
+        sql_0 = sql
+        self.logger.info(f"Answer: {answer}")
+        self.logger.info(f"Generated SQL: \n{sql}")
+        llm_label = await self.llm_eval(test_record, answer)
+        self.logger.info(f"LLM Judge: {llm_label}")
+
+        iteration_count = 0
+        updated_rules_list = None
+        updated_rules_prompt = ""
+        while (
+            llm_label == EvaluationLabel.Wrong
+            or llm_label == EvaluationLabel.Reject
+        ) and (iteration_count < self.max_iteration):
+            iteration_count += 1
+            self.logger.info(f"***Iteration: {iteration_count}***")
+            llm, config = self.get_llm_and_run_config()
+            compare_sql = CompareSql(
+                llm=llm, prompt=compare_sql_prompt_template
+            )
+            reasons = await compare_sql(
+                query=test_record.question,
+                generated_sql=sql_0,
+                expected_sql=expected_sql,
+                config=config,
+            )
+            reason_list = reasons["reasons"][0].reasons
+            reasons_str = "\\n ".join(reason_list)
+            self.logger.info(f"Reasons: \n{reasons_str}\n")
+            rule_from_reasons = RuleUpdater(
+                llm=llm, prompt=rule_updater_from_reasoning_prompt_template
+            )
+            rules = await rule_from_reasons(
+                query=test_record.question,
+                generated_sql=sql_0,
+                expected_sql=expected_sql,
+                current_rules=reasons_str,
+                config=config,
+            )
+            rule_list = rules["rules"][0].rules
+
+            new_rules_prefix = [
+                f"{idx}. {rule}" for idx, rule in enumerate(rule_list)
+            ]
+            current_rules_prefix = [
+                f"{idx}. {rule}" for idx, rule in enumerate(current_rules)
+            ]
+            rule_list_str = current_rules_prefix + new_rules_prefix
+            rule_list_str = "\\n".join(rule_list_str)
+            self.logger.info(f"Rules to consolidate: \n{rule_list_str}\n")
+            rule_consolidation = RuleConsolidation(
+                llm=llm, prompt=rule_consolidation_prompt_template
+            )
+            rules = await rule_consolidation(
+                rule_list_str=rule_list_str, config=config
+            )
+            updated_rules_list = [rule.rule for rule in rules["rules"][0].rules]
+
+            # rule_updater = RuleUpdater(
+            #     llm=llm, prompt=rule_updater_prompt_template
+            # )
+            # rules = await rule_updater(
+            #     query=test_record.question,
+            #     generated_sql=sql_0,
+            #     expected_sql=expected_sql,
+            #     current_rules=current_rules,
+            #     config=config,
+            # )
+            for idx, rule in enumerate(rules["rules"][0].rules):
+                self.logger.info(f"Updated rules prompt: {idx}. {rule}\n")
+                updated_rules_prompt += f"{idx}. {rule}\n"
+            answer, sql = await self.run_question(
+                test_record.question, updated_rules_prompt
+            )
+            self.logger.info(f"Answer: {answer}")
+            self.logger.info(f"Generated SQL: \n{sql}")
+            llm_label = await self.llm_eval(test_record, answer)
+            self.logger.info(f"LLM Judge: {llm_label}")
+        result = [
+            test_record.question,
+            iteration_count,
+            llm_label.value,
+            updated_rules_list if updated_rules_list else current_rules,
+            expected_sql,
+            sql,
+            sql_0,
+            test_record.ground_truth_output,
+            answer,
+        ]
+        self.experiment_result.append(
+            result + [test_record.id, updated_rules_list]
+        )
+        return result
+
 
     async def update_rule_batch(self):
-        pass
+        result = []
+        count = 1
+        starting_rules = []
+        for item in self.test_data.data:
+            self.logger.info(
+                f"\n*** {count} of {len(self.test_data.data)} ***\n"
+            )
+            count += 1
+            update_result = await self.update_rule_with_question(
+                item, starting_rules
+            )
+            starting_rules = update_result[3]
+            self.logger.info(f"Current rules: \n{starting_rules}\n")
+            result.append(update_result)
+            self.experiment_result,
+            open(f"{self.output_file_path}.pkl", "wb"),
+            pickle.dump(
+            )
+            column_names = [
+                "question",
+                "iteration_count",
+                "llm_label",
+                "updated_rules",
+                "expected_sql",
+                "generated_sql",
+                "generated_sql_0",
+                "ground_truth_output",
+                "generated_answer",
+            ]
+            df_result = pd.DataFrame(result, columns=column_names)
+            df_result.to_excel(f"{self.output_file_path}.xlsx")
 
 
     async def tune_question(self, test_record: TestDataItem):
