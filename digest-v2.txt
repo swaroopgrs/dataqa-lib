@@ -3588,8 +3588,8 @@ Here are some tasks you can perform:
   - how data is structured in the table
   - what each row represents
   - what is the relationship between each row
-  - what is the relationship between columns in the table, such as hierarchical relationship, derived relationship, etc.
-  - If there is any relationship between columns in the table, In the description, you should also provide
+  - what is the relationship between rows
+  - if there is any relationship between columns in the table, such as hierarchical relationship, derived relationship, etc.
 2. Generate description of each column in the table. In the description, you should also provide
   - what each column represents
   - what is the function type of each column. Here are list of function types:
@@ -4513,6 +4513,7 @@ class RuleInferenceExperiment:
             List: The result of the test.
 
         The result contains the following:
+
         - The question.
         - The number of iterations.
         - The label of the LLM evaluation.
@@ -4527,7 +4528,7 @@ class RuleInferenceExperiment:
         ground truth output. Then it logs the current rules. It then runs
         the question with the current rules and logs the answer and the
         generated SQL. It evaluates the answer using the LLM and logs the
-        LLM Judge. It then iterates over the rules until the LLM label is
+        LLM judge. It then iterates over the rules until the LLM label is
         correct or the maximum number of iterations is reached. It logs
         the iteration count, the extracted rules, and the answer and
         generated SQL. Finally, it appends the result to the experiment
@@ -4618,7 +4619,7 @@ class RuleInferenceExperiment:
             # )
             # for idx, rule in enumerate(rules["rules"][0].rules):
             for idx, rule in enumerate(updated_rules_list):
-                updated_rules_prompt += f"{idx}. {rule}\n"
+                updated_rules_prompt += f"{idx} - {rule}\n"
             self.logger.info(f"Updated rules: \n{updated_rules_prompt}")
             answer, sql = await self.run_question(
                 test_record.question, updated_rules_prompt
@@ -4660,7 +4661,7 @@ class RuleInferenceExperiment:
             result.append(update_result)
             pickle.dump(
                 self.experiment_result,
-                open(f"{self.output_file_path}.pkl", "wb")
+                open(f"{self.output_file_path}.pkl", "wb"),
             )
         column_names = [
             "question",
@@ -4909,7 +4910,7 @@ if __name__ == "__main__":
 
     #     # results = pickle.load(open("temp/rule_inference_experiment_cib_mp_20250620_3.pkl", "rb"))
     #     # print(results)
-    #     #  test_data = load_test_data(test_data_file)
+    #     # test_data = load_test_data(test_data_file)
     #     # item = test_data.data[16]
     #     # asyncio.run(tune_question(item))
 
@@ -6209,9 +6210,9 @@ class Replanner(Planner):
                 query=input_data.query,
                 history="\n".join(input_data.history),
                 plan=input_data.plan[-1].summarize(),
-                past_steps=input_data.worker_reponse.summarize(),
+                past_steps=input_data.worker_response.summarize(),
                 dataframe_summary=self.memory.summarize_dataframe(
-                    config=config,
+                    config=config
                 ),
                 use_case_schema=input_data.schema,
                 use_case_replanner_instruction=rule,
@@ -6234,7 +6235,7 @@ class Replanner(Planner):
 
         if not isinstance(response.generation, Plan):
             raise Exception(
-                f"Replanner failed to generate Plan response. Raw LLM output: {response.generation}"
+                f"Replanner failed to generate an Plan response. Raw LLM output: {response.generation}"
             )
 
         return PlannerOutput(plan=[response.generation], llm_output=responses)
@@ -6307,7 +6308,7 @@ class SQLValidatorOutput(BaseModel):
 
 
 class SQLExecutorOutput(BaseModel):
-    sql: str = ""
+    sql: str
     dataframe: str = ""
     error: str = ""
     time: float
@@ -6474,7 +6475,7 @@ def dataframe_to_values_subquery(df: pd.DataFrame) -> str:
         )
         values.append(f"({row_str})")
     values_clause = ",\n    ".join(values)
-    return f"(VALUES\n    {values_clause}) AS t({columns})"
+    return f"(VALUES\n    {values_clause}\n) AS t({columns})"
 
 
 def dataframe_to_union_all_subquery(df: pd.DataFrame) -> str:
@@ -6516,13 +6517,11 @@ def clean_sql(
 ) -> Optional[str]:
     """
     Clean the generated SQL by replacing internal dataframes with their original SQL or subquery of dataframe values.
-
     Args:
         sql (str): The generated SQL.
         memory (Memory): The memory object that holds the dataframes.
         config (RunnableConfig): The runnable configuration.
         executor_config (CodeExecutorConfig): The type of database.
-
     Returns:
         Optional[str]: The cleaned SQL.
     """
@@ -6600,7 +6599,7 @@ class SQLExecutor:
             return {"sql_executor_output": response}
 
         if sql == TASK_REJECTED or df_name == TASK_REJECTED:
-            error_msg = f"SQL Ececution skipped, as SQL Generation task is rejected due to the following reason: {state.sql_generator_output.reasoning}"
+            error_msg = f"SQL Execution skipped, as SQL Generation task is rejected due to the following reason: {state.sql_generator_output.reasoning}"
             response = SQLExecutorOutput(sql=sql, error=error_msg, time=0)
             logger.error(
                 f"Conversation ID: {thread_id}; question ID: {question_id}. {error_msg}"
@@ -6626,8 +6625,7 @@ class SQLExecutor:
                 logger.error(
                     f"Conversation ID: {thread_id}; question ID: {question_id}. SQL Execution failed with error:\n{error_msg}"
                 )
-                raise {"sql_executor_output": response}
-
+                return {"sql_executor_output": response}
             SqlInput = create_model("SqlInput", code=(str, ...))
             sql = sql_clean
             executor_input = SqlInput(code=sql)
@@ -6848,13 +6846,13 @@ class Plan(BaseModel):
         return "".join(tasks)
 
 
-
 class Feasibility(BaseModel):
-    """Check if USER OBJECTIVE has no ambiguity and is solvable.
+    """
+    Check if USER OBJECTIVE has no ambiguity and is solvable.
 
     This model contains two attributes: solvable and prompt_back.
     - If USER OBJECTIVE DOES NOT have ambiguity and you CAN solve it, return solvable as true, no need to generate prompt_back.
-    - If USER OBJECTIVE DOES have ambiguity or you CAN NOT solve it, return solvable as false, generate a prompt_back message tobe returned to the user.
+    - If USER OBJECTIVE DOES have ambiguity or you CAN NOT solve it, return solvable as false, generate a prompt_back message to be returned to the user.
     """
 
     solvable: bool = Field(
@@ -7419,21 +7417,15 @@ class ResourceManager:
                     "Only one rule per module is supported for updating"
                 )
         # if module_names is None:
-        #   module_names = [module_name.split(":")[1] for module_name in self.resources if "rule" in module_name]
+        #     module_names = [module_name.split(":")[1] for module_name in self.resources if "rule" in module_name]
         # for module in module_names:
-        #   resource = self.get_resource(resource_type=ResourceType.Rule, module_name=module)
-        #   if resource is not None:
-        #       if len(resource.data) == 1:
-        #           resource.data[0].instructions = new_rules
-        #       else:
-        #           raise ValueError("Only one rule per module is supported for updating")
+        #     resource = self.get_resource(resource_type=ResourceType.Rule, module_name=module)
+        #     if resource is not None:
+        #         if len(resource.data) == 1:
+        #             resource.data[0].instructions = new_rules
+        #         else:
+        #             raise ValueError("Only one rule per module is supported for updating")
 
-
-
-================================================
-FILE: dataqa/core/components/retriever/README.md
-================================================
-[Empty file]
 
 
 ================================================
@@ -7880,9 +7872,9 @@ if __name__ == "__main__":
     import asyncio
 
     config = yaml.safe_load(
-        open("dataqa/examples/ccib_risk/config/config_retriever.yml", "r")
+        open("dataqa/examples/ccb_risk/config/config_retriever.yml", "r")
     )
-    # my_kb = KnowledgeBase(config["components"][0]["params"]["config"])
+    # my_kb = KnowledgeBase(config["components"][4]["params"]["config"])
     my_resource_manager = ResourceManager(
         config["components"][4]["params"]["config"]
     )
@@ -7891,28 +7883,27 @@ if __name__ == "__main__":
 
     for component_config in config["components"][5:6]:
         retriever_node_config = component_config["params"]
-        r_config = {"name": component_config["name"]}
-        r_config.update(retriever_node_config["config"])
+        r_config = retriever_node_config["config"]
+        r_config["name"] = component_config["name"]
         r_input = retriever_node_config["input_config"]
         r_output = retriever_node_config["output_config"]
-
+        # tag_retriever = TagRetrieverOld(r_config, my_kb, r_input, r_output)
         tag_retriever = TagRetriever(
             r_config, my_resource_manager, r_input, r_output
         )
         tag_retriever_input = tag_retriever.prepare_input(mock_state)
         my_retrieved_asset = asyncio.run(tag_retriever.run(tag_retriever_input))
-        print("*" * 50)
         print(
             f"Component {tag_retriever.config.name} of type {tag_retriever.component_type} created."
         )
-        print(f"Retrieved {len(my_retrieved_asset.output_data)} records")
-        print("Content:")
+        print(f"Input tags: {tag_retriever_input.tags}")
+        print(f"Retrieved {len(my_retrieved_asset.output_data)} records:")
         for r in my_retrieved_asset.output_data:
             print(r.content.tags)
-        print("*" * 50)
         print(
-            f"Underlying string:\n{my_retrieved_asset.dict()[r_output[0]['name']]}"
+            f"\nRetrieved string:\n {my_retrieved_asset.dict()[r_output[0]['name']]}"
         )
+        print("***********\n\n")
 
 
 
@@ -8607,7 +8598,7 @@ FILE: dataqa/core/llm/openai.py
 import logging
 import random
 import time
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import openai
 from langchain_openai import AzureChatOpenAI, AzureOpenAIEmbeddings
@@ -8619,7 +8610,7 @@ from dataqa.core.llm.base_llm import (
     LLMError,
     LLMOutput,
 )
-from dataqa.core.utils.prompt_utils import messages_to_serializable
+from dataqa.core.utils.prompts import messages_to_serializable
 
 logger = logging.getLogger(__name__)
 
@@ -8629,81 +8620,81 @@ class AzureOpenAIConfig(LLMConfig):
     api_type: str
     base_url: str = Field(
         default="base_url",
-        description="""
-        The default azure openai url.
-        It should be provided either
-        through this config field or through config
-        call AzureOpenAI.invoke()
-        """,
+        description="The base URL of AzureOpenAI. "
+        "It should be provided either "
+        "- when define AzureOpenAIConfig "
+        "- call AzureOpenAI.invoke()",
     )
     api_key: str = Field(
         default="api_key",
-        description="""
-        The default azure openai key.
-        It should be provided either
-        through this config field or through config
-        call AzureOpenAI.invoke()
-        """,
+        description="The API_KEY of AzureOpenAI. "
+        "It should be provided either "
+        "- when define AzureOpenAIConfig "
+        "- call AzureOpenAI.invoke()",
     )
-    temperature: float = Field(default=1)
-    num_response: int = Field(  # TODO how to generate multiple responses
-        default=1, description="The number of llm response to be generated"
+    temperature: float = Field(
+        default=0, description="The temperature of LLM response generation."
+    )
+    num_response: int = Field(
+        default=1, description="The number of LLM response to be generated"
     )
     max_completion_tokens: int = Field(
-        default=5000,
-        description="The maximum output tokens",  # TODO o1 requires a different attribute "max_completion_token"
+        default=8000,
+        description="The maximum output tokens",  # TODO cl requires a different attribute "max_completion_token"
     )
     frequency_penalty: float = Field(
-        default=None, description="[-2, 2]. Penalty against repeating tokens."
+        default=0, description="[-2, 2]. Penalty against repeating tokens."
     )
-    oai_params: Optional[dict] = Field(default={})
-    azure_model_params: Optional[dict] = Field(
-        default={},
-    )
+    oai_params: Optional[Dict[str, Any]] = Field(default={})
+    azure_model_params: Optional[Dict[str, Any]] = Field(default={})
 
 
-class AzureOpenAI(BaseLLM):
+class AzureOpenAIBaseLLM(BaseLLM):
     config_base_model = AzureOpenAIConfig
-    config: AzureOpenAIConfig
+    azure_model: AzureOpenAIConfig
 
     def _get_model(self, **kwargs):
         with_structured_output = kwargs.get(
             "with_structured_output", self.config.with_structured_output
         )
-        model_kwargs = {
-            "max_completion_tokens": self.config.max_completion_tokens,
-        }
-        model_kwargs.update(self.config.oai_params or {})
-        model_kwargs.update(self.config.azure_model_params or {})
-        if kwargs.get("openai_api_token") is not None and kwargs.get("openai_api_token") != "":
+
+        if kwargs.get("token") is not None and kwargs.get("token") != "":
             llm = AzureChatOpenAI(
-                azure_deployment=self.config.model,
                 azure_endpoint=kwargs.get("base_url") or self.config.base_url,
-                api_version=self.config.api_version,
+                azure_deployment=self.config.model,
                 api_key=kwargs.get("api_key") or self.config.api_key,
-                openai_api_type=self.config.api_type,
+                api_version=self.config.api_version,
                 default_headers={
-                    "Authorization": f"Bearer {kwargs.get('openai_api_token')}"
+                    "Authorization": f"Bearer {kwargs.get('token')}"
                 },
-                n=self.config.num_response,
+                openai_api_type=self.config.api_type,
                 temperature=self.config.temperature,
-                include_response_headers=with_structured_output is None,
+                n=self.config.num_response,
+                # include_response_headers=with_structured_output is not None,
                 frequency_penalty=self.config.frequency_penalty,
-                model_kwargs=model_kwargs,
+                #
+                "max_completion_tokens": self.config.max_completion_tokens,
+                #
+                **self.config.oai_params,
+                **self.config.azure_model_params,
             )
         else:
             llm = AzureChatOpenAI(
-                azure_deployment=self.config.model,
                 azure_endpoint=kwargs.get("base_url") or self.config.base_url,
-                api_version=self.config.api_version,
+                azure_deployment=self.config.model,
                 api_key=kwargs.get("api_key") or self.config.api_key,
+                api_version=self.config.api_version,
                 openai_api_type=self.config.api_type,
-                n=self.config.num_response,
                 temperature=self.config.temperature,
-                include_response_headers=with_structured_output is None,
+                # include_response_headers=with_structured_output is not None,
                 frequency_penalty=self.config.frequency_penalty,
-                model_kwargs=model_kwargs,
+                model_kwargs={
+                    "max_completion_tokens": self.config.max_completion_tokens,
+                    **self.config.oai_params,
+                    **self.config.azure_model_params,
+                },
             )
+
         if with_structured_output is not None:
             llm = llm.with_structured_output(
                 with_structured_output,
@@ -8715,12 +8706,13 @@ class AzureOpenAI(BaseLLM):
     async def ainvoke(self, messages, max_retry: int = 5, **kwargs):
         t = time.time()
         from_component = kwargs.get("from_component", "")
+
         generation = ""
         metadata = None
         error = None
-        logger.info("invoking llm with retry...")
+        logger.info(f"Invoking llm with retry...")
         error_msgs = []
-        # attempts to catch common exceptions raised that occur when invoking Azure
+        """Attempts to catch common exceptions raised that occur when invoking Azure"""
         for i in range(max_retry):
             try:
                 response = await self._get_model(**kwargs).ainvoke(messages)
@@ -8737,45 +8729,44 @@ class AzureOpenAI(BaseLLM):
                         generation = response["parsed"]
                         metadata = {
                             "request_id": response["raw"].id,
-                            "model": response["raw"].response_metadata.get(
-                                "model_name", "unknown model"
-                            ),
+                            "model": response["raw"].response_metadata[
+                                "model_name"
+                            ],
                             "latency": time.time() - t,
                             "num_retries": i,
-                            "input_token": response["raw"].usage_metadata.get(
-                                "input_token", 0
-                            ),
-                            "output_tokens": response["raw"].usage_metadata.get(
-                                "output_tokens", 0
-                            ),
+                            "input_token": response["raw"].usage_metadata[
+                                "input_tokens"
+                            ],
+                            "output_token": response["raw"].usage_metadata[
+                                "output_tokens"
+                            ],
                         }
                 else:
                     generation = response.content
                 break
-            except ValueError as e:
-                # ValueErrors can be Langchain during content filter
-                logger.exception(f"error calling llm try {i + 1}", exc_info=e)
-                error_msgs.append(e)
-                error = LLMError(
-                    error_code=0, error_type="LLM Error", error_message=str(e)
-                )
-                break
+            # Break on non-recoverable exceptions
             except (
+                ValueError,
                 openai.BadRequestError,
                 openai.AuthenticationError,
+                openai.APIConnectionError,
                 openai.PermissionDeniedError,
-                openai.APIError,
-            ) as e:
-                logger.exception(f"error calling llm try {i + 1}", exc_info=e)
+                openai.NotFoundError,
+            ) as e:  # ValueErrors can be langchain during content filter
+                logger.exception(
+                    f"exception calling LLM try {i + 1}", exc_info=e
+                )
                 error_msgs.append(e)
                 error = LLMError(
                     error_code=0, error_type="LLM Error", error_message=str(e)
                 )
                 break
+            # Retry on recoverable exceptions (RateLimit, APITimeOut etc.)
             except Exception as e:
-                logger.exception(f"error calling llm try {i + 1}", exc_info=e)
+                logger.exception(
+                    f"exception calling LLM try {i + 1}", exc_info=e
+                )
                 error_msgs.append(e)
-                # Retry on recoverable exceptions (RateLimit, APITimeOut etc.)
                 # record latest error
                 error = LLMError(
                     error_code=0, error_type="LLM Error", error_message=str(e)
@@ -8784,10 +8775,12 @@ class AzureOpenAI(BaseLLM):
                 logger.info(f"Wait {wait_time}s before retry")
                 time.sleep(wait_time)
                 continue
+
         if error:
-            logger.error(f"errors calling llm: {error_msgs}")
+            logger.error("errors calling LLM %s", error_msgs)
         return LLMOutput(
             prompt=messages_to_serializable(messages),
+            generation=generation,
             from_component=from_component,
             metadata=metadata,
             error=error,
@@ -8798,34 +8791,36 @@ class OpenAIEmbedding:
     embedding_model_client = None
 
     def _get_model(self, **kwargs):
-        if kwargs.get("openai_api_token") is not None and kwargs.get("openai_api_token") != "":
-            if self.embedding_model_client is None:
+        if self.embedding_model_client is None:
+            if (
+                kwargs.get("openai_api_token") is not None
+                and kwargs.get("openai_api_token") != ""
+            ):
                 llm = AzureOpenAIEmbeddings(
                     openai_api_key=kwargs.get("openai_api_key"),
                     openai_api_version=kwargs.get("openai_api_version"),
+                    openai_api_base=kwargs.get("openai_api_base"),
                     default_headers={
-                        "Authorization": f"Bearer {kwargs.get('openai_api_token')}"
+                        "Authorization": f"bearer {kwargs.get('openai_api_token')}"
                     },
                     azure_endpoint=kwargs.get("azure_endpoint"),
                     model=kwargs.get("embedding_model_name"),
                 )
-                self.embedding_model_client = llm
-            return self.embedding_model_client
-        else:
-            if self.embedding_model_client is None:
+            else:
                 llm = AzureOpenAIEmbeddings(
                     openai_api_key=kwargs.get("openai_api_key"),
                     openai_api_version=kwargs.get("openai_api_version"),
                     azure_endpoint=kwargs.get("azure_endpoint"),
                     model=kwargs.get("embedding_model_name"),
                 )
-                self.embedding_model_client = llm
-            return self.embedding_model_client
+            self.embedding_model_client = llm
+        return self.embedding_model_client
 
     async def __call__(self, query: str, **kwargs):
-        response = await self._get_model(**kwargs).aembed_query(query)
-        return response
-
+        res = await self._get_model(**kwargs).aembed_query(
+            query
+        )
+        return res
 
 
 ================================================
@@ -13776,21 +13771,31 @@ FILE: dataqa/integrations/local/__init__.py
 FILE: dataqa/integrations/local/client.py
 ================================================
 import os
-from typing import List
+from typing import Generator, List, Union
 
 import pandas as pd
 
-from dataqa.core.agent.cwd_agent.cwd_agent import CWDAgent, CWDState
-from dataqa.core.client import CoreRequest, CoreResponse, CoreStep, DataQAClient
+from dataqa.core.agent.cwd_agent import CwdAgent, CwdState
+from dataqa.core.client import (
+    CoreResponse,
+    CoreRequest,
+    CoreStatus,
+    CoreStep,
+    DataQAClient,
+)
 from dataqa.core.memory import Memory
-from dataqa.core.utils.agent_util import AgentResponseParser
-from dataqa.core.utils.langgraph_utils import (
+from dataqa.core.utils.agent import AgentResponseParser
+from dataqa.core.utils.langraph_utils import (
     API_KEY,
     BASE_URL,
     CONFIGURABLE,
+    PROMPT_BACK,
+    QUESTION_ID,
     THREAD_ID,
+    TOKEN,
 )
 from dataqa.integrations.local.factory import LocalAgentFactory
+from dataqa.scripts.azure_token import get_az_token_using_cert
 
 
 class LocalClient(DataQAClient):
@@ -13801,16 +13806,16 @@ class LocalClient(DataQAClient):
 
     def __init__(self, config_path: str):
         """
-        Initializes the client with a path to a CWD Agent configuration file.
+        Initializes the client with a path to a Cwd Agent configuration file.
         This file is the single entry point for a local project setup.
 
         Args:
-            config_path: The path to the CWD Agent's main YAML configuration file.
+            config_path: The path to the Cwd Agent's main YAML configuration file.
         """
         self.config_path = config_path
-        self._agent: CWDAgent = None
+        self._agent: CwdAgent = None
 
-    def _get_or_create_agent(self, memory: Memory) -> CWDAgent:
+    def _get_or_create_agent(self, memory: Memory) -> CwdAgent:
         # Agent is created on-demand, which is efficient.
         if self._agent is None:
             self._agent = LocalAgentFactory.create_from_config(
@@ -13818,24 +13823,61 @@ class LocalClient(DataQAClient):
             )
         return self._agent
 
-    async def process_query(self, request: CoreRequest) -> CoreResponse:
+    def get_streaming_message(self) -> CoreStatus:
+        pass
+
+    async def process_query(
+        self,
+        request: CoreRequest,
+        streaming: bool = False,
+        summarize: bool = False,
+        prompt_back: bool = True,
+    ) -> Generator[Union[CoreStatus, CoreResponse], None, None]:
         """
         Processes a query using the agent configured in the local project.
+
+        Run in the streaming mode if `streaming` = True.
         """
         memory = Memory()
-        runnable_config = {
-            CONFIGURABLE: {
-                THREAD_ID: request.conversation_id,
-                # For local mode, we assume credentials are in env vars
-                API_KEY: os.environ.get("AZURE_OPENAI_API_KEY", ""),
-                BASE_URL: os.environ.get("OPENAI_API_BASE", ""),
+
+        if os.environ.get("CERT_PATH"):
+            # print(f"Initializing LLM using cert:{os.environ.get('CERT_PATH')}")
+            token = ""
+            api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
+            if api_key == "":
+                print("Running Standard LLM Azure API Subscription.........")
+                api_key = get_az_token_using_cert()[0]
+            else:
+                print("Running Multi-Tenant LLM Azure API Subscription.........")
+                token = get_az_token_using_cert()[0]
+
+            runnable_config = {
+                CONFIGURABLE: {
+                    THREAD_ID: request.conversation_id,
+                    QUESTION_ID: request.question_id,
+                    # For local mode, we assume credentials are in env vars
+                    API_KEY: api_key,
+                    BASE_URL: os.environ.get("OPENAI_API_BASE", ""),
+                    TOKEN: token,
+                    PROMPT_BACK: prompt_back,
+                }
             }
-        }
+        else:
+            runnable_config = {
+                CONFIGURABLE: {
+                    THREAD_ID: request.conversation_id,
+                    QUESTION_ID: request.question_id,
+                    # for local mode, we assume credentials are in env vars
+                    API_KEY: os.environ.get("AZURE_OPENAI_API_KEY", ""),
+                    BASE_URL: os.environ.get("OPENAI_API_BASE", ""),
+                    TOKEN: os.environ.get("AZURE_OPENAI_API_TOKEN", ""),
+                    PROMPT_BACK: prompt_back,
+                }
+            }
 
         agent = self._get_or_create_agent(memory)
-
         history_texts = [turn.output_text for turn in request.history]
-        initial_state = CWDState(
+        initial_state = CwdState(
             query=request.user_query, history=history_texts
         )
 
@@ -13845,11 +13887,10 @@ class LocalClient(DataQAClient):
             streaming=streaming,
             summarize=summarize,
         ):
-            if isinstance(chunk[0], CWDState):
+            if isinstance(chunk, CwdState):
                 final_state, events = chunk
             elif streaming:
                 yield CoreStatus(name=chunk[0], message=chunk[1])
-
 
         # Process the final state into a CoreResponse
         final_response_obj = final_state.final_response
@@ -13867,18 +13908,18 @@ class LocalClient(DataQAClient):
                     output_dfs.append(df)
 
             for name in final_response_obj.output_img_name:
-                img_bytes, _ = memory.get_image_data(name, runnable_config)
+                img_bytes = memory.get_image(name, runnable_config)
                 if img_bytes:
                     output_imgs.append(img_bytes)
 
         parser = AgentResponseParser(events, memory, runnable_config)
-        # print("\n" + "=" * 20 + " DEBUG INFO " + "=" * 20)
+        # print("\n" + "*" * 20 + " DEBUG INFO " + "*" * 20)
         # print("### List of dataframes in memory")
-        # for df_name, val in memory.get_dataframes(runnable_config).items():
-        #     print(f"df_name: {df_name}\nSQL: {val[1]}\n")
+        # for df_name, val in memory.list_dataframes(runnable_config).items():
+        #     # print(f"### df_name:{df_name}\nSQL: {val[1]}\n")
         # parser.pretty_print_output()
         # from dataqa.core.agent.cwd_agent.error_message import agent_error_log
-        # print(f"### Total number of agent errors" {len(agent_error_log)}\nList of error logs:\n{agent_error_log}\n")
+        # print(f"### Total number of agent errors: {len(agent_error_log)}\nList of error logs:\n{agent_error_log}\n")
         steps = [
             CoreStep(name=f"Step {i + 1}", content=s)
             for i, s in enumerate(parser.formatted_events)
@@ -13890,7 +13931,6 @@ class LocalClient(DataQAClient):
             output_images=output_imgs,
             steps=steps,
         )
-
 
 
 ================================================
