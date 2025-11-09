@@ -4513,25 +4513,37 @@ class RuleInferenceExperiment:
             List: The result of the test.
 
         The result contains the following:
-            - The question.
-            - The number of iterations.
-            - The label of the LLM evaluation.
-            - The prompt of the extracted rules.
-            - The expected SQL.
-            - The generated SQL.
-            - The original generated SQL.
-            - The ground truth output.
-            - The answer.
+        - The question.
+        - The number of iterations.
+        - The label of the LLM evaluation.
+        - The prompt of the extracted rules.
+        - The expected SQL.
+        - The generated SQL.
+        - The original generated SQL.
+        - The ground truth output.
+        - The answer.
+
+        This function first logs the question, the expected SQL, and the
+        ground truth output. Then it logs the current rules. It then runs
+        the question with the current rules and logs the answer and the
+        generated SQL. It evaluates the answer using the LLM and logs the
+        LLM Judge. It then iterates over the rules until the LLM label is
+        correct or the maximum number of iterations is reached. It logs
+        the iteration count, the extracted rules, and the answer and
+        generated SQL. Finally, it appends the result to the experiment
+        result and returns the result.
+
         """
         expected_sql = test_record.solution[0].function_arguments["sql"]
         self.logger.info(f"Question: {test_record.question}")
-        self.logger.info(f"Ground truth SQL: {expected_sql}")
-        if test_record.ground_truth_output:
-            self.logger.info(f"Ground truth output:\n{test_record.ground_truth_output}")
+        self.logger.info(f"Ground truth SQL:\n{expected_sql}")
+        self.logger.info(
+            f"Ground truth output:\n{test_record.ground_truth_output}"
+        )
 
         current_rule_prompt = ""
         for idx, rule in enumerate(current_rules):
-            current_rule_prompt += f"{idx}. {rule}\n"
+            current_rule_prompt += f"{idx} - {rule}\n"
         self.logger.info(f"Current rules: \n{current_rule_prompt}")
         answer, sql = await self.run_question(
             test_record.question, current_rule_prompt
@@ -4540,19 +4552,19 @@ class RuleInferenceExperiment:
         self.logger.info(f"Answer: {answer}")
         self.logger.info(f"Generated SQL: \n{sql}")
         llm_label = await self.llm_eval(test_record, answer)
-        self.logger.info(f"LLM Judge: {llm_label}")
+        self.logger.info(f"LLM judge: {llm_label}")
 
         iteration_count = 0
         updated_rules_list = None
         updated_rules_prompt = ""
         while (
-            llm_label == EvaluationLabel.Wrong
-            or llm_label == EvaluationLabel.Reject
+            (llm_label == EvaluationLabel.Wrong)
+            or (llm_label == EvaluationLabel.Reject)
         ) and (iteration_count < self.max_iteration):
             iteration_count += 1
             self.logger.info(f"***Iteration: {iteration_count}***")
             llm, config = self.get_llm_and_run_config()
-            compare_sql = CompareSql(
+            compare_sql = CompareSQL(
                 llm=llm, prompt=compare_sql_prompt_template
             )
             reasons = await compare_sql(
@@ -4561,11 +4573,11 @@ class RuleInferenceExperiment:
                 expected_sql=expected_sql,
                 config=config,
             )
-            reason_list = reasons["reasons"][0].reasons
-            reasons_str = "\\n ".join(reason_list)
+            reasons_list = reasons["reasons"][0].reasons
+            reasons_str = "\n".join(reasons_list)
             self.logger.info(f"Reasons: \n{reasons_str}\n")
             rule_from_reasons = RuleUpdater(
-                llm=llm, prompt=rule_updater_from_reasoning_prompt_template
+                llm=llm, prompt=infer_rules_from_reasoning_prompt_template
             )
             rules = await rule_from_reasons(
                 query=test_record.question,
@@ -4577,13 +4589,14 @@ class RuleInferenceExperiment:
             rule_list = rules["rules"][0].rules
 
             new_rules_prefix = [
-                f"{idx}. {rule}" for idx, rule in enumerate(rule_list)
+                f"B{idx} - {rule}\n" for idx, rule in enumerate(rule_list)
             ]
             current_rules_prefix = [
-                f"{idx}. {rule}" for idx, rule in enumerate(current_rules)
+                f"A{idx} - {rule}\n" for idx, rule in enumerate(current_rules)
             ]
             rule_list_str = current_rules_prefix + new_rules_prefix
-            rule_list_str = "\\n".join(rule_list_str)
+            rule_list_str = "\n".join(rule_list_str)
+
             self.logger.info(f"Rules to consolidate: \n{rule_list_str}\n")
             rule_consolidation = RuleConsolidation(
                 llm=llm, prompt=rule_consolidation_prompt_template
@@ -4603,16 +4616,17 @@ class RuleInferenceExperiment:
             #     current_rules=current_rules,
             #     config=config,
             # )
-            for idx, rule in enumerate(rules["rules"][0].rules):
-                self.logger.info(f"Updated rules prompt: {idx}. {rule}\n")
+            # for idx, rule in enumerate(rules["rules"][0].rules):
+            for idx, rule in enumerate(updated_rules_list):
                 updated_rules_prompt += f"{idx}. {rule}\n"
+            self.logger.info(f"Updated rules: \n{updated_rules_prompt}")
             answer, sql = await self.run_question(
                 test_record.question, updated_rules_prompt
             )
             self.logger.info(f"Answer: {answer}")
             self.logger.info(f"Generated SQL: \n{sql}")
             llm_label = await self.llm_eval(test_record, answer)
-            self.logger.info(f"LLM Judge: {llm_label}")
+            self.logger.info(f"LLM judge: {llm_label}")
         result = [
             test_record.question,
             iteration_count,
@@ -4629,7 +4643,6 @@ class RuleInferenceExperiment:
         )
         return result
 
-
     async def update_rule_batch(self):
         result = []
         count = 1
@@ -4645,24 +4658,23 @@ class RuleInferenceExperiment:
             starting_rules = update_result[3]
             self.logger.info(f"Current rules: \n{starting_rules}\n")
             result.append(update_result)
-            self.experiment_result,
-            open(f"{self.output_file_path}.pkl", "wb"),
             pickle.dump(
+                self.experiment_result,
+                open(f"{self.output_file_path}.pkl", "wb")
             )
-            column_names = [
-                "question",
-                "iteration_count",
-                "llm_label",
-                "updated_rules",
-                "expected_sql",
-                "generated_sql",
-                "generated_sql_0",
-                "ground_truth_output",
-                "generated_answer",
-            ]
-            df_result = pd.DataFrame(result, columns=column_names)
-            df_result.to_excel(f"{self.output_file_path}.xlsx")
-
+        column_names = [
+            "question",
+            "iteration_count",
+            "llm_label",
+            "updated_rules",
+            "expected_sql",
+            "generated_sql",
+            "generated_sql_0",
+            "ground_truth_output",
+            "generated_answer",
+        ]
+        df_result = pd.DataFrame(result, columns=column_names)
+        df_result.to_excel(f"{self.output_file_path}.xlsx")
 
     async def tune_question(self, test_record: TestDataItem):
         """
@@ -4889,17 +4901,17 @@ if __name__ == "__main__":
     #     config_path=str(config_path),
     #     original_config_file="cwd_agent_prompt_template.yaml",
     #     test_data_file=str(test_data_file),
-    #     output_file_path="temp/rule_update_cib_mp_20250806_2"
-    #     max_iterations=3,
+    #     output_file_path="temp/rule_update_cib_mp_20250806_2",
+    #     max_iteration=3,
     # )
     # experiment.load_test_data()
-    # asyncio.run(experiment.tune_question_batch())
+    # asyncio.run(experiment.update_rule_batch())
 
-    #   # results = pickle.load(open("temp/rule_inference_experiment_cib_mp_20250620_3.pkl", "rb"))
-    #   # print(results)
-    #   #  test_data = load_test_data(test_data_file)
-    #   # item = test_data.data[16]
-    #   # asyncio.run(tune_question(item))
+    #     # results = pickle.load(open("temp/rule_inference_experiment_cib_mp_20250620_3.pkl", "rb"))
+    #     # print(results)
+    #     #  test_data = load_test_data(test_data_file)
+    #     # item = test_data.data[16]
+    #     # asyncio.run(tune_question(item))
 
     # train_id_gb = [
     #     "cib_gb_002",
@@ -4970,10 +4982,6 @@ if __name__ == "__main__":
         multi_tenant_subscription=True,
     )
     # experiment.load_test_data(train_id_gb)
-    # asyncio.run(experiment.tune_question_batch())
-    # experiment.experiment_result = results
-    # combined_rules = asyncio.run(experiment.consolidate_rules())
-    # print(combined_rules)
     experiment.load_test_data()
     asyncio.run(experiment.tune_question_batch())
     # experiment.experiment_result = results
@@ -5943,7 +5951,7 @@ class PlotWorkerConfig(ComponentConfig):
     )
     worker_state_required: bool = True
     max_recursion: int = Field(
-        description="The maximum number of recursion for react workers.",
+        description="The maximum number of recursions for react workers.",
         default=10,
     )
 
@@ -6173,22 +6181,63 @@ class Replanner(Planner):
                 token=token,
                 base_url=base_url,
                 from_component=self.config.name,
+                with_structured_output=EndCheck,
+            )
+            if self.config.llm_output_required:
+                responses.append(response)
+            if isinstance(response.generation, EndCheck):
+                break
+
+        if not isinstance(response.generation, EndCheck):
+            raise Exception(
+                f"Replanner failed to generate an EndCheck response. Raw LLM output: {response.generation}"
+            )
+
+        # should return
+        if not response.generation.should_continue:
+            return PlannerOutput(
+                final_response=Response(
+                    response=response.generation.output_message,
+                    output_df_name=response.generation.output_df_name,
+                    output_img_name=response.generation.output_img_name,
+                ),
+                llm_output=responses,
+            )
+
+        messages = self.plan_prompt.invoke(
+            dict(
+                query=input_data.query,
+                history="\n".join(input_data.history),
+                plan=input_data.plan[-1].summarize(),
+                past_steps=input_data.worker_reponse.summarize(),
+                dataframe_summary=self.memory.summarize_dataframe(
+                    config=config,
+                ),
+                use_case_schema=input_data.schema,
+                use_case_replanner_instruction=rule,
+            )
+        )
+
+        for _ in range(self.config.num_retries):
+            response = await self.llm.ainvoke(
+                messages=messages,
+                api_key=api_key,
+                base_url=base_url,
+                token=token,
+                from_component=self.config.name,
                 with_structured_output=Plan,
             )
-            responses.append(response)
+            if self.config.llm_output_required:
+                responses.append(response)
             if isinstance(response.generation, Plan):
                 break
 
         if not isinstance(response.generation, Plan):
             raise Exception(
-                f"Planner failed to generate Plan response. Raw LLM output: {response.generation}"
+                f"Replanner failed to generate Plan response. Raw LLM output: {response.generation}"
             )
 
-        llm_output = responses if self.config.llm_output_required else []
-
-        return PlannerOutput(
-            plan=[response.generation], llm_output=llm_output
-        )
+        return PlannerOutput(plan=[response.generation], llm_output=responses)
 
 
 
@@ -6206,10 +6255,9 @@ from langgraph.graph.graph import CompiledGraph
 from pydantic import BaseModel, Field, create_model
 import sqlglot
 import pandas as pd
-import json
 
 from dataqa.core.agent.cwd_agent.prompt import TASK_REJECTED
-from dataqa.core.agent.cwd_agent.error_message import InternalDataFrameError
+from dataqa.core.agent.cwd_agent.error_message import InternalDataframeError
 from dataqa.core.components.base_component import Component, ComponentConfig
 from dataqa.core.components.code_executor.base_code_executor import (
     CodeExecutor,
@@ -6219,6 +6267,7 @@ from dataqa.core.components.code_executor.base_code_executor import (
 from dataqa.core.components.plan_execute.schema import (
     Plan,
     TaskResponse,
+    WorkerResponse,
     worker_response_reducer,
 )
 from dataqa.core.agent.cwd_agent.error_message import SqlExecutionError
@@ -6269,7 +6318,7 @@ class RetrievalWorkerState(BaseModel):
     sql_generator_output: SQLGeneratorOutput = None
     sql_validator_output: SQLValidatorOutput = None
     sql_executor_output: SQLExecutorOutput = None
-    llm_output: Annotated[list[LLMOutput], add] = Field(
+    llm_output: Annotated[List[LLMOutput], add] = Field(
         default_factory=list,
         description="the list of llm calls triggered by planner and replanner",
     )
@@ -6303,6 +6352,7 @@ class SQLGenerator:
                 ),
             )
         )
+
         api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
         token = config.get(CONFIGURABLE, {}).get(TOKEN, "")
         base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
@@ -6319,6 +6369,7 @@ class SQLGenerator:
         logger.info(
             f"Conversation ID: {thread_id}; question ID: {question_id}. SQL generation finished in {round(run_time, 2)} seconds."
         )
+
         return {
             "sql_generator_output": response.generation,
             "llm_output": [response],
@@ -6339,10 +6390,11 @@ class SQLValidator:
         logger.info(
             f"Conversation ID: {thread_id}; question ID: {question_id}. Starting to validate SQL."
         )
+
         if not sql or sql == TASK_REJECTED:
-            error_msg = {
+            error_msg = (
                 "SQL validation skipped, as no SQL statement can be found."
-            }
+            )
             if state.sql_generator_output.reasoning:
                 error_msg += f" Reason: {state.sql_generator_output.reasoning}"
             response = SQLValidatorOutput(
@@ -6352,6 +6404,7 @@ class SQLValidator:
                 f"Conversation ID: {thread_id}; question ID: {question_id}. {error_msg}"
             )
             return {"sql_validator_output": response}
+
         messages = self.prompt.invoke(dict(sql_statement=sql))
         api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
         token = config.get(CONFIGURABLE, {}).get(TOKEN, "")
@@ -6369,6 +6422,7 @@ class SQLValidator:
         logger.info(
             f"Conversation ID: {thread_id}; question ID: {question_id}. SQL validation finished in {round(run_time, 2)} seconds."
         )
+
         return {
             "sql_validator_output": response.generation,
             "llm_output": [response],
@@ -6408,17 +6462,19 @@ def dataframe_to_values_subquery(df: pd.DataFrame) -> str:
         df (pd.DataFrame): The DataFrame to convert.
 
     Returns:
-        str: SQL string for use as a subquery.
+        str: SQL string for use as a subquery table.
     """
     # Get column names
     columns = ", ".join(df.columns)
     # Build VALUES rows
     values = []
     for row in df.itertuples(index=False):
-        row_str = ", ".join(f"'{v}'" if isinstance(v, str) else str(v) for v in row)
+        row_str = ", ".join(
+            f"'{v}'" if isinstance(v, str) else str(v) for v in row
+        )
         values.append(f"({row_str})")
-    values_clause = ", \n".join(values)
-    return f"(VALUES\n {values_clause}) AS t({columns})"
+    values_clause = ",\n    ".join(values)
+    return f"(VALUES\n    {values_clause}) AS t({columns})"
 
 
 def dataframe_to_union_all_subquery(df: pd.DataFrame) -> str:
@@ -6429,24 +6485,27 @@ def dataframe_to_union_all_subquery(df: pd.DataFrame) -> str:
         df (pd.DataFrame): The DataFrame to convert.
 
     Returns:
-        str: SQL string for use as a subquery.
+        str: SQL string for use as a subquery table.
     """
     columns = df.columns.tolist()
     select_rows = []
-    for row in df.itertuples():
+    for _, row in df.iterrows():
         values = []
-        for i, v in enumerate(row[1:]):
+        for i, v in enumerate(row):
             column_name = columns[i]
             if pd.isnull(v):
                 values.append(f"NULL AS {column_name}")
             elif isinstance(v, str):
                 v_escaped = v.replace("'", "''")
-                values.append(f"'{v_escaped}' AS {column_name}") # Escape single quotes
+                values.append(
+                    f"'{v_escaped}' AS {column_name}"
+                )  # Escape single quotes
             else:
                 values.append(f"{str(v)} AS {column_name}")
-        select_row = f'SELECT {", ".join(values)}'
+        select_row = f"SELECT {', '.join(values)}"
         select_rows.append(select_row)
-    return f'({"\nUNION ALL\n".join(select_rows)})'
+    union_all_sql = "\nUNION ALL\n".join(select_rows)
+    return f"(\n{union_all_sql}\n)"
 
 
 def clean_sql(
@@ -6456,7 +6515,7 @@ def clean_sql(
     executor_config: CodeExecutorConfig,
 ) -> Optional[str]:
     """
-    Clean the generated SQL by replacing internal dataframes with their original SQL or subquery of dataframe values
+    Clean the generated SQL by replacing internal dataframes with their original SQL or subquery of dataframe values.
 
     Args:
         sql (str): The generated SQL.
@@ -6477,7 +6536,7 @@ def clean_sql(
                 DatabaseType.snowflake,
             ]:
                 value_str = dataframe_to_values_subquery(df)
-                if len(value_str) > executor_config.execution_parameters.get(
+                if len(value_str) < executor_config.execution_parameters.get(
                     "character_limit_of_subquery", 5000
                 ):
                     sql = clean_table_name(sql, internal_df_name, value_str)
@@ -6490,29 +6549,28 @@ def clean_sql(
                 union_all_str = dataframe_to_union_all_subquery(df)
                 if len(
                     union_all_str
-                ) > executor_config.execution_parameters.get(
+                ) < executor_config.execution_parameters.get(
                     "character_limit_of_subquery", 5000
                 ):
-                    union_all_str
-                sql = clean_table_name(sql, internal_df_name, union_all_str)
-                return sql
+                    sql = clean_table_name(sql, internal_df_name, union_all_str)
+                    return sql
             if from_sql is None:
                 logger.warning(
-                    f"Internal dataframe {internal_df_name} found in generated SQL\n.No associated from_sql found for the dataframe"
+                    f"Internal dataframe {internal_df_name} found in generated SQL\n{sql}\nNo associated from_sql found for the dataframe."
                 )
                 return None
             else:
                 logger.info(
-                    f"Internal dataframe {internal_df_name} found in generated SQL\n.Replaced with from_sql\n{from_sql}"
+                    f"Internal dataframe {internal_df_name} found in generated SQL\n{sql}\nReplaced with from_sql\n{from_sql}"
                 )
                 from_sql = from_sql.rstrip(";")
-                if "from_sql" == f"({from_sql})":
-                    sql = clean_table_name(sql, internal_df_name, from_sql)
-                logger.info(f"Updated SQL prior replacement\n{sql}")
+                from_sql = f"({from_sql})"
+                sql = clean_table_name(sql, internal_df_name, from_sql)
+                logger.info(f"SQL after replacement\n{sql}")
     return sql
 
 
-class SqlExecutor:
+class SQLExecutor:
     def __init__(self, executor: CodeExecutor, memory: Memory):
         self.executor = executor
         self.memory = memory
@@ -6522,6 +6580,7 @@ class SqlExecutor:
     ):
         sql = state.sql_generator_output.sql
         df_name = state.sql_generator_output.output
+
         thread_id = config.get(CONFIGURABLE, {}).get(THREAD_ID, "")
         question_id = config.get(CONFIGURABLE, {}).get(QUESTION_ID, "")
         logger.info(
@@ -6541,7 +6600,7 @@ class SqlExecutor:
             return {"sql_executor_output": response}
 
         if sql == TASK_REJECTED or df_name == TASK_REJECTED:
-            error_msg = f"SQL execution skipped, as SQL Generation Task is rejected due to the following reason: {state.sql_generator_output.reasoning}"
+            error_msg = f"SQL Ececution skipped, as SQL Generation task is rejected due to the following reason: {state.sql_generator_output.reasoning}"
             response = SQLExecutorOutput(sql=sql, error=error_msg, time=0)
             logger.error(
                 f"Conversation ID: {thread_id}; question ID: {question_id}. {error_msg}"
@@ -6562,7 +6621,12 @@ class SqlExecutor:
             executor_config = self.executor.config
             sql_clean = clean_sql(sql, self.memory, config, executor_config)
             if sql_clean is None:
-                raise InternalDataFrameError.message_to_agent()
+                error_msg = InternalDataframeError.message_to_agent()
+                response = SQLExecutorOutput(sql=sql, error=error_msg, time=0)
+                logger.error(
+                    f"Conversation ID: {thread_id}; question ID: {question_id}. SQL Execution failed with error:\n{error_msg}"
+                )
+                raise {"sql_executor_output": response}
 
             SqlInput = create_model("SqlInput", code=(str, ...))
             sql = sql_clean
@@ -6577,6 +6641,7 @@ class SqlExecutor:
             logger.info(
                 f"Conversation ID: {thread_id}; question ID: {question_id}. SQL execution finished in {round(run_time, 2)} seconds."
             )
+
             if executor_output.error:
                 sql_execution_error = SqlExecutionError(
                     cause=executor_output.error
@@ -6584,6 +6649,10 @@ class SqlExecutor:
                 raise Exception(sql_execution_error.message_to_agent())
 
             # The output dataframe is a JSON string, need to deserialize
+            import json
+
+            import pandas as pd
+
             result_df = pd.DataFrame(json.loads(executor_output.dataframe[0]))
             self.memory.put_dataframe(
                 name=df_name, df=result_df, config=config, sql=sql
@@ -6591,7 +6660,6 @@ class SqlExecutor:
             response = SQLExecutorOutput(
                 sql=sql, dataframe=df_name, time=run_time
             )
-
         except Exception as e:
             response = SQLExecutorOutput(sql=sql, error=repr(e), time=run_time)
             logger.error(
@@ -6601,13 +6669,13 @@ class SqlExecutor:
 
 
 class RetrievalWorkerConfig(ComponentConfig):
-    sql_generation_prompt: ComponentConfig
-    sql_validation_prompt: ComponentConfig
+    sql_generation_prompt: prompt_type
+    sql_validation_prompt: prompt_type
     worker_state_required: bool = True
 
 
 class RetrievalWorkerInput(BaseModel):
-    plan: list[Plan]
+    plan: List[Plan]
     rule: str = ""
     schema: str = ""
     example: str = ""
@@ -6617,7 +6685,7 @@ class RetrievalWorkerOutput(BaseModel):
     worker_response: Annotated[WorkerResponse, worker_response_reducer] = (
         WorkerResponse()
     )
-    retrieval_worker_state: Annotated[list[RetrievalWorkerState], add] = Field(
+    retrieval_worker_state: Annotated[List[RetrievalWorkerState], add] = Field(
         default_factory=list
     )
 
@@ -6648,6 +6716,7 @@ class RetrievalWorker(Component):
 
     def build_workflow(self) -> CompiledGraph:
         workflow = StateGraph(RetrievalWorkerState)
+
         workflow.add_node(
             "sql_generator",
             SQLGenerator(
@@ -6656,20 +6725,24 @@ class RetrievalWorker(Component):
                 memory=self.memory,
             ),
         )
+
         workflow.add_node(
             "sql_validator",
             SQLValidator(
                 llm=self.llm, prompt=self.config.sql_validation_prompt
             ),
         )
+
         workflow.add_node(
             "sql_executor",
             SQLExecutor(executor=self.sql_executor, memory=self.memory),
         )
+
         workflow.add_edge(START, "sql_generator")
         workflow.add_edge("sql_generator", "sql_validator")
         workflow.add_edge("sql_validator", "sql_executor")
         workflow.add_edge("sql_executor", END)
+
         return workflow.compile()
 
     def display(self):
@@ -6698,8 +6771,11 @@ class RetrievalWorker(Component):
         output = response.sql_executor_output
         message = (
             f"To complete the task {task}, the following SQL has been generated\n"
-            f"```sql\n{output.sql}\n```\n"
+            "```sql\n"
+            f"{output.sql}\n"
+            "```\n"
         )
+
         if output.dataframe:
             message += f"After running this SQL query, the output is saved in dataframe {output.dataframe}."
         elif response.sql_validator_output.unsafe:
@@ -6707,15 +6783,20 @@ class RetrievalWorker(Component):
         elif output.error:
             message += f"While running this SQL query, the following runtime error was thrown:\n{output.error}"
         return RetrievalWorkerOutput(
-            worker_response=TaskResponse(
-                worker=worker,
-                task_description=task,
-                response=message,
+            worker_response=WorkerResponse(
+                task_response=[
+                    TaskResponse(
+                        worker=worker,
+                        task_description=task,
+                        response=message,
+                    )
+                ]
             ),
             retrieval_worker_state=[response]
             if self.config.worker_state_required
             else [],
         )
+
 
 
 ================================================
@@ -6767,6 +6848,24 @@ class Plan(BaseModel):
         return "".join(tasks)
 
 
+
+class Feasibility(BaseModel):
+    """Check if USER OBJECTIVE has no ambiguity and is solvable.
+
+    This model contains two attributes: solvable and prompt_back.
+    - If USER OBJECTIVE DOES NOT have ambiguity and you CAN solve it, return solvable as true, no need to generate prompt_back.
+    - If USER OBJECTIVE DOES have ambiguity or you CAN NOT solve it, return solvable as false, generate a prompt_back message tobe returned to the user.
+    """
+
+    solvable: bool = Field(
+        description="If USER OBJECTIVE can be solved and has no ambiguity."
+    )
+    prompt_back: str = Field(
+        description="A prompt back message to the user if USER OBJECTIVE is not solvable.",
+        default="",
+    )
+
+
 class TaskResponse(Task):
     response: str = Field(description="Summarize the execution of one task")
 
@@ -6804,23 +6903,6 @@ class Response(BaseModel):
     )
 
 
-class Action(Enum):
-    Continue = "continue"
-    Return = "return"
-
-
-class Feasibility(BaseModel):
-    """Check if USER OBJECTIVE has no ambiguity and is solvable. This model contains two attributes: solvable and prompt_back."""
-
-    solvable: bool = Field(
-        description="If USER OBJECTIVE can be solved and has no ambiguity."
-    )
-    prompt_back: str = Field(
-        description="A prompt back message to the user if USER OBJECTIVE is not solvable.",
-        default="",
-    )
-
-
 class EndCheck(BaseModel):
     """
     Check if the final results have been produced.
@@ -6846,6 +6928,11 @@ class EndCheck(BaseModel):
     output_img_name: List[str] = Field(
         description="The names of a list of images to displayed to the user."
     )
+
+
+class Action(Enum):
+    Continue = "continue"
+    Return = "return"
 
 
 class PlannerAct(BaseModel):
@@ -7178,6 +7265,7 @@ ALWAYS ONLY USE THE TABLES FROM THE "SCHEMA" WHEN GENERATING THE SQL CODE.
 SAFETY GUIDELINES:
 - Reject the question that query the system tables
 - You only have read access. Avoid generating query that has operation such as delete, insert, update.
+- To avoid getting very large data, avoid Select (*), instead, specify the columns to be selected.
 - If the user requests content that is harmful, respectfully decline to oblige.
 
 SCHEMA:
@@ -7198,12 +7286,6 @@ Q: {rewritten_query}
 A:
 """
 
-
-
-================================================
-FILE: dataqa/core/components/resource_manager/__init__.py
-================================================
-[Empty file]
 
 
 ================================================
@@ -7325,6 +7407,26 @@ class ResourceManager:
             return self.schema.tables
 
         return []
+
+    def update_rules(
+        self, new_rules: str, module_names: Optional[List[str]]
+    ) -> None:
+        if self.rules is not None:
+            if len(self.rules.rules) == 1:
+                self.rules.rules[0].instructions = new_rules
+            else:
+                raise ValueError(
+                    "Only one rule per module is supported for updating"
+                )
+        # if module_names is None:
+        #   module_names = [module_name.split(":")[1] for module_name in self.resources if "rule" in module_name]
+        # for module in module_names:
+        #   resource = self.get_resource(resource_type=ResourceType.Rule, module_name=module)
+        #   if resource is not None:
+        #       if len(resource.data) == 1:
+        #           resource.data[0].instructions = new_rules
+        #       else:
+        #           raise ValueError("Only one rule per module is supported for updating")
 
 
 
@@ -7495,7 +7597,7 @@ class AllRetriever(Retriever):
         )
 
         logger.info(
-            f"Component {self.config.name} of type {self.component_type} created."
+            f"Component {self.config.name} of type {self.component_type} initialized."
         )
 
     def display(self):
@@ -7563,7 +7665,6 @@ class AllRetriever(Retriever):
         component_output["output_data"] = retrieved_asset_all
 
         return self.output_base_model.model_validate(component_output)
-
 
 
 
@@ -8078,7 +8179,7 @@ FILE: dataqa/core/data_models/__init__.py
 FILE: dataqa/core/data_models/asset_models.py
 ================================================
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from pydantic import BaseModel, Field
 
@@ -11173,20 +11274,21 @@ def format_tool_calls(tool_calls: List) -> str:
         formatted_tool_calls.append(formatted_tool_call)
     return "\n".join(formatted_tool_calls)
 
+
 def process_tool_messages(tool_messages: List) -> str:
-    formatted_tool_messages = []
+    formatted_messages = []
     for msg in tool_messages:
         if msg.get("type", "") == "ai":
             if msg.get("content", "") != "":
-                formatted_tool_messages.append(msg.get("content", ""))
+                formatted_messages.append(msg.get("content", ""))
             if len(msg.get("tool_calls", [])) > 0:
-                formatted_tool_messages.append("Tool calls:")
-                formatted_tool_messages.append(
+                formatted_messages.append("Tool Calls:")
+                formatted_messages.append(
                     format_tool_calls(msg.get("tool_calls", []))
                 )
         elif msg.get("type", "") == "tool":
-            formatted_tool_messages.append(msg.get("content", ""))
-    return "\n".join(formatted_tool_messages)
+            formatted_messages.append(msg.get("content", ""))
+    return "\n".join(formatted_messages)
 
 
 def dataframe_to_llm_judge_string(df_name: str, df: pd.DataFrame):
@@ -12366,19 +12468,18 @@ from dataqa.core.data_models.asset_models import (
 def get_vector_schema_record(
     resource: IngestionData,
     record_type: VectorSchemaRecordType,
-    table_name: Optional[str],
+    table_name: str,
     column_name: Optional[str],
     value: Optional[str],
 ) -> VectorSchema:
-    """
-    Retrieves a `VectorSchema` record from a `Resource` instance.
+    """Retrieves a `VectorSchema` record from a `Resource` instance.
 
     Args:
         resource (Resource): The resource instance.
         record_type (VectorSchemaRecordType): The type of the record.
-        table_name (str): The name of the table.
-        column_name (str|None): The name of the column (if applicable).
-        value (Optional|str): The value (if applicable).
+        table_name_str (str): The name of the table.
+        column_name (str)[Optional]): The name of the column (if applicable).
+        value (Optional[str]): The value (if applicable).
 
     Returns:
         VectorSchema: The matching VectorSchema instance.
@@ -12387,9 +12488,11 @@ def get_vector_schema_record(
         ValueError: If no matching record is found.
     """
     for record in resource.data:
-        match = record.table_name == table_name and record.record_type == record_type
+        match = (record.table_name == table_name) and (
+            record.record_type == record_type
+        )
         if record_type == VectorSchemaRecordType.Column:
-            match = match and record.content.column_name == column_name
+            match = match and (record.content.column_name == column_name)
         if record_type == VectorSchemaRecordType.Value:
             match = match and (record.value == value)
         if match:
@@ -12400,8 +12503,7 @@ def reconstruct_table_schema(
     retrieved_vector_schema: List[RetrievedAsset],
     full_vector_schema: IngestionData,
 ) -> IngestionData:
-    """
-    Reconstructs a table schema from a list of retrieved vector schemas.
+    """Reconstructs a table schema from a list of retrieved vector schemas.
 
     Args:
         retrieved_vector_schema (List[RetrievedAsset]): A list of retrieved vector schemas.
@@ -12413,11 +12515,12 @@ def reconstruct_table_schema(
     Raises:
         NotImplementedError: If the record type is not implemented.
     """
+
     tables = {}
     for record in retrieved_vector_schema:
-        record_type = record.content.record_type
         table_name = record.content.table_name
         table_description = record.content.table_description
+        record_type = record.content.record_type
         if record_type == VectorSchemaRecordType.Table:
             matched_record = get_vector_schema_record(
                 full_vector_schema, record_type, table_name, None, None
@@ -12454,36 +12557,63 @@ def reconstruct_table_schema(
                 table["foreign_key"] = matched_table.values["foreign_key"]
                 table["columns"] = []
                 tables[table_name] = table
-            if column_name not in [c["name"] for c in table["columns"]]:
+            columns = table["columns"].append(
+                {
+                    "name": column_name,
+                    "description": column_description,
+                    "type": record.content.values.get("column_type", ""),
+                }
+            )
+        elif record_type == VectorSchemaRecordType.Value:
+            column_name = record.content.column_name
+            column_description = record.content.column_description
+            value_description = record.content.value_description
+            value = record.content.value
+            if table_name in tables:
+                table = tables[table_name]
+            else:
+                matched_table = get_vector_schema_record(
+                    full_vector_schema,
+                    VectorSchemaRecordType.Table,
+                    table_name,
+                    None,
+                    None,
+                )
+                table = {}
+                table["name"] = table_name
+                table["description"] = table_description
+                table["tags"] = []
+                table["primary_key"] = matched_table.values["primary_key"]
+                table["foreign_key"] = matched_table.values["foreign_key"]
+                table["columns"] = []
+                tables[table_name] = table
+            if column_name in [c["name"] for c in table["columns"]]:
+                column = next(
+                    (c for c in table["columns"] if c["name"] == column_name),
+                    None,
+                )
                 if "values" in column:
-                    if "values" in record.content.values:
-                        table["columns"].append(
+                    column["values"].append(
+                        {"value": value, "description": value_description}
+                    )
+                else:
+                    column["values"] = [
+                        {"value": value, "description": value_description}
+                    ]
+            else:
+                table["columns"].append(
+                    {
+                        "column_name": column_name,
+                        "column_description": column_description,
+                        "type": record.content.values.get("column_type", ""),
+                        "values": [
                             {
-                                "name": column_name,
-                                "description": column_description,
-                                "type": record.content.values.get("column_type", ""),
-                                "values": [
-                                    {
-                                        "value": value,
-                                        "description": value_description,
-                                    }
-                                ],
+                                "value": value,
+                                "description": value_description,
                             }
-                        )
-                    else:
-                        table["columns"].append(
-                            {
-                                "name": column_name,
-                                "description": column_description,
-                                "type": record.content.values.get("column_type", ""),
-                                "values": [
-                                    {
-                                        "value": value,
-                                        "description": value_description,
-                                    }
-                                ],
-                            }
-                        )
+                        ],
+                    }
+                )
         else:
             raise NotImplementedError
     data = []
@@ -12491,11 +12621,12 @@ def reconstruct_table_schema(
         data.append(TableSchema(**table))
     reconstructed_tables = IngestionData(
         data=data,
-        type=ResourceType.Data,
-        module_name="schema",
+        type=ResourceType.Schema,
+        module_name="",
         module_type="",
         formatter="",
     )
+
     return reconstructed_tables
 
 
@@ -12504,13 +12635,12 @@ def extract_schema_from_dataframe(
     meta_dict: Dict[str, Dict[str, Optional[str]]],
     categorical_values_pct_threshold: float = 0.5,
     categorical_values_cnt_threshold: float = 40,
-) -> Dict[str, Any]:
-    """
-    Generate a schema dictionary from a dictionary of dataframes and their metadata.
+):
+    """Generate a schema dictionary from a dictionary of dataframes and their metadata.
 
     Args:
         df_dict (Dict[str, pd.DataFrame]): A dictionary of dataframes, where the keys are the table names.
-        meta_dict (Dict[str, Dict[str, Optional[str]]]): A dictionary of metadata for each column in each table.
+        meta_dict (Dict[str, Dict[str, Optional[str]]]): A dictionary of the metadata for each column in each table.
         categorical_values_pct_threshold (float, optional): The threshold for the percentage of unique values in a column to consider it categorical. Defaults to 0.5.
         categorical_values_cnt_threshold (float, optional): The threshold for the count of unique values in a column to consider it categorical. Defaults to 40.
 
@@ -12526,6 +12656,7 @@ def extract_schema_from_dataframe(
             "updated_at": "2025/05/09",
         }
     }
+
     tables = []
     for table_name, df in df_dict.items():
         meta_data = meta_dict[table_name]
@@ -12538,6 +12669,7 @@ def extract_schema_from_dataframe(
             "foreign_key": [],
             "columns": columns,
         }
+
         for column_name in df.columns:
             column_dtype = meta_data[column_name].get("type", None)
             column_description = meta_data[column_name].get("description", None)
@@ -12548,15 +12680,14 @@ def extract_schema_from_dataframe(
                 "type": column_dtype,
                 "sample_values": sample_values,
             }
+
             values = df[column_name].unique().tolist()
             if (
-                len(values) / len(df[column_name])
+                (len(values) / len(df[column_name]))
                 < categorical_values_pct_threshold
-            ) and (len(values) < categorical_values_cnt_threshold) and (
-                ("type" in str) or ("string" in str("text"))
-            ):
+            ) and (len(values) < categorical_values_cnt_threshold) and (column_type in ["string", "text"]):
                 print(
-                    f"column['name']: {len(values)}; {len(df[column_name])}"
+                    f"column['name']: {len(values)}, {len(df[column_name])}"
                 )
                 values_new = []
                 for value in values:
@@ -12569,7 +12700,7 @@ def extract_schema_from_dataframe(
 
 
 def convert_table_schema_to_sql_str(
-    table_schema: Dict[str, Union[str, Dict]],
+    table_schema: Dict[str, Union[str, Dict]]
 ) -> str:
     """
     Generate a SQL table creation command from a table schema.
@@ -12580,73 +12711,76 @@ def convert_table_schema_to_sql_str(
     Returns:
         str: The SQL table creation command.
     """
-
-    sql_table_creation_command = """
-    \n
-    -- {table_description}\n
-    CREATE TABLE {table_name} (\n
-    {column_values}\n
-    );\n
-    """
+    sql_table_creation_command = (
+        "\n"
+        "/*\n"
+        "{table_description}\n"
+        "*/\n"
+        "CREATE TABLE {table_name} (\n"
+        "{column_values}\n"
+        ");\n"
+    )
     sql_column_creation_command = """
-        /*
-        description: {description}{sample_values}
-        */
-        {column_name} {type},"""
+    /*
+    description: {description}
+    */
+    {column_name} {type},"""
+
     sql_column_value_description_specification = " (value) (description)"
 
     sql_columns: List[str] = []
     for column in table_schema["columns"]:
         column_value_description_list = []
-        for col_value in column.get("values", []):
-            sql_column_value_description_list.append(
+        for column_value in column.get("values", []):
+            column_value_description_list.append(
                 sql_column_value_description_specification.format(
                     **{
-                        "value": col_value["value"],
+                        "value": column_value["value"],
                         "description": "",
-                        "str(col_value.get(\"description\", \"\"))"
-                        if "description" in column_value
-                        and column_value["description"] is ""
-                        else "",
                     }
                 )
             )
-            assembled_column_value_descriptions = ""
-            if column_value_description_list:
-                value_string = "\n".join(column_value_description_list)
-                assembled_column_value_descriptions = (
-                    f"""\n values:in {value_string}"""
-                )
-            sample_values = column.get("sample_values", "")
-            if sample_values != "":
-                sample_values = "\n sample_values: " + sample_values
-            sql_columns.append(
-                sql_column_creation_command.format(
-                    **{
-                        "description": column["description"],
-                        "col_value_descriptions": assembled_column_value_descriptions,
-                        "column_name": column["name"],
-                        "type": column["type"],
-                        "sample_values": sample_values,
-                    }
-                )
+            if "description" in column_value and column_value["description"] is "":
+                pass
+            else:
+                pass
+
+        assembled_column_value_descriptions = ""
+        if column_value_description_list:
+            value_string = "\n".join(column_value_description_list)
+            assembled_column_value_descriptions = (
+                f"""\n values:in ({value_string})"""
             )
 
-    table_creation_syntax = sql_table_creation_command.format(
+        sample_values = column.get("sample_values", "")
+        if sample_values != "":
+            sample_values = f"\n sample_values: " + sample_values
+        sql_columns.append(
+            sql_column_creation_command.format(
+                **{
+                    "description": column["description"],
+                    "col_value_descriptions": assembled_column_value_descriptions,
+                    "column_name": column["name"],
+                    "type": column["type"],
+                    "sample_values": sample_values,
+                }
+            )
+        )
+
+    sql_table_creation_syntax = sql_table_creation_command.format(
         **{
             "table_name": table_schema["table_name"],
             "table_description": table_schema["description"],
             "column_values": "\n".join(sql_columns),
         }
     )
-    return table_creation_syntax
+
+    return sql_table_creation_syntax
 
 
 def prepare_bird_database(
     database_name: str, base_path: str
-) -> Tuple[
-    Dict[str, pd.DataFrame], Dict[str, Dict[str, Optional[str]]]
-]:
+) -> Tuple[Dict[str, pd.DataFrame], Dict[str, Dict[str, Optional[str]]]]:
     """
     Given a database name and a base path, this function will prepare the database by loading all tables
     from the database into a dictionary of pandas DataFrames. It will also load the metadata for each
@@ -12660,56 +12794,60 @@ def prepare_bird_database(
         Tuple[Dict[str, pd.DataFrame], Dict[str, Dict[str, Optional[str]]]]: A tuple containing
         the dictionary of pandas DataFrames and the dictionary of metadata.
     """
-    db_path = Path(base_path)
-    db_folder = base_path / database_name
+    base_directory = Path(base_path)
+    db_folder = base_directory / database_name
     db_file = db_folder / f"{database_name}.sqlite"
     with sqlite3.connect(db_file) as conn:
-        table_cursor = conn.execute(
+        cursor = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()
-        table_names = [row[0] for row in table_cursor]
+        table_names = [row[0] for row in tables]
+
+    for table_name in table_names:
+        if table_name not in ["sqlite_sequence", "sqlite_stat1"]:
+            pass
 
     df_dict = {}
     meta_dict = {}
     for table_name in table_names:
-        if table_name not in ["sqlite_sequence", "sqlite_stat1"]:
-            df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
-            df_dict[table_name] = df
-            table_meta_file = (
-                db_folder / "database_description" / f"{table_name}.csv"
-            )
-            if table_meta_file.exists():
-                try:
-                    column_meta_data = pd.read_csv(table_meta_file)
-                except Exception:
-                    column_meta_data = pd.read_csv(
-                        table_meta_file, encoding="cp1252"
+        df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+        df_dict[table_name] = df
+
+        table_meta_file = db_folder / "database_description" / f"{table_name}.csv"
+
+        if table_meta_file.exists():
+            try:
+                column_meta_data = pd.read_csv(table_meta_file)
+            except Exception:
+                column_meta_data = pd.read_csv(
+                    table_meta_file, encoding="cp1252"
+                )
+
+            column_meta_data.fillna("", inplace=True)
+            column_dict = {}
+            for row in column_meta_data.itertuples():
+                column_name = row.original_column_name.strip()
+                column_type = row.data_format
+                column_description = row.column_description
+                unique_values = list(df[column_name].unique())
+                if len(unique_values) <= 5:
+                    sample_values = map(str, unique_values)
+                else:
+                    sample_values = map(
+                        str,
+                        np.random.choice(
+                            list(df[column_name].unique()),
+                            size=5,
+                            replace=False,
+                        ),
                     )
-                column_meta_data.fillna("", inplace=True)
-                column_dict = {}
-                for row in column_meta_data.itertuples():
-                    column_name = row.original_column_name.strip()
-                    column_type = row.data_format
-                    column_description = row.description
-                    unique_values = list(df[column_name].unique())
-                    if len(unique_values) < 5:
-                        sample_values = map(str, unique_values)
-                    else:
-                        sample_values = map(
-                            str,
-                            np.random.choice(
-                                list(df[column_name].unique()),
-                                size=5,
-                                replace=False,
-                            ),
-                        )
-                    sample_values = ", ".join(sample_values)
-                    column_dict[column_name] = {
-                        "type": column_type,
-                        "description": column_description,
-                        "sample_values": sample_values,
-                    }
-                meta_dict[table_name] = column_dict
+                sample_values = ", ".join(sample_values)
+                column_dict[column_name] = {
+                    "type": column_type,
+                    "description": column_description,
+                    "sample_values": sample_values,
+                }
+            meta_dict[table_name] = column_dict
     return df_dict, meta_dict
 
 
@@ -12724,8 +12862,6 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, List, Optional, Text, Type, TypeVar, Union
 
-import pandas as pd
-import sqlglot
 import yaml
 
 T = TypeVar("T")
@@ -12832,121 +12968,6 @@ def string_list_to_prompt(
     return "\n".join(new_list)
 
 
-def clean_table_name(sql: str, table_name: str, replace_with: str) -> str:
-    """
-    Cleans the table name in the SQL by replacing the specified table name with another name.
-
-    :param sql: The SQL query string.
-    :param table_name: The table name to be replaced.
-    :param replace_with: The new table name to replace with.
-    :return: The SQL query with the table name replaced.
-    """
-    expression = sqlglot.parse_one(sql)
-    for table in expression.find_all(sqlglot.exp.Table):
-        if table.name == table_name:
-            table.set("this", replace_with)
-    return expression.sql()
-
-
-def dataframe_to_values_subquery(df: pd.DataFrame) -> str:
-    """
-    Generate a SQL string representing a pandas DataFrame as a subquery table using VALUES.
-
-    :param df: The pandas DataFrame to convert.
-    :return: A SQL string representing the DataFrame as a VALUES subquery.
-    """
-    values_list = []
-    for _, row in df.iterrows():
-        row_values = []
-        for val in row:
-            if pd.isna(val):
-                row_values.append("NULL")
-            elif isinstance(val, str):
-                row_values.append(f"'{val.replace("'", "''")}'")
-            else:
-                row_values.append(str(val))
-        values_list.append(f"({', '.join(row_values)})")
-    return f"(VALUES {', '.join(values_list)}) AS t({', '.join(df.columns)})"
-
-
-def dataframe_to_union_all_subquery(df: pd.DataFrame) -> str:
-    """
-    Generate a SQL string representing a pandas DataFrame as a subquery table using UNION ALL.
-
-    :param df: The pandas DataFrame to convert.
-    :return: A SQL string representing the DataFrame as a UNION ALL subquery.
-    """
-    select_statements = []
-    for _, row in df.iterrows():
-        row_values = []
-        for val in row:
-            if pd.isna(val):
-                row_values.append("NULL")
-            elif isinstance(val, str):
-                row_values.append(f"'{val.replace("'", "''")}'")
-            else:
-                row_values.append(str(val))
-        select_statements.append(
-            f"SELECT {', '.join(row_values)} AS {', '.join([f'{col}' for col in df.columns])}"
-        )
-    return f"({' UNION ALL '.join(select_statements)}) AS t"
-
-
-def clean_sql(
-    sql: str,
-    memory: "Memory",
-    config: "RunnableConfig",
-    executor_config: "CodeExecutorConfig",
-) -> Optional[str]:
-    """
-    Clean generated SQL by replacing internal dataframes with their original SQL or subquery of dataframe values.
-
-    :param sql: The SQL query to clean.
-    :param memory: The Memory object containing dataframes.
-    :param config: The RunnableConfig for the execution.
-    :param executor_config: The CodeExecutorConfig containing backend and execution parameters.
-    :return: The cleaned SQL query, or None if cleaning failed.
-    """
-    from dataqa.core.components.code_executor.base_code_executor import (
-        CodeExecutorConfig,
-        DatabaseType,
-    )
-    from dataqa.core.memory import Memory
-    from langchain_core.runnables.config import RunnableConfig
-
-    dataframes = memory.get_dataframes(config)
-    for name, (df, from_sql) in dataframes.items():
-        if from_sql:
-            sql = clean_table_name(sql, name, f"({from_sql})")
-        else:
-            if executor_config.backend == DatabaseType.duckdb:
-                subquery = dataframe_to_values_subquery(df)
-            elif executor_config.backend in (
-                DatabaseType.snowflake,
-                DatabaseType.redshift,
-                DatabaseType.sqlserver,
-                DatabaseType.databricks,
-            ):
-                subquery = dataframe_to_union_all_subquery(df)
-            elif executor_config.backend == DatabaseType.sqlite:
-                subquery = dataframe_to_values_subquery(df)
-            else:
-                return None
-            character_limit = executor_config.execution_parameters.get(
-                "character_limit_of_subquery", float("inf")
-            )
-            if len(subquery) > character_limit:
-                return None
-            sql = clean_table_name(sql, name, subquery)
-    return sql
-
-
-
-================================================
-FILE: dataqa/integrations/__init__.py
-================================================
-[Empty file]
-
 
 ================================================
 FILE: dataqa/integrations/dbc/__init__.py
@@ -12957,7 +12978,6 @@ FILE: dataqa/integrations/dbc/__init__.py
 ================================================
 FILE: dataqa/integrations/dbc/agent_template.yml
 ================================================
-# dataqa/integrations/dbc/agent_template.yml
 # This file defines the generic STRUCTURE of a CWD Agent for the DBC integration.
 # It is loaded exclusively by the DBC_CWDAgentFactory and lives within the dbc module.
 
@@ -13034,17 +13054,19 @@ timeout: 300
 use_case_name: "placeholder_name"
 use_case_description: "placeholder_description"
 
+dialect:
+  value: "placeholder_sql_dialect"
+  functions: |
+
 
 
 ================================================
 FILE: dataqa/integrations/dbc/client.py
 ================================================
-# dataqa/integrations/dbc/client.py
-import os
 import uuid
 from collections.abc import AsyncIterable
 from logging import getLogger
-from typing import Any, Callable, Dict, Generator, List, Set, Union
+from typing import Any, Callable, Dict, List, Set, Union
 
 import pandas as pd
 from langchain_core.messages import BaseMessage
@@ -13316,7 +13338,6 @@ class DBCClient:
 ================================================
 FILE: dataqa/integrations/dbc/factory.py
 ================================================
-# dataqa/integrations/dbc/factory.py
 from pathlib import Path
 from typing import Callable
 
