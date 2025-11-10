@@ -3563,7 +3563,7 @@ from dataqa.core.utils.prompt_utils import build_prompt, prompt_type
 
 
 class MetaData(BaseModel):
-    """metadata for the database"""
+    """Metadata for the database"""
 
     level: Literal["table", "column"] = Field(
         description="level of the metadata"
@@ -3573,7 +3573,7 @@ class MetaData(BaseModel):
 
 
 class MetaDataList(BaseModel):
-    """metadata for the database"""
+    """Metadata for the database"""
 
     metadata: List[MetaData] = Field(
         default_factory=list, description="A list of metadata for the database"
@@ -6903,17 +6903,37 @@ class Response(BaseModel):
 
 class EndCheck(BaseModel):
     """
-    Check if the final results have been produced.
+    Evaluate if the final results have been obtained for solving USER OBJECTIVE. If so, generate the output as text, dataframes and images.
 
-    If the final results have not been produced, we should continue to the next step and no output should be generated.
-    If the final results have been produced, we should return with the output message, dataframes, and images.
+    This model contains four attributes: should_continue, output_message, output_df_name, output_img_name.
+    - If should_continue=True, leave output_message, output_df_name and output_img_name as empty.
+    - If should_continue=False, generate proper values for output_message, output_df_name and output_img_name.
 
-    Example outputs:
-    - Continue: {"should_continue": true, "output_message": "", "output_df_name": [], "output_img_name": []}
-    - Return with text: {"should_continue": false, "output_message": "text response", "output_df_name": [], "output_img_name": []}
-    - Return with dataframes: {"should_continue": false, "output_message": "text response", "output_df_name": ["df1", "df2"], "output_img_name": []}
-    - Return with images: {"should_continue": false, "output_message": "text response", "output_df_name": [], "output_img_name": ["img1", "img2"]}
-    - Return with prompt back: {"should_continue": false, "output_message": "prompt back message", "output_df_name": [], "output_img_name": []}
+    Example
+    -------
+    - If the final results have not been produced, we should continue to the next step and no output should be generated.
+    {
+        "should_continue": true,
+        "output_message": "",
+        "output_df_name": [],
+        output_img_name": []
+    }
+
+    - If the final results have been obtained and we are ready to return, generate the output.
+    {
+        "should_continue": false,
+        "output_message": "text message",
+        "output_df_name": ["df1", "df2"],
+        output_img_name": ["img1", "img2"]
+    }
+
+    - If the final results were not produced but we cannot continue on solving USER OBJECTIVE, generate a prompt back message.
+    {
+        "should_continue": false,
+        "output_message": "prompt back message",
+        "output_df_name": [],
+        output_img_name": []
+    }
     """
 
     should_continue: bool = Field(
@@ -7959,11 +7979,11 @@ class VectorRetriever(Retriever):
         Create a new instance of the VectorRetriever class.
 
         Args:
-           config (Dict): The configuration for the retriever.
-           resource_manager (ResourceManager): The resource manager.
-           input_config (List): The configuration for the input fields.
-           output_config (List): The configuration for the output fields.
-           embedding_model (OpenAIEmbedding): The embedding model to use for vectorization.
+            config (Dict): The configuration for the retriever.
+            resource_manager (ResourceManager): The resource manager.
+            input_config (List): The configuration for the input fields.
+            output_config (List): The configuration for the output fields.
+            embedding_model (OpenAIEmbedding): The embedding model to use for vectorization.
 
         Returns:
            VectorRetriever: A new instance of the VectorRetriever class.
@@ -7975,7 +7995,6 @@ class VectorRetriever(Retriever):
         self.input_base_model = create_base_model(
             input_base_model_name, input_config
         )
-
         output_base_model_name = f"{self.config.name}_output"
         if output_config is None:
             output_config = self.create_output_config(
@@ -7989,9 +8008,7 @@ class VectorRetriever(Retriever):
         self.output_base_model = create_base_model(
             output_base_model_name, output_config, RetrieverOutput
         )
-
         self.embedding_model = embedding_model
-
         logger.info(
             f"Component {self.config.name} of type {self.component_type} created."
         )
@@ -8004,7 +8021,7 @@ class VectorRetriever(Retriever):
 
     def prepare_input(self, state: Dict[str, Any]):
         """
-        temporary, to be replaced by generic component input preparation function
+        temporary. to be replaced by generic component input preparation function
         :param state:
         :return:
         """
@@ -8018,19 +8035,20 @@ class VectorRetriever(Retriever):
         Retrieves assets from the resource based on the query.
 
         Args:
-           query (RetrieverInput): The query to match against the resource.
-           resource (Resource): The resource to retrieve assets from.
+            query (RetrieverInput): The query to match against the resource.
+            resource (Resource): The resource to retrieve assets from.
 
         Returns:
-           list[RetrievedAsset]: A list of retrieved assets.
+            List[RetrievedAsset]: A list of retrieved assets.
         """
+
         all_retrieved = []
 
         arrays = [e.embedding_vector for e in resource.data]
         matrix = np.stack(arrays)
 
         query_embedding = await self.embedding_model(
-            query.query, **self.embedding_model.config
+            query.query, **embedding_model_config
         )
         query_embedding = np.array(query_embedding)
 
@@ -8047,14 +8065,15 @@ class VectorRetriever(Retriever):
             query_array = np.transpose(np.array(query_embedding))
             dot_prod = matrix.dot(query_array)
             dot_prod_flatten = dot_prod.flatten()
-            scores = dot_prod_flatten / (norm(query_array) * norm_all)
+            norm_query = norm(query_array)
+            scores = dot_prod_flatten / (norm_query * norm_all)
         else:
             raise NotImplementedError
-        top_k_idx = np.flip(
+        top_n_idx = np.flip(
             scores.argsort()[-self.config.parameters["top_k"] :]
         )
 
-        for i in top_k_idx:
+        for i in top_n_idx:
             record = resource.data[i]
             retrieved_record = {
                 "asset_type": resource.type,
@@ -8076,6 +8095,7 @@ class VectorRetriever(Retriever):
         :param query: RetrieverInput for tag retrieval method
         :return: output base model for retriever component
         """
+
         resource_type_module_combinations = list(
             itertools.product(
                 self.config.resource_type, self.config.module_name
@@ -8094,6 +8114,7 @@ class VectorRetriever(Retriever):
             if resource is None:
                 continue
             retrieved_asset = await self.retrieve_assets(input_data, resource)
+
             retrieved_asset_all.extend(retrieved_asset)
             output_str = self.prepare_output_string(retrieved_asset, resource)
             if self.output_field_name is not None:
@@ -8103,8 +8124,10 @@ class VectorRetriever(Retriever):
                     self.get_state_name(resource_type, module_name)
                 ] = output_str
         retrieve_time = time.time() - start_time
+
         component_output["metadata"] = {"time": retrieve_time}
         component_output["output_data"] = retrieved_asset_all
+
         return self.output_base_model.model_validate(component_output)
 
 
@@ -8112,7 +8135,7 @@ if __name__ == "__main__":
     import asyncio
 
     config = yaml.safe_load(
-        open("examples/ccb_risk/config/config_ccb_risk.yml", "r")
+        open("examples/ccb_risk/config/config_ccb_risk.yaml", "r")
     )
     my_resource_manager = ResourceManager(
         config["components"][4]["params"]["config"]
@@ -8120,43 +8143,44 @@ if __name__ == "__main__":
     my_resource_manager.load_schema_embedding(
         data_file_path="examples/ccb_risk/data/schema_embedding.pkl"
     )
+
     from scripts.azure_token import get_az_token_using_cert
 
     api_key = get_az_token_using_cert()[0]
 
     embedding_model_config = {
-        "azure_endpoint": "https://llmopenai-bi-us-east.openai.azure.com/openai/deployments/jpmc-ada-002-text-embedding/embeddings?api-version=2023-05-15",
-        "openai_api_version": "2024-02-15",
-        "api_key": api_key,
-        "embedding_model_name": "text-embedding-ada-002",
+        "azure_endpoint": "https://llmopenai-02.jpmchase.net/WKSP0001016-exp-usnc/",
+        "openai_api_version": "2024-02-15-preview",
+        "openai_api_key": api_key,
+        "embedding_model_name": "text-embedding-ada-002-2",
     }
     embedding_model = OpenAIEmbedding()
-    question = "How have median cash buffers trended for Chase deposit customers since 2021?"
-    mock_state = {"query": question}
-    component_config = config["components"][6:7]
-    retriever_node_config = component_config["params"]
-    r_config = {"name": component_config["name"]}
-    r_config.update(retriever_node_config["config"])
-    r_input = retriever_node_config["input_config"]
-    r_output = retriever_node_config["output_config"]
 
-    vector_retriever = VectorRetriever(
-        r_config, my_resource_manager, r_input, r_output, embedding_model
-    )
-    vector_retriever_input = vector_retriever.prepare_input(mock_state)
-    my_retrieved_asset = asyncio.run(
-        vector_retriever.run(vector_retriever_input)
-    )
-    print("*" * 50)
-    print(
-        f"Component {vector_retriever.config.name} of type {vector_retriever.component_type} created."
-    )
-    print("*" * 50)
-    print(f"Retrieved {len(my_retrieved_asset.output_data)} records")
-    print("*" * 50)
-    print(
-        f"Underlying string:\n{my_retrieved_asset.dict()[r_output[0]['name']]}"
-    )
+    question = "How have median cash buffers trended for Chase deposit customers since 2019?"
+    mock_state = {"query": question}
+
+    for component_config in config["components"][6:7]:
+        retriever_node_config = component_config["params"]
+        r_config = retriever_node_config["config"]
+        r_config["name"] = component_config["name"]
+        r_input = retriever_node_config["input_config"]
+        r_output = retriever_node_config["output_config"]
+        vector_retriever = VectorRetriever(
+            r_config, my_resource_manager, r_input, r_output, embedding_model
+        )
+        vector_retriever_input = vector_retriever.prepare_input(mock_state)
+        my_retrieved_asset = asyncio.run(
+            vector_retriever.run(vector_retriever_input)
+        )
+        print(
+            f"Component {vector_retriever.config.name} of type {vector_retriever.component_type} created."
+        )
+        print("Input: {vector_retriever_input.query}")
+        print(f"Retrieved {len(my_retrieved_asset.output_data)} records:")
+        print(
+            f"\nRetrieved string:\n {my_retrieved_asset.dict()[r_output[0]['name']]}"
+        )
+        print("***********\n\n")
 
 
 
@@ -8203,70 +8227,70 @@ class ColumnSchema(BaseModel):
     name: str
     type: str
     description: str = Field(default="")
-    values: List[CategoricalValue] = Field(default_factory=list)
-    example_values: list[Any] | None = Field(default=[])
+    values: list[CategoricalValue] | None = Field(default=[])
+    foreign_key: str | None = None
+    null_count: int | None = Field(default=None)
     distinct_count: int | None = Field(default=None)
-    null_count: Optional[int] = None
+    example_values: list[Any] | None = Field(default=[])
     is_primary_key: bool | None = Field(default=False)
-    foreign_key: Optional[str] = None
 
 
 class TableSchema(BaseModel):
     table_name: str
-    description: str = Field(default="")
+    description: str
     columns: list[ColumnSchema]
-    row_count: Optional[int] = None
-    tags: List[str] = Field(default_factory=list)
+    row_count: int | None = Field(default=None)
+    tags: list[str] = Field(default=[])
     primary_keys: list[str] | None = Field(default=[])
-    foreign_keys: List[ForeignKey] = Field(default_factory=list)
+    foreign_keys: list[ForeignKey] | None = Field(default=[])
 
 
 class DatabaseSchema(BaseModel):
-    tables: List[TableSchema]
+    tables: list[TableSchema]
 
 
 class Rule(BaseModel):
     rule_name: str
-    module_name: Optional[str] = None
+    module_name: str | None = None
+    search_content: str | None
+    tags: list[str] = Field(default=[])
     instructions: str
-    tags: List[str] = Field(default_factory=list)
-    search_content: Optional[str] = None
 
 
 class Rules(BaseModel):
-    rules: List[Rule]
+    rules: list[Rule]
 
 
 class ExampleContent(BaseModel):
-    question: str
     code: str
-    reasoning: Optional[str] = None
+    question: str
+    reasoning: str | None = None
 
 
 class Example(BaseModel):
     query: str
-    module_name: Optional[str] = None
+    module_name: str | None = None
     example: ExampleContent
-    tags: List[str] = Field(default_factory=list)
-    search_content: Optional[str] = None
+    tags: list[str] = Field(default=[])
+    search_content: str | None = None
 
 
 class Examples(BaseModel):
-    examples: List[Example]
+    examples: list[Example]
 
 
 class IngestionData(BaseModel):
-    rules: Optional[Rules] = None
-    schema: Optional[DatabaseSchema] = None
-    examples: Optional[Examples] = None
+    rules: Rules | None = None
+    schema: DatabaseSchema | None = None
+    examples: Examples | None = None
 
 
 class VectorSchema(BaseModel):
-    embedding_vector: List[float]
+    embedding_vector: list[float]
     search_content: str
     table_description: str
     table_name: str
-    tags: List[Any]
+    tags: list[Any]
     values: Dict[str, Any]
     record_type: VectorSchemaRecordType
     column_description: str
@@ -8319,18 +8343,18 @@ from pydantic import BaseModel, Field
 
 _BM = TypeVar("_BM", bound=BaseModel)
 _DictOrPydanticClass = Union[Dict[str, Any], Type[_BM]]
-_StrOrDictOrPydantic = Union[str, Dict[str, Any], Type[_BM], List]
+_StrOrDictOrPydantic = Union[str, Dict, _BM]
 
 
 class LLMConfig(BaseModel):
     model: str = Field(
-        description="The model name, such as deployment_name for oai llm, such as `gpt-4o-2024-05-06`, but NOT model_name like `gpt-4o`"
+        description="The model name, such as deployment_name for oai llm, such as `gpt-4o-2024-08-06`, but NOT model_name like `gpt-4o`"
     )
     with_structured_output: Optional[Union[None, _DictOrPydanticClass]] = Field(
         default=None,
         description="""
-        Parse raw llm generations to structured output.
-        The input is a dict or a BaseModel class.
+            Parse raw llm generations to structured output.
+            The input is a dict or a BaseModel class.
         """,
     )
     # with_tools TODO
@@ -8340,7 +8364,7 @@ class LLMMetaData(BaseModel):
     request_id: str = Field(
         description="A unique identifier for this LLM call. Usually provided by the LLM provider."
     )
-    model: str = Field(description="The model name used in this LLM call.")
+    model: str = Field(description="The LLM model.")
     num_generations: int = Field(
         default=1,
         description="The number of generations requested in this LLM call.",
@@ -8350,11 +8374,11 @@ class LLMMetaData(BaseModel):
     )
     start_timestamp: Union[None, str] = Field(
         default=None,
-        description="The timestamp to send request. The preferred format is `%a, %d %b %Y %H:%M:%S %Z`, e.g. `Tue, 04 Mar 2025 20:54:30 GMT`",
+        description="The timestamp to send request. The preferred format is %a, %d %b %Y %H:%M:%S %Z, e.g. 'Tue, 04 Mar 2025 16:06:02 GMT'",
     )
     end_timestamp: Union[None, str] = Field(
         default=None,
-        description="The timestamp to receive response. In the same format as `start timestamp`",
+        description="The timestamp to receive response. In the same format as start timestamp",
     )
     latency: Union[None, float] = Field(
         default=None,
@@ -8396,19 +8420,19 @@ class LLMError(BaseModel):
 
 
 class LLMOutput(BaseModel):
-    prompt: _StrOrDictOrPydantic = Field(description="The input prompt")
+    prompt: List = Field(description="The input prompt")
     generation: _StrOrDictOrPydantic = Field(
         default="",
         description="""
-        The LLM generations.
-        Parsed to Dict or Pydantic BaseModel is the structured output is required.
+            The raw LLM generations.
+            Parsed to Dict or Pydantic BaseModel is the structured output is required.
         """,
     )
     from_component: Optional[str] = Field(
         default="",
         description="""
-        The name of component that triggers this LLM call.
-        Set to empty if the component name is provided.
+            The name of component that triggers this LLM call.
+            Set to empty if the component name is provided.
         """,
     )
     metadata: Union[None, LLMMetaData] = Field(
@@ -8610,7 +8634,7 @@ from dataqa.core.llm.base_llm import (
     LLMError,
     LLMOutput,
 )
-from dataqa.core.utils.prompts import messages_to_serializable
+from dataqa.core.utils.prompt_utils import messages_to_serializable
 
 logger = logging.getLogger(__name__)
 
@@ -8620,27 +8644,29 @@ class AzureOpenAIConfig(LLMConfig):
     api_type: str
     base_url: str = Field(
         default="base_url",
-        description="The base URL of AzureOpenAI. "
-        "It should be provided either "
-        "- when define AzureOpenAIConfig "
-        "- call AzureOpenAI.invoke()",
+        description="""
+            The base URL of AzureOpenAI.
+            It should be provided either
+              - when define AzureOpenAIConfig
+              - call AzureOpenAI.invoke()
+        """,
     )
     api_key: str = Field(
         default="api_key",
-        description="The API_KEY of AzureOpenAI. "
-        "It should be provided either "
-        "- when define AzureOpenAIConfig "
-        "- call AzureOpenAI.invoke()",
+        description="""
+            The API_KEY of AzureOpenAI
+            It should be provided either
+            - when define AzureOpenAIConfig
+            - call AzureOpenAI.invoke()
+        """,
     )
-    temperature: float = Field(
-        default=0, description="The temperature of LLM response generation."
-    )
-    num_response: int = Field(
+    temperature: float = Field(default=1)
+    num_response: int = Field( # TODO how to generate multiple responses
         default=1, description="The number of LLM response to be generated"
     )
     max_completion_tokens: int = Field(
-        default=8000,
-        description="The maximum output tokens",  # TODO cl requires a different attribute "max_completion_token"
+        default=5000,
+        description="The maximum output tokens",  # TODO ol requires a different attribute "max_completion_token"
     )
     frequency_penalty: float = Field(
         default=0, description="[-2, 2]. Penalty against repeating tokens."
@@ -8649,15 +8675,14 @@ class AzureOpenAIConfig(LLMConfig):
     azure_model_params: Optional[Dict[str, Any]] = Field(default={})
 
 
-class AzureOpenAIBaseLLM(BaseLLM):
+class AzureOpenAI(BaseLLM):
     config_base_model = AzureOpenAIConfig
-    azure_model: AzureOpenAIConfig
+    config: AzureOpenAIConfig
 
     def _get_model(self, **kwargs):
         with_structured_output = kwargs.get(
             "with_structured_output", self.config.with_structured_output
         )
-
         if kwargs.get("token") is not None and kwargs.get("token") != "":
             llm = AzureChatOpenAI(
                 azure_endpoint=kwargs.get("base_url") or self.config.base_url,
@@ -8670,11 +8695,11 @@ class AzureOpenAIBaseLLM(BaseLLM):
                 openai_api_type=self.config.api_type,
                 temperature=self.config.temperature,
                 n=self.config.num_response,
-                # include_response_headers=with_structured_output is not None,
+                include_response_headers=with_structured_output is None,
                 frequency_penalty=self.config.frequency_penalty,
-                #
-                "max_completion_tokens": self.config.max_completion_tokens,
-                #
+                model_kwargs={
+                    "max_completion_tokens": self.config.max_completion_tokens,
+                }
                 **self.config.oai_params,
                 **self.config.azure_model_params,
             )
@@ -8686,13 +8711,14 @@ class AzureOpenAIBaseLLM(BaseLLM):
                 api_version=self.config.api_version,
                 openai_api_type=self.config.api_type,
                 temperature=self.config.temperature,
-                # include_response_headers=with_structured_output is not None,
+                n=self.config.num_response,
+                include_response_headers=with_structured_output is None,
                 frequency_penalty=self.config.frequency_penalty,
                 model_kwargs={
                     "max_completion_tokens": self.config.max_completion_tokens,
-                    **self.config.oai_params,
-                    **self.config.azure_model_params,
                 },
+                **self.config.oai_params,
+                **self.config.azure_model_params,
             )
 
         if with_structured_output is not None:
@@ -8710,7 +8736,7 @@ class AzureOpenAIBaseLLM(BaseLLM):
         generation = ""
         metadata = None
         error = None
-        logger.info(f"Invoking llm with retry...")
+        logger.info(f"invoking llm with retry...")
         error_msgs = []
         """Attempts to catch common exceptions raised that occur when invoking Azure"""
         for i in range(max_retry):
@@ -8751,8 +8777,8 @@ class AzureOpenAIBaseLLM(BaseLLM):
                 openai.AuthenticationError,
                 openai.APIConnectionError,
                 openai.PermissionDeniedError,
-                openai.NotFoundError,
-            ) as e:  # ValueErrors can be langchain during content filter
+                openai.APIError,
+            ) as e:  # ValueErrors can be Langchain during content filter
                 logger.exception(
                     f"exception calling LLM try {i + 1}", exc_info=e
                 )
@@ -8799,9 +8825,8 @@ class OpenAIEmbedding:
                 llm = AzureOpenAIEmbeddings(
                     openai_api_key=kwargs.get("openai_api_key"),
                     openai_api_version=kwargs.get("openai_api_version"),
-                    openai_api_base=kwargs.get("openai_api_base"),
                     default_headers={
-                        "Authorization": f"bearer {kwargs.get('openai_api_token')}"
+                        "Authorization": f"Bearer {kwargs.get('openai_api_token')}"
                     },
                     azure_endpoint=kwargs.get("azure_endpoint"),
                     model=kwargs.get("embedding_model_name"),
@@ -8817,10 +8842,9 @@ class OpenAIEmbedding:
         return self.embedding_model_client
 
     async def __call__(self, query: str, **kwargs):
-        res = await self._get_model(**kwargs).aembed_query(
-            query
-        )
+        res = await self._get_model(**kwargs).aembed_query(query)
         return res
+
 
 
 ================================================
@@ -8841,6 +8865,7 @@ COMPONENT_MARKER = "is_component"
 CONDITIONAL_EDGE_MARKER = "is_conditional_edge"
 INPUT_SOURCE = "input_source"
 INPUT_FROM_STATE = "input_from_state"
+OUTPUT_TO_STATE = "output_to_state"
 COMPONENT_OUTPUT_SUFFIX = "_output"
 PIPELINE_INPUT = "input"
 PIPELINE_OUTPUT = "output"
@@ -8850,25 +8875,24 @@ PIPELINE_OUTPUT = "output"
 ================================================
 FILE: dataqa/core/pipelines/pipeline.py
 ================================================
-from typing import Any, Dict, List, Optional, Type, Union
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import yaml
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.graph import CompiledGraph
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, create_model
 from pydantic.fields import FieldInfo
-from typing import Tuple, Type
 
+from dataqa.core.components.base_component import Component
 from dataqa.core.errors import PipelineConfigError
 from dataqa.core.pipelines.constants import (
     COMP_PREFIX,
     COMPONENT_MARKER,
-    COMPONENT_OUTPUT_SUFFIX,
     CONDITIONAL_EDGE_MARKER,
     FILE_PREFIX,
     INPUT_FROM_STATE,
-    INPUT_SOURCE,
     OUTPUT_TO_STATE,
     PIPELINE_END,
     PIPELINE_INPUT,
@@ -8955,15 +8979,6 @@ def update_edge_node_name(node: Union[str, List[str]]) -> Union[str, List[str]]:
 
     return [update_node_name(name) for name in node]
 
-
-def update_input_mapping(mapping: Dict[str, str]) -> Dict[str, str]:
-    new_mapping = {}
-    for field, mapped_field in mapping.items():
-        names = mapped_field.split(".")
-        if names[0] == PIPELINE_START:
-            names[0] = PIPELINE_INPUT
-        new_mapping[field] = ".".join(names)
-    return new_mapping
 
 
 def add_field(
@@ -12967,6 +12982,33 @@ def string_list_to_prompt(
 ================================================
 FILE: dataqa/integrations/dbc/__init__.py
 ================================================
+"""
+dataqa: A powerful, modular library for building data-centric AI agents.
+"""
+
+# Expose the default local client for easy, out-of-the-box use.
+# Expose the core data contracts for requests and responses.
+from dataqa.core.client import (
+    CoreConversationTurn,
+    CoreRequest,
+    CoreResponse,
+    DataQAClient,
+)
+from dataqa.integrations.local.client import LocalClient
+
+__all__ = [
+    "LocalClient",
+    "DataQAClient",
+    "CoreRequest",
+    "CoreResponse",
+    "CoreConversationTurn",
+]
+
+
+
+================================================
+FILE: dataqa/integrations/dbc/__init__.py
+================================================
 [Empty file]
 
 
@@ -13064,18 +13106,18 @@ from logging import getLogger
 from typing import Any, Callable, Dict, List, Set, Union
 
 import pandas as pd
-
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
 
-from dataqa.core.agent.cwd_agent import CwdAgent, CwdState
+from dataqa.core.agent.cwd_agent.cwd_agent import CWDState
 from dataqa.core.utils.dataframe_utils import df_to_markdown
-from dataqa.integrations.dbc.factory import DBCWdAgentFactory
+from dataqa.integrations.dbc.factory import DBC_CWDAgentFactory
 from dataqa.integrations.dbc.models import (
     DBCResponse,
     FileType,
     IngestionData,
     StatusResponse,
+    StepResponse
     UsecaseConfig,
 )
 
@@ -13091,16 +13133,16 @@ class DBCClient:
         self,
         usecase_config: UsecaseConfig,
         request: DBCRequest,
-        llm_callable: Callable[[List[BaseMessage], Any], BaseMessage],
-        s3_retrieval: Callable[[str], IngestionData],
-        sql_callable: Callable[[str], str],
+        llm_callable: Callable[[str, List[BaseMessage], Any], BaseMessage],
+        s3_retrieval: Callable[[uuid.UUID, Set[FileType]], IngestionData],
+        sql_callable: Callable[[str], Dict[str, Union[pd.DataFrame, str]]],
         storage_callable: Callable[[str, Union[pd.DataFrame, bytes]], None],
         os_retrieval: Callable[
             [str, uuid.UUID, Set[FileType], int],
             Union[IngestionData, List[str]],
         ],
         retrieve_previous_data: Callable[
-            [str, uuid.UUID],
+            [str, uuid.UUID], # name, question_id
             Union[None, pd.DataFrame],
         ],
     ):
@@ -13132,14 +13174,14 @@ class DBCClient:
         )
 
         for turn in recent_turns:
-            # Format: user query -> assistant response with dataframe names
+            # Format: user query + assistant response with dataframe names
             user_part = f"USER: {turn.query}"
             assistant_part = f"ASSISTANT: {turn.output_text}"
 
             # Add dataframe names if they exist
             if turn.output_dataframes:
                 df_names = ", ".join(turn.output_dataframes)
-                assistant_part = f"{assistant_part} (DataFrames: {df_names})"
+                assistant_part += f"[DataFrames: {df_names}]"
 
             history_entry = f"{user_part}\n{assistant_part}\n---\n"
             history.append(history_entry)
@@ -13177,7 +13219,6 @@ class DBCClient:
                         df = await self.retrieve_previous_data(
                             df_name, turn.question_id
                         )
-
                         if df is not None:
                             memory.put_dataframe(df_name, df, config)
                             logger.info(
@@ -13192,8 +13233,8 @@ class DBCClient:
 
     async def process_query(
         self,
+        streaming: bool = True,
         summarize: bool = True,
-        stream: bool = True,
         num_history_turns: int = 10,
         num_memory_turns: int = 1,
     ) -> AsyncIterable[Union[StatusResponse, DBCResponse]]:
@@ -13201,15 +13242,15 @@ class DBCClient:
         Main entry point to process a query from the DBC service.
 
         Args:
-            summarize: Whether to stream intermediate responses
+            streaming: Whether to stream intermediate responses
+            summarize: Whether to include summary in the final response
             num_history_turns: Number of previous turns to include in history
             num_memory_turns: Number of previous turns to load dataframes from
         """
-
         from dataqa.core.data_models.asset_models import (
             IngestionData as CoreIngestionData,
         )
-        from dataqa.core.utils.langraph_utils import (
+        from dataqa.core.utils.langgraph_utils import (
             CONFIGURABLE,
             QUESTION_ID,
             THREAD_ID,
@@ -13243,7 +13284,7 @@ class DBCClient:
         )
 
         # 4. Create the agent instance using the DBC factory
-        agent = DBCWdAgentFactory.create_agent(
+        agent = DBC_CWDAgentFactory.create_agent(
             usecase_config=self.usecase_config,
             ingestion_data=core_ingestion_data,
             memory=memory,
@@ -13252,17 +13293,18 @@ class DBCClient:
         )
 
         # 5. Run the agent
-        initial_state = CwdState(query=self.request.user_query, history=history)
+        initial_state = CWDState(query=self.request.user_query, history=history)
+
         final_state = None
-        async for chunk in agent.astream(
+        async for chunk in agent(
             state=initial_state,
             config=runnable_config,
-            stream=stream,
+            streaming=streaming,
             summarize=summarize,
         ):
-            if isinstance(chunk, CwdState):
+            if isinstance(chunk[0], CWDState):
                 final_state, _ = chunk
-            elif isinstance(chunk, StatusResponse):
+            elif streaming:
                 yield StatusResponse(name=chunk[0], message=chunk[1])
 
         # 6. Process and persist final outputs
@@ -13284,7 +13326,7 @@ class DBCClient:
                         logger.info(
                             f"Store dataframe {name} to s3. Question ID {self.request.question_id} Conversation ID {self.request.conversation_id}."
                         )
-                        text_response += f"\n\nPlease check the table {name} below:\n\n{df_to_markdown(df, fold=True)}"
+                        text_response += f"\n\nPlease check the table {name} below:\n{df_to_markdown(df=df, fold=True)}"
                     except Exception as e:
                         logger.error(
                             f"Failed to save dataframe {name} to s3 due to {repr(e)}. Question ID {self.request.question_id} Conversation ID {self.request.conversation_id}."
@@ -13304,8 +13346,8 @@ class DBCClient:
                             f"Failed to save image {name} to s3 due to {repr(e)}. Question ID {self.request.question_id} Conversation ID {self.request.conversation_id}."
                         )
 
-        if summarize and final_state and final_state.summary:
-            text_response += f"\n\n---\n\nHere is a brief summary of how your question was being handled:\n\n{final_state.summary}"
+            if summarize and final_state and final_state.summary:
+                text_response += f"\n\n---\n\nHere is a brief summary of how your question was being handled:\n\n{final_state.summary}"
 
         steps = []
         if (
@@ -13324,6 +13366,7 @@ class DBCClient:
             output_image_names=img_s3_names,
             steps=steps,
         )
+
 
 
 ================================================
@@ -13381,6 +13424,8 @@ class DBC_CWDAgentFactory:
         base_config_dict["use_case_description"] = (
             usecase_config.usecase_description
         )
+        base_config_dict["dialect"] = usecase_config.sql_dialect.model_dump()
+
         agent_config = CwdAgentDefinitionConfig(**base_config_dict)
 
         # 3. Build adapters for DBC services.
@@ -13389,7 +13434,7 @@ class DBC_CWDAgentFactory:
 
         resource_manager = ResourceManager(ingestion_data=ingestion_data)
 
-        sql_executor = DBCSQLExecutor(sql_callable, config=())
+        sql_executor = DBCSQLExecutor(sql_callable, config={})
 
         # 4. Use the generic builder to assemble the agent.
         builder = CWDAgentBuilder(config=agent_config)
@@ -13484,12 +13529,12 @@ delegate._agenerate = types.MethodType(_custom_agenerate, delegate)
         """
         Single unified method for all LLM calls. Uses the proxy model to handle everything consistently.
         """
-        t = time.time()
+        # t = time.time()
         from_component = kwargs.pop("from_component", "")
         try:
             # get the base proxy model
             model = self._get_model()
-            # dbc_kwargs = {k: v for k, v in kwargs.items() if k not in}
+            # dbc_kwargs = {k:v for k, v in kwargs.items() if k not in}
 
             # apply structured output if requested for this specific call
             with_structured_output = kwargs.pop(
@@ -13499,13 +13544,13 @@ delegate._agenerate = types.MethodType(_custom_agenerate, delegate)
             if with_structured_output:
                 model = model.with_structured_output(
                     with_structured_output,
-                    include_raw=True,
+                    # include_raw=True,
                     method="json_schema",
                 )
 
             # invoke the model
             response = await model.ainvoke(messages)
-            if isinstance(response, BaseMessage):
+            if isinstance(response, BaseModel):
                 generation = response
             elif hasattr(response, "tool_calls") and response.tool_calls:
                 generation = response.tool_calls[0]["args"]
@@ -13513,23 +13558,23 @@ delegate._agenerate = types.MethodType(_custom_agenerate, delegate)
                 generation = response.content
 
             # metadata = {
-            #    "request_id": response["raw"].id,
-            #    "model": response["raw"].response_metadata[
-            #        "model_name"
-            #    ],
-            #    "latency": time.time() - t,
-            #    "input_token": response["raw"].usage_metadata[
-            #        "input_tokens"
-            #    ],
-            #    "output_token": response["raw"].usage_metadata[
-            #        "output_tokens"
-            #    ],
+            #     # "request_id": response["raw"].id,
+            #     # "model": response["raw"].response_metadata[
+            #     #     "model_name"
+            #     # ],
+            #     # "latency": time.time() - t,
+            #     # "input_token": response["raw"].usage_metadata[
+            #     #    "input_tokens"
+            #     # ],
+            #     # "output_token": response["raw"].usage_metadata[
+            #     #   "output_tokens"
+            #     # ],
             # }
 
             return LLMOutput(
                 prompt=messages_to_serializable(messages),
                 generation=generation,
-                metadata=metadata,
+                # metadata=metadata,
                 from_component=from_component,
             )
 
@@ -13544,6 +13589,7 @@ delegate._agenerate = types.MethodType(_custom_agenerate, delegate)
                 },
                 from_component=from_component,
             )
+
 
 
 ================================================
@@ -13775,17 +13821,17 @@ from typing import Generator, List, Union
 
 import pandas as pd
 
-from dataqa.core.agent.cwd_agent import CwdAgent, CwdState
+from dataqa.core.agent.cwd_agent.cwd_agent import CWDAgent, CWDState
 from dataqa.core.client import (
-    CoreResponse,
     CoreRequest,
+    CoreResponse,
     CoreStatus,
     CoreStep,
     DataQAClient,
 )
 from dataqa.core.memory import Memory
-from dataqa.core.utils.agent import AgentResponseParser
-from dataqa.core.utils.langraph_utils import (
+from dataqa.core.utils.agent_util import AgentResponseParser
+from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
     CONFIGURABLE,
@@ -13806,16 +13852,16 @@ class LocalClient(DataQAClient):
 
     def __init__(self, config_path: str):
         """
-        Initializes the client with a path to a Cwd Agent configuration file.
+        Initializes the client with a path to a CWD Agent configuration file.
         This file is the single entry point for a local project setup.
 
         Args:
-            config_path: The path to the Cwd Agent's main YAML configuration file.
+            config_path: The path to the CWD Agent's main YAML configuration file.
         """
         self.config_path = config_path
-        self._agent: CwdAgent = None
+        self._agent: CWDAgent = None
 
-    def _get_or_create_agent(self, memory: Memory) -> CwdAgent:
+    def _get_or_create_agent(self, memory: Memory) -> CWDAgent:
         # Agent is created on-demand, which is efficient.
         if self._agent is None:
             self._agent = LocalAgentFactory.create_from_config(
@@ -13841,14 +13887,14 @@ class LocalClient(DataQAClient):
         memory = Memory()
 
         if os.environ.get("CERT_PATH"):
-            # print(f"Initializing LLM using cert:{os.environ.get('CERT_PATH')}")
+            # print(f"Initializing LLM using CERT_PATH: {os.environ.get('CERT_PATH')}")
             token = ""
             api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
             if api_key == "":
-                print("Running Standard LLM Azure API Subscription.........")
+                print("Running Standard LLM Azure API Subscription........")
                 api_key = get_az_token_using_cert()[0]
             else:
-                print("Running Multi-Tenant LLM Azure API Subscription.........")
+                print("Running Multi-Tenant LLM Azure API Subscription........")
                 token = get_az_token_using_cert()[0]
 
             runnable_config = {
@@ -13867,7 +13913,7 @@ class LocalClient(DataQAClient):
                 CONFIGURABLE: {
                     THREAD_ID: request.conversation_id,
                     QUESTION_ID: request.question_id,
-                    # for local mode, we assume credentials are in env vars
+                    # For local mode, we assume credentials are in env vars
                     API_KEY: os.environ.get("AZURE_OPENAI_API_KEY", ""),
                     BASE_URL: os.environ.get("OPENAI_API_BASE", ""),
                     TOKEN: os.environ.get("AZURE_OPENAI_API_TOKEN", ""),
@@ -13876,8 +13922,9 @@ class LocalClient(DataQAClient):
             }
 
         agent = self._get_or_create_agent(memory)
+
         history_texts = [turn.output_text for turn in request.history]
-        initial_state = CwdState(
+        initial_state = CWDState(
             query=request.user_query, history=history_texts
         )
 
@@ -13887,7 +13934,7 @@ class LocalClient(DataQAClient):
             streaming=streaming,
             summarize=summarize,
         ):
-            if isinstance(chunk, CwdState):
+            if isinstance(chunk[0], CWDState):
                 final_state, events = chunk
             elif streaming:
                 yield CoreStatus(name=chunk[0], message=chunk[1])
@@ -13913,10 +13960,10 @@ class LocalClient(DataQAClient):
                     output_imgs.append(img_bytes)
 
         parser = AgentResponseParser(events, memory, runnable_config)
-        # print("\n" + "*" * 20 + " DEBUG INFO " + "*" * 20)
+        # print("\n" + "=" * 20 + " DEBUG INFO " + "=" * 20)
         # print("### List of dataframes in memory")
-        # for df_name, val in memory.list_dataframes(runnable_config).items():
-        #     # print(f"### df_name:{df_name}\nSQL: {val[1]}\n")
+        # for df_name, val in memory.get_dataframes(runnable_config).items():
+        #     # print(f"df_name: {df_name}\nSQL: {val[1]}\n")
         # parser.pretty_print_output()
         # from dataqa.core.agent.cwd_agent.error_message import agent_error_log
         # print(f"### Total number of agent errors: {len(agent_error_log)}\nList of error logs:\n{agent_error_log}\n")
@@ -13931,6 +13978,7 @@ class LocalClient(DataQAClient):
             output_images=output_imgs,
             steps=steps,
         )
+
 
 
 ================================================
