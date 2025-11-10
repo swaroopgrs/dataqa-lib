@@ -11516,7 +11516,7 @@ class AgentResponseParser:
         elif node_name == NodeName.sql_executor.value:
             processed_step["step_type"] = "tool"
             processed_step["node"] = node_name
-            processed_step["time"] = events[1][node_name][
+            processed_step["time"] = event[1][node_name][
                 "sql_executor_output"
             ].time
             self.run_statistics["total_sql_execution_time"] += processed_step[
@@ -11618,6 +11618,7 @@ class AgentResponseParser:
                 event[1][node_name][f"{node_name}_state"][0].messages
             )
             formatted_output.append(indented(tool_calls, indent="      "))
+
             prompt = event[1][node_name][f"{node_name}_state"][0].messages[0][
                 "content"
             ]
@@ -12138,6 +12139,7 @@ DEFAULT_SEARCH_CONTENT_CONFIG = {
 
 logger = logging.getLogger(__name__)
 
+
 class TableRecord(BaseModel):
     """Record of table index"""
 
@@ -12519,7 +12521,7 @@ def get_vector_schema_record(
         resource (Resource): The resource instance.
         record_type (VectorSchemaRecordType): The type of the record.
         table_name (str): The name of the table.
-        column_name ([Optional[str]]): The name of the column (if applicable).
+        column_name (Optional[str]): The name of the column (if applicable).
         value (Optional[str]): The value (if applicable).
 
     Returns:
@@ -12557,6 +12559,7 @@ def reconstruct_table_schema(
 
     Raises:
         NotImplementedError: If the record type is not implemented.
+
     """
     tables = {}
     for record in retrieved_vector_schema:
@@ -12679,7 +12682,7 @@ def extract_schema_from_dataframe(
 
     Args:
         df_dict (Dict[str, pd.DataFrame]): A dictionary of dataframes, where the keys are the table names.
-        meta_dict (Dict[str, Dict[str, Dict[str, Optional[str]]]]): A dictionary of the metadata for each column in each table.
+        meta_dict (Dict[str, Dict[str, Dict[str, Optional[str]]]]): A dictionary of metadata for each column in each table.
         categorical_values_pct_threshold (float, optional): The threshold for the percentage of unique values in a column to consider it categorical. Defaults to 0.5.
         categorical_values_cnt_threshold (float, optional): The threshold for the count of unique values in a column to consider it categorical. Defaults to 40.
 
@@ -12727,7 +12730,7 @@ def extract_schema_from_dataframe(
                     < categorical_values_pct_threshold
                 )
                 and (len(values) < categorical_values_cnt_threshold)
-                and (column_type in ["string", "text"])
+                and (column["type"] in ["string", "text"])
             ):
                 print(
                     f"{column['name']}: {len(values)}, {len(df[column_name])}"
@@ -12770,7 +12773,7 @@ def convert_table_schema_to_sql_str(
     */
     {column_name} {type},\n"""
 
-    sql_column_value_description_specification = "     {value} {description}"
+    sql_column_value_description_specification = "    {value} {description}"
 
     sql_columns: List[str] = []
     for column in table_schema["columns"]:
@@ -12794,7 +12797,6 @@ def convert_table_schema_to_sql_str(
             assembled_column_value_descriptions = (
                 f"""\n    values:\n  {value_string}"""
             )
-
         sample_values = column.get("sample_values", "")
         if sample_values != "":
             sample_values = "\n    sample values: " + sample_values
@@ -12836,7 +12838,7 @@ def prepare_bird_database(
         base_path (str): The base path to the database.
 
     Returns:
-        Tuple[Dict[str, pd.DataFrame],  Dict[str, Dict[str, Dict[str, Optional[str]]]]]: A tuple containing
+        Tuple[Dict[str, pd.DataFrame], Dict[str, Dict[str, Dict[str, Optional[str]]]]]: A tuple containing
             the dictionary of pandas DataFrames and the dictionary of metadata.
     """
     base_directory = Path(base_path)
@@ -12851,7 +12853,7 @@ def prepare_bird_database(
     table_names = [
         table_name
         for table_name in table_names
-        if not in ["sqlite_sequence", "sqlite_stat1"]
+        if table_name not in ["sqlite_sequence", "sqlite_stat1"]
     ]
 
     df_dict = {}
@@ -13152,7 +13154,7 @@ from dataqa.core.agent.cwd_agent.cwd_agent import CWDState
 from dataqa.core.utils.dataframe_utils import df_to_markdown
 from dataqa.integrations.dbc.factory import DBC_CWDAgentFactory
 from dataqa.integrations.dbc.models import (
-    BDCRequest,
+    DBCRequest,
     DBCResponse,
     FileType,
     IngestionData,
@@ -13525,7 +13527,7 @@ class DBCLLMAdapter(BaseLLM):
         return LLMConfig
 
     def __init__(self, llm_callable: Callable, model_name: str = "dbc_model"):
-        super().__init__(_config=LLMConfig(model=model_name))
+        super().__init__(config=LLMConfig(model=model_name))
         self.llm_callable = llm_callable
         self._proxy_model: Optional[BaseChatModel] = None
 
@@ -13533,7 +13535,6 @@ class DBCLLMAdapter(BaseLLM):
         """
         Returns an instance of our custom DBCProxyChatModel.
         """
-
         if self._proxy_model is None:
             # The delegate is a real langchain model. It's used to correctly
             # format tool and structured output calls, but its own `invoke`
@@ -13608,7 +13609,7 @@ class DBCLLMAdapter(BaseLLM):
             #     #     "input_tokens"
             #     # ],
             #     # "output_token": response["raw"].usage_metadata[
-            #     #    "output_tokens"
+            #     #     "output_tokens"
             #     # ],
             # }
 
