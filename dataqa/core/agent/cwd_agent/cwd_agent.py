@@ -58,6 +58,8 @@ from dataqa.core.components.resource_manager.resource_manager import (
 )
 from dataqa.core.llm.base_llm import BaseLLM
 from dataqa.core.memory import Memory
+
+# from dataqa.core.services.storage import LocalFileDataSource
 from dataqa.core.tools import (
     get_analytics_tools_and_descriptions,
     get_plot_tools_and_descriptions,
@@ -73,6 +75,8 @@ from dataqa.core.utils.langgraph_utils import (
     TOKEN,
 )
 from dataqa.core.utils.prompt_utils import build_prompt
+
+# from dataqa.core.utils.prompt_utils import prompt_type
 from dataqa.core.utils.utils import cls_from_str
 
 logger = logging.getLogger(__name__)
@@ -120,7 +124,6 @@ class CWDState(PlanExecuteState):
     plot_worker_rule: str = ""
     plot_worker_schema: str = ""
     plot_worker_example: str = ""
-    schema_fallback_level: str = ""
     error: str = ""
     total_time: float = 0
 
@@ -198,22 +201,6 @@ class CWDAgent(Agent):
         for field in self.retriever.output_base_model.__fields__:
             retriever_output[field] = field
         self.retriever.output_mapping = retriever_output
-
-        # 3.1 Instantiate fall back retriever
-        if config.fallback_retriever_config is not None:
-            self.fallback_retriever = cls_from_str(
-                config.fallback_retriever_config.type
-            )(
-                config=config.fallback_retriever_config.config,
-                resource_manager=self.resource_manager,
-            )
-            self.fallback_retriever.set_input_mapping(dict(query="query"))
-            retriever_output = {}
-            for field in self.fallback_retriever.output_base_model.__fields__:
-                retriever_output[field] = field
-            self.fallback_retriever.output_mapping = retriever_output
-        else:
-            self.fallback_retriever = None
 
         # 4. Finalize initialization by calling the parent constructor
         super().__init__(memory=memory, llm=self.llms["default"])
@@ -331,7 +318,6 @@ class CWDAgent(Agent):
             llm=llm,
             config=config,
             sql_executor=self.sql_executor,
-            fallback_schema_retriever=self.fallback_retriever,
         )
         worker.set_input_mapping(
             dict(
@@ -339,7 +325,6 @@ class CWDAgent(Agent):
                 rule="retrieval_worker_rule",
                 schema="retrieval_worker_schema",
                 example="retrieval_worker_example",
-                schema_fallback_level="schema_fallback_level",
             )
         )
         worker.output_mapping = dict(
@@ -539,7 +524,7 @@ class CWDAgent(Agent):
             timeout = self.config.timeout
             start_time = time.monotonic()
             logger.info(
-                f"Conversation ID: {thread_id}; question ID: {question_id}. - Starting to run agent graph."
+                f"Conversation ID: {thread_id}; question ID: {question_id}. Starting to run agent graph."
             )
             async with asyncio.timeout(timeout):
                 async for name, message in stream():
@@ -549,7 +534,7 @@ class CWDAgent(Agent):
 
             state.total_time = time.monotonic() - start_time
             logger.info(
-                f"Conversation ID: {thread_id}; question ID: {question_id}. - Finished running agent graph in {round(state.total_time, 2)} seconds."
+                f"Conversation ID: {thread_id}; question ID: {question_id}. Finished running agent graph in {round(state.total_time, 2)} seconds."
             )
             yield state, all_events
 
@@ -572,6 +557,6 @@ class CWDAgent(Agent):
             )
             state.error = f"{repr(e)}\n{call_stack}"
             logger.error(
-                f"Conversation ID: {thread_id}; question ID: {question_id}. Error: Agent failed with error:\n{state.error}"
+                f"Conversation ID: {thread_id}; question ID: {question_id}. Error: agent failed with error:\n{state.error}"
             )
             yield state, all_events

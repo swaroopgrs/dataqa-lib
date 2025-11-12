@@ -1,65 +1,44 @@
-# DataQA Library
+# DataQA: The Conversational Data Agent
 
-A modular, production-grade Python framework for building, composing, and orchestrating intelligent data agents.
+A powerful, config-driven framework for building intelligent agents that answer natural language questions about your data.
 
 [![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 
 ---
 
-## What is DataQA?
+## What is the DataQA CWD Agent?
 
-**DataQA** is a declarative, config-driven library for building intelligent agents that can understand, analyze, and respond to natural language queries and data scientists who want to create conversational analytics, automated data pipelines, or custom data assistants.
+The **DataQA CWD Agent** is an intelligent system designed to understand your data and answer complex questions. It follows a "Plan, Work, Dispatch" loop to break down your query, retrieve data using SQL, perform analysis, and deliver a clear, accurate answer.
 
-## Who is DataQA for?
+Instead of writing complex code, you teach the agent about your data through simple YAML files.
 
-- **Data scientists** and **ML engineers** building LLM-powered analytics.
-- **Developers** creating conversational data tools or chatbots.
-- **Teams** needing robust, extensible data agent frameworks for structured data.
+## Who is this for?
+
+- **Data Analysts & Scientists** who want to enable natural language querying for their datasets.
+- **Teams** that need a robust, reliable way to build and maintain a conversational data assistant.
+- **Developers** creating data-centric applications without wanting to manage complex agentic loops.
 
 ---
 
 ## Key Features
 
-- **Conversational AI Agent (`CWD`Agent`):** Plan-and-execute loop for complex queries.
-- **Modular Pipeline Engine:** Compose custom workflows from reusable components.
-- **Comprehensive Tooling:** Built-in SQL, Pandas, and plotting tools.
-- **Config-Driven:** Define agent behavior in YAML, not code.
-- **Extensible:** Add your own tools, prompts, and components.
-- **Integrated Benchmarking:** Evaluate accuracy and performance.
+- **Conversational CWD Agent:** A powerful plan-and-execute loop for tackling multi-step questions.
+- **Knowledge-Driven:** Define your data's schema, business rules, and query examples in simple YAML files.
+- **Config, Not Code:** Most agent behavior is defined in a central `agent.yaml` file.
+- **Built-in Tools:** Comes with tools for SQL generation, data analysis (Pandas), and plotting out-of-the-box.
+- **Local First:** Designed for easy local setup and testing before deployment.
 
 ---
 
-## Quickstart
-
-```python
-from dataqa.integrations.local.client import LocalClient
-from dataqa.core.client import CoreRequest
-
-client = LocalClient(config_path="path/to/your/agent.yaml")
-request = CoreRequest(user_query="show me sales by region", conversation_id="demo-1")
-response = await client.process_query(request)
-print(response.text)
-```
-
-See the [Quickstart Guide](quickstart.md) for a step-by-step walkthrough.
-
----
-
-# Architecture Overview
-
-![DataQA Architecture](resources/dataqa_overview.png "DataQA Architecture")
-
----
-
-# Get Started
+## Get Started
 
 <div class="grid cards" markdown>
 
--   **Quickstart**
+-   **Quickstart Guide**
 
     ---
 
-    The fastest way to get a DataQA agent running.
+    Get your first agent running in 5 minutes. This is the best place to start.
 
     [:octicons-arrow-right-24: Quickstart Guide](quickstart.md)
 
@@ -67,25 +46,25 @@ See the [Quickstart Guide](quickstart.md) for a step-by-step walkthrough.
 
     ---
 
-    Learn how to install the library, run the included examples, and understand the core concepts.
+    Learn the core concepts and master the art of configuring your agent's knowledge base.
 
     [:octicons-arrow-right-24: User Guide](guide/introduction.md)
 
--   **API Reference**
+-   **Building Assets**
 
     ---
 
-    Explore the detailed API documentation for all classes, methods, and components.
+    Deep dive into creating the `schema.yml`, `rules.yml`, and `examples.yml` files that power your agent.
 
-    [:octicons-arrow-right-24: API Reference](reference/agent.md)
+    [:octicons-arrow-right-24: Building Assets](guide/building_assets.md)
 
--   **Contributing**
+-   **Configuration Reference**
 
     ---
 
-    Learn how to contribute to the library.
+    Detailed reference for the `agent.yaml` configuration file.
 
-    [:octicons-arrow-right-24: Developer Guide](contributing.md)
+    [:octicons-arrow-right-24: Configuration Reference](reference/agent_config.md)
 
 </div>
 
@@ -93,5 +72,5 @@ See the [Quickstart Guide](quickstart.md) for a step-by-step walkthrough.
 
 ## Community & Support
 
+- [Troubleshooting Guide](guide/troubleshooting.md)
 - [FAQ](guide/faq.md)
-- [TODO] Add a mailing list

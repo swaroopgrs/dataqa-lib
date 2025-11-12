@@ -1,9 +1,9 @@
 import logging
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Literal, Union  # noqa: F401
 
 from pydantic import BaseModel, Field
 
-from dataqa.components.langgraph_conditional_edge.base_conditional_edge import (
+from dataqa.core.components.langgraph_conditional_edge.base_conditional_edge import (
     BaseConditionalEdge,
     BaseConditionalEdgeConfig,
     Condition,

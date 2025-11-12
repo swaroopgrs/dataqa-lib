@@ -7,7 +7,9 @@ from pydantic import BaseModel, Field
 from tqdm import tqdm
 
 from dataqa.core.data_models.asset_models import (
+    # ColumnSchema,
     DatabaseSchema,
+    # TableSchema,
 )
 from dataqa.core.llm.openai import OpenAIEmbedding
 
@@ -17,6 +19,8 @@ DEFAULT_SEARCH_CONTENT_CONFIG = {
     "values": ["value", "description"],
     "include_key": False,
 }
+
+logger = logging.getLogger(__name__)
 
 
 class TableRecord(BaseModel):
@@ -95,7 +99,7 @@ class CategoricalValueRecord(BaseModel):
 
 
 def record_value_to_string(
-    record_model: Union[BaseModel],
+    record_model: BaseModel,
     include_fields: Optional[List[str]],
     display_field_name: bool = False,
 ) -> str:

@@ -120,6 +120,8 @@ def get_plot_tool(memory: Memory) -> Tuple[StructuredTool, str, str]:
                     case PlotType.line:
                         # Line
                         sns.lineplot(data=df, x=col_x, y=col_y)
+                        plt.xticks(rotation=45)
+                        plt.tight_layout()
 
                     case PlotType.pie:
                         # Pie

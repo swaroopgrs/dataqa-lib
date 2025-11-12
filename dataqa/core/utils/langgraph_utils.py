@@ -1,4 +1,6 @@
 CONFIGURABLE = "configurable"
+TOKEN = "token"
+QUESTION_ID = "question_id"
 THREAD_ID = "thread_id"
 DEFAULT_THREAD = "default_thread"
 API_KEY = "api_key"
@@ -6,4 +8,6 @@ BASE_URL = "base_url"
 METADATA = "metadata"
 DEBUG = "debug"
 TIMEOUT = "timeout"
+PROMPT_BACK = "prompt_back"
+RECURSION_LIMIT = "recursion_limit"
 MAX_TABLE_CHARACTERS = 8192

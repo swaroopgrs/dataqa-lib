@@ -8,7 +8,7 @@ These examples demonstrate how to run both the `CWD`Agent` (conversational agent
 ## Prerequisites
 
 Before running the examples, make sure you have:
-- Installed DataQA (see [Installation](installation.md))
+- Installed DataQA (see [Installation](../installation.md))
 - Set up your environment variables for LLM access (see below)
 
 ### Set Environment Variables
@@ -65,8 +65,8 @@ This will execute the benchmark tests and save the results to the output directo
 
 ## Next Steps
 
-- [Building Your First Agent](building_your_first_agent.md)
-- [Customizing Agents](customizing_agents.md)
+- [Building Assets](building_assets.md)
+- [Quickstart](../quickstart.md)
 - [API Reference](../reference/agent.md)
 
 ---

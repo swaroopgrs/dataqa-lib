@@ -114,8 +114,7 @@ To add a new type of worker (e.g., for a new analytics task):
 
 ## Next Steps
 
-- [Configuration Deep Dive](configuration.md)
-- [Extending DataQA (Plugins, Adapters)](extending.md)
+- [Agent Configuration Reference](../reference/agent_config.md)
+- [Building Assets](building_assets.md)
 - [API Reference](../reference/agent.md)
-- [Need Help?](../faq.md)
 - [FAQ](faq.md)

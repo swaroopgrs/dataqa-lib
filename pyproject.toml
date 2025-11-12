@@ -3,6 +3,7 @@ name = "mlcoellm-dataqa"
 version = "0.1.1"
 description = "Data Q&A Library"
 readme = "README.md"
+authors = []
 packages = [
     { include = "dataqa" },
 ]

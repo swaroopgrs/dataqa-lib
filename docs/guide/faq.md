@@ -1,95 +1,81 @@
 # Frequently Asked Questions (FAQ)
 
-Find answers to common questions about using, configuring, and extending DataQA.
+Find answers to common questions about using and configuring the DataQA CWD Agent.
 
 ---
 
 ## General
 
-**Q: What is DataQA?**
-A: DataQA is a modular Python framework for building intelligent data agents and pipelines that can answer natural language questions about your data.
+**Q: What is the CWD Agent?**
+A: It's an autonomous agent that follows a Plan-Work-Dispatch loop to answer complex, multi-step questions about your data using natural language.
 
-**Q: Who should use DataQA?**
-A: Data scientists, ML engineers, and developers who want to build conversational analytics, data chatbots, or custom data pipelines.
+**Q: What is the primary way to control the agent's behavior?**
+A: Through three YAML files: `schema.yml` (to describe your data), `rules.yml` (to define business logic), and `examples.yml` (to show correct query patterns).
 
 ---
 
 ## Installation & Setup
 
-**Q: What Python version is required?**
+**Q: What Python version do I need?**
 A: Python 3.11 or higher.
 
-**Q: How do I install DataQA?**
-```bash
-pip install aicoelin-dataqa
-```
-See [Installation Guide](../installation.md) for details.
-
-**Q: How do I set LLM credentials?**
-A: Set the required environment variables (e.g., `AZURE_OPENAI_API_KEY`, `OPENAI_API_BASE`) in your shell or `.env` file.
-See [Installation Guide#set-up-environment-variables](../installation.md#set-up-environment-variables).
+**Q: How do I provide my LLM credentials?**
+A: Set the environment variables `AZURE_OPENAI_API_KEY` and `OPENAI_API_BASE` in your shell or a `.env` file before running your application. See the [Installation Guide](../installation.md) for details.
 
 ---
 
 ## Configuration
 
+**Q: What does `<CONFIG_DIR>` mean in the YAML file?**
+A: It's a special placeholder that gets replaced with the absolute path to the directory containing your `agent.yaml` file. This makes your configuration portable. For example, `path: "<CONFIG_DIR>/data/my_data.csv"` will always resolve correctly.
+
+**Q: My agent isn't using my business logic. Where do I put rules?**
+A: Place rules that affect SQL generation under the `retrieval_worker` `module_name` in your `rules.yml` file. This is the most common use case.
+
+**Q: Can I use a different LLM for planning versus SQL generation?**
+A: Yes. In your `agent.yaml`, you can define multiple LLMs in `llm_configs` and assign them to specific components (like `planner` or `retrieval_worker`) in the `llm` section.
+
 **Q: Where do I put my schema, rules, and example files?**
-A: In the directory specified by `asset_directory` in your agent config (commonly `data/`).
-
-**Q: Can I use environment variables in my YAML config?**
-A: Yes! Use `${VAR}` or `${VAR:-default}` syntax.
-
-**Q: How do I use a different LLM for planning vs. execution?**
-A: Assign different LLMs in the `llm` section of your agent config.
-See [Customizing Agents](customizing_agents.md).
+A: In the directory specified by `asset_directory` in your `resource_manager_config` (commonly `data/`). The path can use `<CONFIG_DIR>` as a placeholder.
 
 ---
 
-## Running & Debugging
+## Agent Behavior
 
-**Q: How do I run an example agent?**
-```bash
-python -m dataqa.examples.cib_mp.agent.cwd_agent
-```
-See [Running the Examples](running_examples.md).
+**Q: The agent generated SQL for a column that doesn't exist. Why?**
+A: Your `schema.yml` is likely out of date or the column descriptions are misleading. Ensure your schema perfectly reflects your database and that descriptions are unambiguous.
 
-**Q: My agent returns empty or irrelevant results. What should I do?**
-A:
-- Add more rules or in-context examples to guide the LLM.
-- Check your schema and data files for completeness.
-- Revise your agent config for typos.
+**Q: The agent fails on a query involving a complex calculation. How do I fix it?**
+A: This is a perfect use case for `examples.yml`. Create a new example showing a similar question, a detailed `reasoning` block explaining the steps, and the perfect `code` block with the correct SQL.
 
-**Q: How do I debug YAML or config errors?**
+**Q: Can the agent work with multiple CSV files or database tables?**
+A: Yes. List all your CSV files under `data_files` in the `sql_execution_config` section of your `agent.yaml`. For each file, provide a `table_name` that matches an entry in your `schema.yml`. The agent can then perform `JOIN`s between these tables as if they were in a real database.
 
-## Extending & Customization
+**Q: How do I make the agent understand business-specific terms?**
+A: Add detailed descriptions in your `schema.yml` that include synonyms and business jargon. For categorical values, use the `values` field to map codes to meanings. You can also add rules in `rules.yml` that define how to interpret specific terms.
 
-**Q: Can I add my own analytics or plot tools?**
-A: Yes! Register your tool in the tool registry.
-See [Extending DataQA](extending.md).
-
-**Q: How do I use a custom LLM or SQL executor?**
-A: Subclass the appropriate base class and reference it in your config.
-See [Extending DataQA](extending.md).
+**Q: The agent keeps asking for clarification instead of answering. What's wrong?**
+A: This usually means there's ambiguity in your schema or the query. Review your column descriptions - do multiple columns match the user's question? Add more specific descriptions or create an example in `examples.yml` that shows how to handle that type of query.
 
 ---
 
-## Deployment
+## Asset Files
 
-**Q: How can I run DataQA in Docker or the cloud?**
-A: Yes! See [Deployment Guide](deployment.md) for Docker, Kubernetes, and cloud best practices.
+**Q: How detailed should my schema descriptions be?**
+A: Very detailed! The descriptions are what the LLM uses to map user questions to your data. Include synonyms, business terms, usage examples, and what each row/column represents. See the [Building Assets](building_assets.md) guide for examples.
+
+**Q: Should I put everything in rules or examples?**
+A: Use rules for business logic and constraints (e.g., "always exclude test accounts"). Use examples for complex query patterns and to teach the agent how to think through problems. Both are valuable.
+
+**Q: How many examples do I need?**
+A: Start with 3-5 high-quality examples covering your most common and complex query patterns. You can add more as you identify gaps in the agent's performance.
 
 ---
 
 ## Support
 
-**Q: Where can I get help?**
+**Q: Where can I get more help?**
 A:
-- [Troubleshooting Guide](troubleshooting.md)
-- [TODO] - Add a support mailing list.
-
----
-
-## Contributing
-
-**Q: How can I contribute to DataQA?**
-A: See [Contributing Guide](../contributing.md) for setup, code style, and PR process.
+- Review the [Troubleshooting Guide](troubleshooting.md).
+- Re-read the [Building Assets](building_assets.md) guide, as most issues can be solved by improving the asset files.
+- Check the [Configuration Reference](../reference/agent_config.md) for detailed field descriptions.

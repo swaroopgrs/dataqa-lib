@@ -150,7 +150,7 @@ class AllRetriever(Retriever):
         )
 
         logger.info(
-            f"Component {self.config.name} of type {self.component_type} created."
+            f"Component {self.config.name} of type {self.component_type} initialized."
         )
 
     def display(self):

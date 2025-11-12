@@ -65,12 +65,11 @@ Evaluates progress and updates the plan as needed.
 
 ## Analytics & Plotting Tools
 
-See [Extending DataQA](../guide/extending.md) for how to add custom tools.
+See [Tools API Reference](tools.md) for available analytics and plotting tools.
 
 ---
 
 ## See Also
 
 - [Agent API Reference](agent.md)
-- [Pipelines API Reference](pipelines.md)
-- [Extending DataQA](../guide/extending.md)
+- [Tools API Reference](tools.md)

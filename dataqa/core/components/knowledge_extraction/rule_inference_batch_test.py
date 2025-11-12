@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import pickle
@@ -6,45 +5,49 @@ from typing import List
 
 import pandas as pd
 import yaml
-from benchmark.llm_judge_prompt import LLM_JUDGE_PROMPT
-from benchmark.log import get_logger
-from benchmark.schema import (
+
+from dataqa.benchmark.llm_judge_prompt import LLM_JUDGE_PROMPT
+from dataqa.benchmark.log import get_logger
+from dataqa.benchmark.schema import (
     EvaluationLabel,
     LLMJudgeOutput,
     TestDataItem,
     UseCaseTestData,
 )
-from state import CWDState
-
-from dataqa.agent.cwd_agent.cwd_agent import CWDAgent
-from dataqa.components.knowledge_extraction.rule_inference import (
+from dataqa.core.agent.cwd_agent.cwd_agent import CWDAgent, CWDState
+from dataqa.core.components.knowledge_extraction.rule_inference import (
+    CompareSQL,
     RuleConsolidation,
     RuleInference,
     RuleTriggered,
+    RuleUpdater,
+    compare_sql_prompt_template,
+    infer_rules_from_reasoning_prompt_template,
     rule_consolidation_prompt_template,
     rule_inference_prompt_template,
     rule_list_str,
     rule_pruning_prompt_template,
 )
-from dataqa.llm.openai import AzureOpenAI, AzureOpenAIConfig
-from dataqa.memory import Memory
-from dataqa.utils.agent_util import (
+from dataqa.core.llm.openai import AzureOpenAI
+from dataqa.core.memory import Memory
+from dataqa.core.utils.agent_util import (
     dataframe_to_llm_judge_string,
     image_to_llm_judge_string,
 )
-from dataqa.utils.langgraph_utils import (
+from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
-    CONFIGURABLE,
     DEFAULT_THREAD,
     THREAD_ID,
+    TOKEN,
 )
-from dataqa.utils.prompt_utils import build_prompt
-from dataqa.utils.utils import (
+from dataqa.core.utils.prompt_utils import build_prompt
+from dataqa.core.utils.utils import (
     generate_alphabetic_bullets,
     string_list_to_prompt,
 )
-from scripts.azure_token import get_az_token_using_cert
+from dataqa.integrations.local.factory import LocalAgentFactory
+from dataqa.scripts.azure_token import get_az_token_using_cert
 
 
 class RuleInferenceExperiment:
@@ -56,6 +59,7 @@ class RuleInferenceExperiment:
         output_file_path: str,
         logging_level=logging.INFO,
         max_iteration: int = 3,
+        multi_tenant_subscription: bool = False,
     ):
         self.config_path = config_path
         self.original_config_file = original_config_file
@@ -63,6 +67,7 @@ class RuleInferenceExperiment:
         self.test_data = None
         self.output_file_path = output_file_path
         self.max_iteration = max_iteration
+        self.multi_tenant_subscription = multi_tenant_subscription
         self.logger = get_logger(
             name="RuleInferenceExperiment",
             file_path=f"{output_file_path}.log",
@@ -73,14 +78,27 @@ class RuleInferenceExperiment:
         self.question_id_to_alphabetic_bullets = None
 
     def get_llm_and_run_config(self):
-        api_key = get_az_token_using_cert()[0]
-        base_url = os.environ["OPENAI_API_BASE"]
-        config = {
-            "configurable": {
-                "api_key": api_key,
-                "base_url": base_url,
+        if self.multi_tenant_subscription:
+            token = get_az_token_using_cert()[0]
+            os.environ["AZURE_OPENAI_API_TOKEN"] = token
+            config = {
+                "configurable": {
+                    THREAD_ID: DEFAULT_THREAD,
+                    API_KEY: os.environ.get("AZURE_OPENAI_API_KEY", ""),
+                    BASE_URL: os.environ.get("OPENAI_API_BASE", ""),
+                    TOKEN: token,
+                }
             }
-        }
+        else:
+            api_key = get_az_token_using_cert()[0]
+            os.environ["AZURE_OPENAI_API_KEY"] = api_key
+            config = {
+                "configurable": {
+                    THREAD_ID: DEFAULT_THREAD,
+                    API_KEY: api_key,
+                    BASE_URL: os.environ.get("OPENAI_API_BASE", ""),
+                }
+            }
 
         # TODO: move llm config to experiment config file
         llm_config = {
@@ -108,38 +126,39 @@ class RuleInferenceExperiment:
                 - The generated SQL query.
 
         """
-        config_path = self.config_path  # "examples/cib_mp/agent/"
+        config_path = self.config_path  # "dataqa/examples/cib_mp/agent/"
         original_config_file = self.original_config_file
-        if custom_instruction is not None:
-            config_file = f"{config_path}{original_config_file}"
-            agent_config = yaml.safe_load(open(config_file))
-            agent_config["prompts"]["use_case_sql_instruction"] = (
-                custom_instruction
-            )
-            agent_config["prompts"]["use_case_planner_instruction"] += (
-                f"\n{custom_instruction}"
-            )
-            updated_config_file = f"{config_path}cwd_agent_prompt_template_custom_instruction.yaml"
-            with open(updated_config_file, "w") as f:
-                yaml.safe_dump(agent_config, f)
-            config_file = updated_config_file
-        else:
-            config_file = f"{config_path}{original_config_file}"
 
-        agent: CWDAgent = CWDAgent.from_config_path(config_file, Memory())
+        config_file = f"{config_path}/{original_config_file}"
+
+        memory = Memory()
+        agent: CWDAgent = LocalAgentFactory.create_from_config(
+            config_file, memory
+        )
+
+        if custom_instruction is not None:
+            agent.resource_manager.update_rules(custom_instruction, None)
         state = CWDState(query=question)
-        runnable_config = {
-            CONFIGURABLE: {
-                THREAD_ID: DEFAULT_THREAD,
-                API_KEY: get_az_token_using_cert()[0],
-                BASE_URL: os.environ["OPENAI_API_BASE"],
-            }
-        }
+        _, runnable_config = self.get_llm_and_run_config()
+
         try:
-            response, events = await agent(state=state, config=runnable_config)
+            # response, events = await agent(state=state, config=runnable_config)
+            async for chunk in agent(
+                state=state,
+                config=runnable_config,
+                streaming=False,
+                summarize=False,
+            ):
+                if isinstance(chunk[0], CWDState):
+                    response, events = chunk
 
             text = response.final_response.response
-            sql = response.retrieval_worker_state[0].sql_generator_output.sql
+            try:
+                sql = response.retrieval_worker_state[
+                    0
+                ].sql_generator_output.sql
+            except Exception:
+                sql = text
 
             for name in response.final_response.output_df_name:
                 df = agent.memory.get_dataframe(name, runnable_config)
@@ -170,15 +189,7 @@ class RuleInferenceExperiment:
 
         """
         # TODO: move llm judge config to experiment config file
-        llm_judge_model = AzureOpenAI(
-            AzureOpenAIConfig(
-                model="gpt-4o-2024-08-06",
-                api_version="2024-08-01-preview",
-                api_type="azure",
-                temperature=0,
-                with_structured_output=LLMJudgeOutput,
-            )
-        )
+
         llm_judge_prompt = build_prompt(LLM_JUDGE_PROMPT)
         instruction = test_record.instruction_for_llm_judge
         if instruction:
@@ -188,6 +199,9 @@ class RuleInferenceExperiment:
             # no ground truth
             llm_label = EvaluationLabel.NotAvailable
         else:
+            llm_judge_model, runnable_config = self.get_llm_and_run_config()
+            runnable_config = runnable_config["configurable"]
+            runnable_config["with_structured_output"] = LLMJudgeOutput
             llm_judge_output = await llm_judge_model.ainvoke(
                 messages=llm_judge_prompt.invoke(
                     dict(
@@ -197,10 +211,7 @@ class RuleInferenceExperiment:
                         prediction=generated_answer,
                     )
                 ),
-                **{
-                    API_KEY: get_az_token_using_cert()[0],
-                    BASE_URL: os.environ["OPENAI_API_BASE"],
-                },
+                **runnable_config,
             )
             if isinstance(llm_judge_output.generation, LLMJudgeOutput):
                 if llm_judge_output.generation.SCORE == 1:
@@ -222,6 +233,184 @@ class RuleInferenceExperiment:
         else:
             data.data = [x for x in data.data if x.active and x.id in filter_id]
         self.test_data = data
+
+    async def update_rule_with_question(
+        self, test_record: TestDataItem, current_rules: List[str]
+    ):
+        """
+        Updates the rules with the given test record.
+
+        Args:
+            test_record (TestDataItem): The test data item.
+            current_rules (List[str]): The list of current rules.
+
+        Returns:
+            List: The result of the test.
+
+        The result contains the following:
+
+        - The question.
+        - The number of iterations.
+        - The label of the LLM evaluation.
+        - The prompt of the extracted rules.
+        - The expected SQL.
+        - The generated SQL.
+        - The original generated SQL.
+        - The ground truth output.
+        - The answer.
+
+        This function first logs the question, the expected SQL, and the
+        ground truth output. Then it logs the current rules. It then runs
+        the question with the current rules and logs the answer and the
+        generated SQL. It evaluates the answer using the LLM and logs the
+        LLM judge. It then iterates over the rules until the LLM label is
+        correct or the maximum number of iterations is reached. It logs
+        the iteration count, the extracted rules, and the answer and
+        generated SQL. Finally, it appends the result to the experiment
+        result and returns the result.
+
+        """
+        expected_sql = test_record.solution[0].function_arguments["sql"]
+        self.logger.info(f"Question: {test_record.question}")
+        self.logger.info(f"Ground truth SQL:\n{expected_sql}")
+        self.logger.info(
+            f"Ground truth output:\n{test_record.ground_truth_output}"
+        )
+
+        current_rule_prompt = ""
+        for idx, rule in enumerate(current_rules):
+            current_rule_prompt += f"{idx} - {rule}\n"
+        self.logger.info(f"Current rules: \n{current_rule_prompt}")
+        answer, sql = await self.run_question(
+            test_record.question, current_rule_prompt
+        )
+        sql_0 = sql
+        self.logger.info(f"Answer: {answer}")
+        self.logger.info(f"Generated SQL: \n{sql}")
+        llm_label = await self.llm_eval(test_record, answer)
+        self.logger.info(f"LLM judge: {llm_label}")
+
+        iteration_count = 0
+        updated_rules_list = None
+        updated_rules_prompt = ""
+        while (
+            (llm_label == EvaluationLabel.Wrong)
+            or (llm_label == EvaluationLabel.Reject)
+        ) and (iteration_count < self.max_iteration):
+            iteration_count += 1
+            self.logger.info(f"***Iteration: {iteration_count}***")
+            llm, config = self.get_llm_and_run_config()
+            compare_sql = CompareSQL(
+                llm=llm, prompt=compare_sql_prompt_template
+            )
+            reasons = await compare_sql(
+                query=test_record.question,
+                generated_sql=sql_0,
+                expected_sql=expected_sql,
+                config=config,
+            )
+            reasons_list = reasons["reasons"][0].reasons
+            reasons_str = "\n".join(reasons_list)
+            self.logger.info(f"Reasons: \n{reasons_str}\n")
+            rule_from_reasons = RuleUpdater(
+                llm=llm, prompt=infer_rules_from_reasoning_prompt_template
+            )
+            rules = await rule_from_reasons(
+                query=test_record.question,
+                generated_sql=sql_0,
+                expected_sql=expected_sql,
+                current_rules=reasons_str,
+                config=config,
+            )
+            rule_list = rules["rules"][0].rules
+
+            new_rules_prefix = [
+                f"B{idx} - {rule}\n" for idx, rule in enumerate(rule_list)
+            ]
+            current_rules_prefix = [
+                f"A{idx} - {rule}\n" for idx, rule in enumerate(current_rules)
+            ]
+            rule_list_str = current_rules_prefix + new_rules_prefix
+            rule_list_str = "\n".join(rule_list_str)
+
+            self.logger.info(f"Rules to consolidate: \n{rule_list_str}\n")
+            rule_consolidation = RuleConsolidation(
+                llm=llm, prompt=rule_consolidation_prompt_template
+            )
+            rules = await rule_consolidation(
+                rule_list_str=rule_list_str, config=config
+            )
+            updated_rules_list = [rule.rule for rule in rules["rules"][0].rules]
+
+            # rule_updater = RuleUpdater(
+            #     llm=llm, prompt=rule_updater_prompt_template
+            # )
+            # rules = await rule_updater(
+            #     query=test_record.question,
+            #     generated_sql=sql_0,
+            #     expected_sql=expected_sql,
+            #     current_rules=current_rules,
+            #     config=config,
+            # )
+            # for idx, rule in enumerate(rules["rules"][0].rules):
+            for idx, rule in enumerate(updated_rules_list):
+                updated_rules_prompt += f"{idx} - {rule}\n"
+            self.logger.info(f"Updated rules: \n{updated_rules_prompt}")
+            answer, sql = await self.run_question(
+                test_record.question, updated_rules_prompt
+            )
+            self.logger.info(f"Answer: {answer}")
+            self.logger.info(f"Generated SQL: \n{sql}")
+            llm_label = await self.llm_eval(test_record, answer)
+            self.logger.info(f"LLM judge: {llm_label}")
+        result = [
+            test_record.question,
+            iteration_count,
+            llm_label.value,
+            updated_rules_list if updated_rules_list else current_rules,
+            expected_sql,
+            sql,
+            sql_0,
+            test_record.ground_truth_output,
+            answer,
+        ]
+        self.experiment_result.append(
+            result + [test_record.id, updated_rules_list]
+        )
+        return result
+
+    async def update_rule_batch(self):
+        result = []
+        count = 1
+        starting_rules = []
+        for item in self.test_data.data:
+            self.logger.info(
+                f"\n*** {count} of {len(self.test_data.data)} ***\n"
+            )
+            count += 1
+            update_result = await self.update_rule_with_question(
+                item, starting_rules
+            )
+            starting_rules = update_result[3]
+            self.logger.info(f"Current rules: \n{starting_rules}\n")
+            result.append(update_result)
+            pickle.dump(
+                self.experiment_result,
+                open(f"{self.output_file_path}.pkl", "wb"),
+            )
+        column_names = [
+            "question",
+            "iteration_count",
+            "llm_label",
+            "updated_rules",
+            "expected_sql",
+            "generated_sql",
+            "generated_sql_0",
+            "ground_truth_output",
+            "generated_answer",
+        ]
+        df_result = pd.DataFrame(result, columns=column_names)
+        df_result.to_excel(f"{self.output_file_path}.xlsx")
 
     async def tune_question(self, test_record: TestDataItem):
         """
@@ -253,7 +442,7 @@ class RuleInferenceExperiment:
             f"Ground truth output:\n{test_record.ground_truth_output}"
         )
 
-        answer, sql = await self.run_question(test_record.question)
+        answer, sql = await self.run_question(test_record.question, " ")
         sql_0 = sql
         self.logger.info(f"Answer: {answer}")
         self.logger.info(f"Generated SQL: \n{sql}")
@@ -267,6 +456,7 @@ class RuleInferenceExperiment:
         while (
             (llm_label == EvaluationLabel.Wrong)
             or (llm_label == EvaluationLabel.Reject)
+            or (llm_label == EvaluationLabel.PromptBack)
         ) and (iteration_count < self.max_iteration):
             iteration_count += 1
             self.logger.info(f"***Iteration: {iteration_count}***")
@@ -380,6 +570,7 @@ class RuleInferenceExperiment:
 
     async def consolidate_rules(self):
         rule_list_str = self.prepare_rules_to_combine()
+        self.logger.info(f"Rules to combine: \n{rule_list_str}")
         llm, config = self.get_llm_and_run_config()
         rule_consolidation = RuleConsolidation(
             llm=llm, prompt=rule_consolidation_prompt_template
@@ -387,6 +578,7 @@ class RuleInferenceExperiment:
         rules = await rule_consolidation(
             rule_list_str=rule_list_str, config=config
         )
+        self.logger.info(f"Combined rules: \n{rules['rules'][0].rules}")
         self.consolidated_rules = rules
         rules_list = [rule.rule for rule in rules["rules"][0].rules]
         rules_prompt = string_list_to_prompt(rules_list, "- ")
@@ -434,89 +626,102 @@ class RuleInferenceExperiment:
 
 
 if __name__ == "__main__":
-    os.environ["CERT_PATH"] = ""
-    os.environ["CLIENT_ID"] = ""
-    os.environ["TENANT_ID"] = ""
-    os.environ["OPENAI_API_BASE"] = ""
+    import asyncio
+    from pathlib import Path
 
-    # results = pickle.load(open("temp/rule_inference_experiment_cib_mp_20250620_3.pkl", "rb"))
-    # print(results)
-    # test_data_file = "examples/cib_mp/examples.yaml"
-    # test_data = load_test_data(test_data_file)
-    # item = test_data.data[16]
-    # asyncio.run(tune_question(item))
+    PROJECT_ROOT = Path(__file__).resolve().parents[3]
+    config_path = PROJECT_ROOT / "examples/cib_mp/agent/"
+    test_data_file = PROJECT_ROOT / "examples/cib_mp/examples.yaml"
 
-    train_id_gb = [
-        "cib_gb_002",
-        "cib_gb_005",
-        "cib_gb_006",
-        "cib_gb_007",
-        "cib_gb_008",
-        "cib_gb_009",
-        "cib_gb_011",
-        "cib_gb_012",
-        "cib_gb_014",
-        "cib_gb_015",
-        "cib_gb_016",
-        "cib_gb_017",
-        "cib_gb_019",
-        "cib_gb_020",
-        "cib_gb_021",
-        "cib_gb_023",
-        "cib_gb_027",
-        "cib_gb_028",
-        "cib_gb_029",
-        "cib_gb_031",
-        "cib_gb_032",
-        "cib_gb_033",
-        "cib_gb_034",
-        "cib_gb_035",
-        "cib_gb_036",
-        "cib_gb_038",
-        "cib_gb_039",
-        "cib_gb_041",
-        "cib_gb_042",
-        "cib_gb_043",
-        "cib_gb_044",
-        "cib_gb_045",
-        "cib_gb_046",
-        "cib_gb_048",
-        "cib_gb_049",
-        "cib_gb_050",
-        "cib_gb_052",
-        "cib_gb_053",
-    ]
-    test_id_gb = [
-        "cib_gb_001",
-        "cib_gb_003",
-        "cib_gb_004",
-        "cib_gb_010",
-        "cib_gb_013",
-        "cib_gb_018",
-        "cib_gb_022",
-        "cib_gb_024",
-        "cib_gb_025",
-        "cib_gb_026",
-        "cib_gb_030",
-        "cib_gb_037",
-        "cib_gb_040",
-        "cib_gb_047",
-        "cib_gb_051",
-        "cib_gb_054",
-        "cib_gb_055",
-    ]
+    # experiment = RuleInferenceExperiment(
+    #     config_path=str(config_path),
+    #     original_config_file="cwd_agent_prompt_template.yaml",
+    #     test_data_file=str(test_data_file),
+    #     output_file_path="temp/rule_update_cib_mp_20250806_2",
+    #     max_iteration=3,
+    # )
+    # experiment.load_test_data()
+    # asyncio.run(experiment.update_rule_batch())
+
+    #     # results = pickle.load(open("temp/rule_inference_experiment_cib_mp_20250620_3.pkl", "rb"))
+    #     # print(results)
+    #     # test_data = load_test_data(test_data_file)
+    #     # item = test_data.data[16]
+    #     # asyncio.run(tune_question(item))
+
+    # train_id_gb = [
+    #     "cib_gb_002",
+    #     "cib_gb_005",
+    #     "cib_gb_006",
+    #     "cib_gb_007",
+    #     "cib_gb_008",
+    #     "cib_gb_009",
+    #     "cib_gb_011",
+    #     "cib_gb_012",
+    #     "cib_gb_014",
+    #     "cib_gb_015",
+    #     "cib_gb_016",
+    #     "cib_gb_017",
+    #     "cib_gb_019",
+    #     "cib_gb_020",
+    #     "cib_gb_021",
+    #     "cib_gb_023",
+    #     "cib_gb_027",
+    #     "cib_gb_028",
+    #     "cib_gb_029",
+    #     "cib_gb_031",
+    #     "cib_gb_032",
+    #     "cib_gb_033",
+    #     "cib_gb_034",
+    #     "cib_gb_035",
+    #     "cib_gb_036",
+    #     "cib_gb_038",
+    #     "cib_gb_039",
+    #     "cib_gb_041",
+    #     "cib_gb_042",
+    #     "cib_gb_043",
+    #     "cib_gb_044",
+    #     "cib_gb_045",
+    #     "cib_gb_046",
+    #     "cib_gb_048",
+    #     "cib_gb_049",
+    #     "cib_gb_050",
+    #     "cib_gb_052",
+    #     "cib_gb_053",
+    # ]
+    # test_id_gb = [
+    #     "cib_gb_001",
+    #     "cib_gb_003",
+    #     "cib_gb_004",
+    #     "cib_gb_010",
+    #     "cib_gb_013",
+    #     "cib_gb_018",
+    #     "cib_gb_022",
+    #     "cib_gb_024",
+    #     "cib_gb_025",
+    #     "cib_gb_026",
+    #     "cib_gb_030",
+    #     "cib_gb_037",
+    #     "cib_gb_040",
+    #     "cib_gb_047",
+    #     "cib_gb_051",
+    #     "cib_gb_054",
+    #     "cib_gb_055",
+    # ]
 
     experiment = RuleInferenceExperiment(
-        config_path="examples/cib_mp/agent/",
-        original_config_file="cwd_agent_prompt_template.yaml",
-        test_data_file="examples/cib_mp/examples.yaml",
-        output_file_path="temp/rule_pruning_cibmp_20250623_2",
+        config_path=str(config_path),
+        original_config_file="cwd_agent.yaml",
+        test_data_file=str(test_data_file),
+        output_file_path="temp/rule_inference_cib_mp_20250915_3",
         max_iteration=3,
+        multi_tenant_subscription=True,
     )
     # experiment.load_test_data(train_id_gb)
-    # asyncio.run(experiment.tune_question_batch())
-    # experiment.experiment_result = results
-    # combined_rules = asyncio.run(experiment.consolidate_rules())
-    # print(combined_rules)
     experiment.load_test_data()
-    asyncio.run(experiment.rule_pruning())
+    asyncio.run(experiment.tune_question_batch())
+    # experiment.experiment_result = results
+    combined_rules = asyncio.run(experiment.consolidate_rules())
+    print(combined_rules)
+    # experiment.load_test_data()
+    # asyncio.run(experiment.rule_pruning())

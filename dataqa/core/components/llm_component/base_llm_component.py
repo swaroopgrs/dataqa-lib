@@ -3,21 +3,22 @@ from typing import Dict, List, Literal, Tuple, Union
 
 from pydantic import BaseModel, Field
 
-from dataqa.components.base_component import (
+from dataqa.core.components.base_component import (
     Component,
     ComponentConfig,
     OutputVariable,
     RunnableConfig,
 )
-from dataqa.llm.base_llm import BaseLLM
-from dataqa.utils.component_utils import (
+from dataqa.core.llm.base_llm import BaseLLM
+from dataqa.core.utils.component_utils import (
     build_base_model_from_parameters,
     extract,
 )
-from dataqa.utils.langgraph_utils import (
+from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
     CONFIGURABLE,
+    TOKEN,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,7 @@ class BaseLLMComponent(Component):
         assert isinstance(input_data, self.input_base_model)
 
         api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
+        token = config.get(CONFIGURABLE, {}).get(TOKEN, "")
         base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
 
         if self.config.output_parser == "basemodel":
@@ -83,6 +85,7 @@ class BaseLLMComponent(Component):
         response = await self.llm.ainvoke(
             messages=input_data.messages,  # TODO validation
             api_key=api_key,
+            token=token,
             base_url=base_url,
             from_component=self.config.name,
             with_structured_output=with_structured_output,

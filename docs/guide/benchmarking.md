@@ -1,98 +1,97 @@
-# Benchmarking & Evaluation
+# Evaluating Your Agent
 
-DataQA includes a built-in benchmarking suite to help you evaluate the accuracy, latency, and performance of your agents and pipelines.
-
----
-
-## 1. What Can You Benchmark?
-
-- **Agents:** Test how well your conversational agent answers a set of questions.
-- **Pipelines:** Evaluate the correctness and speed of custom data processing pipelines.
-- **LLM Output:** Compare different LLMs, prompts, or configuration.
+DataQA includes a benchmarking suite to help you test and evaluate your agent's performance as you refine its knowledge base. This is crucial for tracking improvements and catching regressions.
 
 ---
 
-## 2. Preparing a Benchmark Configuration
+## 1. Why Evaluate?
 
-Create a YAML file describing your benchmark.
-A typical config includes:
-- The agent or pipeline to test
-- The test data (questions, expected answers, etc.)
-- Evaluation criteria (e.g., accuracy, latency)
-
-**Example: `benchmark_config.yml`**
-```yaml
-agent_config_path: "agent.yaml"
-test_data_path: "tests/test_questions.yml"
-output_dir: "benchmark_results/"
-metrics:
-  - accuracy
-  - latency
-```
+- **Measure Accuracy:** Objectively determine if your agent is answering questions correctly.
+- **Track Progress:** See if changes to your `schema.yml`, `rules.yml`, or `examples.yml` are making the agent smarter.
+- **Prevent Regressions:** Ensure that fixing one type of query doesn't break another.
 
 ---
 
-## 3. Preparing Test Data
+## 2. Preparing Test Data
 
-Test data is usually a YAML file with a list of questions and expected outputs.
+The foundation of any evaluation is a good test set. Create a YAML file containing a list of questions you expect your agent to answer correctly.
 
 **Example: `test_questions.yml`**
 ```yaml
-- id: test_001
-  question: "What is the total sales for 2024?"
-  expected_answer: "..."
-- id: test_002
-  question: "Show all active customers."
-  expected_answer: "..."
+# A friendly name for your test suite
+use_case: "Sales Agent Evaluation"
+
+# A list of test items
+data:
+  - id: "sales_total_revenue"
+    question: "What is the total revenue of all sales?"
+    # The expected SQL query the agent should generate
+    solution:
+      - function_arguments:
+          sql: "SELECT SUM(revenue) FROM sales_report;"
+    # Optional: A ground truth text answer for LLM-based judging
+    ground_truth_output: "The total revenue is $27,650."
+    active: true
+
+  - id: "sales_by_region"
+    question: "Show me the total revenue per region."
+    solution:
+      - function_arguments:
+          sql: "SELECT region, SUM(revenue) FROM sales_report GROUP BY region;"
+    active: true
 ```
+*   `id`: A unique identifier for the test case.
+*   `question`: The user query to test.
+*   `solution`: The ground truth, typically the exact SQL you expect the agent to generate.
+*   `ground_truth_output`: An optional final text answer, used for more advanced LLM-based judging.
 
 ---
 
-## 4. Running the Benchmark
+## 3. Running the Benchmark
 
-Use the benchmarking runner module:
+The benchmarking suite is run from the command line. You point it to your agent's configuration and your test data file.
 
 ```bash
-python -m dataqa.benchmark.run_test -c benchmark_config.yml
+# Set your LLM environment variables first!
+export AZURE_OPENAI_API_KEY="..."
+export OPENAI_API_BASE="..."
+
+# Run the test
+python -m dataqa.core.components.knowledge_extraction.rule_inference_batch_test \
+    --config /path/to/your/agent.yaml \
+    --test-data /path/to/your/test_questions.yml
 ```
 
-- Results will be saved in the specified `output_dir`.
-- You'll get a summary of accuracy, latency, and any errors.
+*(Note: The entry point `rule_inference_batch_test.py` is planned to be renamed to a more general test runner in a future release.)*
 
 ---
 
-## 5. Interpreting Results
+## 4. Interpreting Results
 
-- **Accuracy:** Percentage of questions answered correctly (matches expected output).
-- **Latency:** Time taken per query or pipeline run.
-- **Detailed Logs:** See which questions failed and why.
+The benchmark script will output:
+- **Execution Logs:** To your console, showing each test question and the agent's generated SQL.
+- **Result Files:** An Excel (`.xlsx`) and a Pickle (`.pkl`) file in a `temp/` directory containing detailed results for each test case, including:
+    - The original question.
+    - The expected SQL.
+    - The generated SQL.
+    - An `llm_label` (Correct/Wrong) if `ground_truth_output` was provided and evaluated.
 
-Results are typically saved as CSV or Excel files for easy analysis.
-
----
-
-## 6. Advanced: Custom Evaluation Metrics
-
-You can add your own evaluation logic by subclassing the evaluation classes in `dataqa/benchmark/schema.py`.
+By comparing the "expected_sql" and "generated_sql" columns in the output Excel file, you can quickly identify where your agent is succeeding or failing.
 
 ---
 
-## 7. Best Practices
+## 5. Iterative Improvement
 
-- **Start with a small test set** to validate your setup.
-- **Iterate:** Add more questions and edge cases as your agent improves.
-- **Automate:** Integrate benchmarking into your CI/CD pipeline for regression testing.
+The typical workflow is:
+1.  Run the benchmark and identify a failing test case.
+2.  Analyze *why* it failed. Is a column description unclear? Is a business rule missing? Is there a complex query pattern that needs an example?
+3.  Update your `schema.yml`, `rules.yml`, or `examples.yml` to fix the issue.
+4.  Run the benchmark again to confirm the fix and ensure no other tests have broken.
+5.  Repeat.
 
 ---
 
 ## Next Steps
 
-- [Deployment Guide](deployment.md)
-- [API Reference: Benchmarking](../reference/benchmark.md)
-- [FAQ](faq.md)
-
----
-
-## Need Help?
-
-- [FAQ](faq.md)
+- **[Building Assets](building_assets.md)**: Learn how to improve your asset files based on benchmark results.
+- **[Troubleshooting](troubleshooting.md)**: Common issues and solutions.

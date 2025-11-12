@@ -5,18 +5,18 @@ from typing import Any, Dict, List
 
 import yaml
 
-from dataqa.components.resource_manager.resource_manager import (
+from dataqa.core.components.resource_manager.resource_manager import (
     Resource,
     ResourceManager,
 )
-from dataqa.components.retriever.base_retriever import (
+from dataqa.core.components.retriever.base_retriever import (
     Retriever,
     RetrieverConfig,
     RetrieverInput,
     RetrieverOutput,
 )
-from dataqa.data_models.asset_models import RetrievedAsset
-from dataqa.utils.data_model_util import create_base_model
+from dataqa.core.data_models.asset_models import RetrievedAsset
+from dataqa.core.utils.data_model_util import create_base_model
 
 logger = logging.getLogger(__name__)
 
@@ -35,18 +35,18 @@ class TagRetriever(Retriever):
         output_config: List,
     ):
         """
-        Create a new instance of the TagRetriever.
+        Create a new instance of the TagRetriever class.
 
         Args:
-           config (Dict): The configuration for the retriever.
-           resource_manager (ResourceManager): The resource manager.
-           input_config (List): The configuration for the input fields.
-           output_config (List): The configuration for the output fields.
+            config (Dict): The configuration for the retriever.
+            resource_manager (ResourceManager): The resource manager.
+            input_config (List): The configuration for the input fields.
+            output_config (List): The configuration for the output fields.
 
         Returns:
-           TagRetriever: A new instance of the TagRetriever class.
-        """
+            TagRetriever: A new instance of the TagRetriever class.
 
+        """
         tag_retriever_config = RetrieverConfig.model_validate(config)
         super().__init__(tag_retriever_config)
         self.resource_manager = resource_manager
@@ -79,7 +79,7 @@ class TagRetriever(Retriever):
 
     def prepare_input(self, state: Dict[str, Any]):
         """
-        temporary, to be replaced by generic component input preparation function
+        temporary. to be replaced by generic component input preparation function
         :param state:
         :return:
         """
@@ -93,11 +93,11 @@ class TagRetriever(Retriever):
         Retrieves assets from the resource based on the query.
 
         Args:
-           query (RetrieverInput): The query to match against the resource.
-           resource (Resource): The resource to retrieve assets from.
+            query (RetrieverInput): The query to match against the resource.
+            resource (Resource): The resource to retrieve assets from.
 
         Returns:
-           list[RetrievedAsset]: A list of retrieved assets.
+            List[RetrievedAsset]: A list of retrieved assets.
         """
         search_field = [r for r in self.input_base_model.model_fields]
         if isinstance(search_field, str):
@@ -134,7 +134,7 @@ class TagRetriever(Retriever):
         return all_retrieved
 
     @staticmethod
-    def validate(input_tag: list, asset_tag: list) -> bool:
+    def validate(input_tag: List, asset_tag: List) -> bool:
         """
         :param input_tag: list of input tags
         :param asset_tag: list of tags of the asset record
@@ -207,9 +207,9 @@ if __name__ == "__main__":
     import asyncio
 
     config = yaml.safe_load(
-        open("dataqa/examples/ccib_risk/config/config_retriever.yml", "r")
+        open("dataqa/examples/ccb_risk/config/config_retriever.yml", "r")
     )
-    # my_kb = KnowledgeBase(config["components"][0]["params"]["config"])
+    # my_kb = KnowledgeBase(config["components"][4]["params"]["config"])
     my_resource_manager = ResourceManager(
         config["components"][4]["params"]["config"]
     )
@@ -218,25 +218,24 @@ if __name__ == "__main__":
 
     for component_config in config["components"][5:6]:
         retriever_node_config = component_config["params"]
-        r_config = {"name": component_config["name"]}
-        r_config.update(retriever_node_config["config"])
+        r_config = retriever_node_config["config"]
+        r_config["name"] = component_config["name"]
         r_input = retriever_node_config["input_config"]
         r_output = retriever_node_config["output_config"]
-
+        # tag_retriever = TagRetrieverOld(r_config, my_kb, r_input, r_output)
         tag_retriever = TagRetriever(
             r_config, my_resource_manager, r_input, r_output
         )
         tag_retriever_input = tag_retriever.prepare_input(mock_state)
         my_retrieved_asset = asyncio.run(tag_retriever.run(tag_retriever_input))
-        print("*" * 50)
         print(
             f"Component {tag_retriever.config.name} of type {tag_retriever.component_type} created."
         )
-        print(f"Retrieved {len(my_retrieved_asset.output_data)} records")
-        print("Content:")
+        print(f"Input tags: {tag_retriever_input.tags}")
+        print(f"Retrieved {len(my_retrieved_asset.output_data)} records:")
         for r in my_retrieved_asset.output_data:
             print(r.content.tags)
-        print("*" * 50)
         print(
-            f"Underlying string:\n{my_retrieved_asset.dict()[r_output[0]['name']]}"
+            f"\nRetrieved string:\n {my_retrieved_asset.dict()[r_output[0]['name']]}"
         )
+        print("***********\n\n")

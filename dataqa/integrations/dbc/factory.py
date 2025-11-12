@@ -1,4 +1,3 @@
-# dataqa/integrations/dbc/factory.py
 from pathlib import Path
 from typing import Callable
 
@@ -51,6 +50,8 @@ class DBC_CWDAgentFactory:
         base_config_dict["use_case_description"] = (
             usecase_config.usecase_description
         )
+        base_config_dict["dialect"] = usecase_config.sql_dialect.model_dump()
+
         agent_config = CwdAgentDefinitionConfig(**base_config_dict)
 
         # 3. Build adapters for DBC services.
@@ -59,9 +60,7 @@ class DBC_CWDAgentFactory:
 
         resource_manager = ResourceManager(ingestion_data=ingestion_data)
 
-        sql_executor = DBCSQLExecutor(
-            sql_callable, config_id=usecase_config.config_id, config={}
-        )
+        sql_executor = DBCSQLExecutor(sql_callable, config={})
 
         # 4. Use the generic builder to assemble the agent.
         builder = CWDAgentBuilder(config=agent_config)

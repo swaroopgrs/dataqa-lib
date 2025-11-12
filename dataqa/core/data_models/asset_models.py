@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from pydantic import BaseModel, Field
 
@@ -18,8 +18,8 @@ class VectorSchemaRecordType(Enum):
 
 
 class CategoricalValue(BaseModel):
-    value: str
-    description: Optional[str] = None
+    value: Any
+    description: str = Field(default="")
 
 
 class ForeignKey(BaseModel):
@@ -31,71 +31,71 @@ class ForeignKey(BaseModel):
 class ColumnSchema(BaseModel):
     name: str
     type: str
-    description: Optional[str] = None
-    values: List[CategoricalValue] = Field(default_factory=list)
-    example_values: List[Any] = Field(default_factory=list)
-    distinct_count: Optional[int] = None
-    null_count: Optional[int] = None
-    is_primary_key: Optional[bool] = None
-    foreign_key: Optional[str] = None
+    description: str = Field(default="")
+    values: list[CategoricalValue] | None = Field(default=[])
+    foreign_key: str | None = None
+    null_count: int | None = Field(default=None)
+    distinct_count: int | None = Field(default=None)
+    example_values: list[Any] | None = Field(default=[])
+    is_primary_key: bool | None = Field(default=False)
 
 
 class TableSchema(BaseModel):
     table_name: str
-    description: Optional[str] = None
-    columns: List[ColumnSchema]
-    row_count: Optional[int] = None
-    tags: List[str] = Field(default_factory=list)
-    primary_keys: List[str] = Field(default_factory=list)
-    foreign_keys: List[ForeignKey] = Field(default_factory=list)
+    description: str
+    columns: list[ColumnSchema]
+    row_count: int | None = Field(default=None)
+    tags: list[str] = Field(default=[])
+    primary_keys: list[str] | None = Field(default=[])
+    foreign_keys: list[ForeignKey] | None = Field(default=[])
 
 
 class DatabaseSchema(BaseModel):
-    tables: List[TableSchema]
+    tables: list[TableSchema]
 
 
 class Rule(BaseModel):
     rule_name: str
-    module_name: Optional[str] = None
+    module_name: str | None = None
+    search_content: str | None
+    tags: list[str] = Field(default=[])
     instructions: str
-    tags: List[str] = Field(default_factory=list)
-    search_content: Optional[str] = None
 
 
 class Rules(BaseModel):
-    rules: List[Rule]
+    rules: list[Rule]
 
 
 class ExampleContent(BaseModel):
-    question: str
     code: str
-    reasoning: Optional[str] = None
+    question: str
+    reasoning: str | None = None
 
 
 class Example(BaseModel):
     query: str
-    module_name: Optional[str] = None
+    module_name: str | None = None
     example: ExampleContent
-    tags: List[str] = Field(default_factory=list)
-    search_content: Optional[str] = None
+    tags: list[str] = Field(default=[])
+    search_content: str | None
 
 
 class Examples(BaseModel):
-    examples: List[Example]
+    examples: list[Example]
 
 
 class IngestionData(BaseModel):
-    rules: Optional[Rules] = None
-    schema: Optional[DatabaseSchema] = None
-    examples: Optional[Examples] = None
+    rules: Rules | None = None
+    schema: DatabaseSchema | None = None
+    examples: Examples | None = None
 
 
 class VectorSchema(BaseModel):
-    embedding_vector: List[float]
+    embedding_vector: list[float]
     search_content: str
     table_description: str
     table_name: str
-    tags: List[Any]
+    tags: list[Any]
     values: Dict[str, Any]
     record_type: VectorSchemaRecordType
     column_description: str
@@ -119,10 +119,10 @@ class RetrievedAsset(BaseModel):
         default_factory=dict,
         description="Metadata about the asset (e.g., source)",
     )
-    relevance_score: Optional[float] = Field(
+    relevance_score: float | None = Field(
         default=None,
         description="Optional relevant score assigned to the asset",
     )
-    asset_id: Optional[str] = Field(
+    asset_id: str | None = Field(
         default=None, description="Optional unique identifier for the asset"
     )

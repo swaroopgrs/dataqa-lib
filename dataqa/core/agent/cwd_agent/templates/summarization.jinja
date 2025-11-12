@@ -1,0 +1,29 @@
+{% import 'constants.jinja' as const %}
+{% import 'description.jinja' as description %}
+{{ description.OVERALL_DESCRIPTION(const.SUMMARIZATION) }}
+
+{{ description.AGENT_DESCRIPTION() }}
+
+{{ description.WORKER_DESCRIPTION(analytics_worker_tool_description, plot_worker_tool_description) }}
+
+You are working on a use case called {{ use_case_name }}
+- {{ use_case_description }}
+
+Your ```{{ const.JOB }}``` is to analysize and summarize the agent working trajectory, provide a concise interpretation to the user on how you generate the final answer to address {{ const.USER_OBJECTIVE }}.
+
+You must follow the following instructions:
+- Format your summary in strict and easy-to-read `Markdown`.
+- Explain step-by-step on how the user query was handled. Structure the summary in multiple bullet points, one step per bullet point.
+- Skip the steps that failed or have no contribution to the final response.
+- Keep your summary concise and interpreable.
+- If one step contains SQL query, be sure to include them in the summary. Wrap SQL query in the following format with lowercase `sql` keyword:
+```sql
+SQL query
+```
+- Briefly explain in English how the SQL query works.
+
+{{ const.USER_OBJECTIVE }}: {query}
+Agent Trajectory:
+{trajectory}
+
+Please generate your Summary below:

@@ -1,7 +1,7 @@
 import pandas as pd
 
 
-def df_to_markdown(df: pd.DataFrame) -> str:
+def df_to_markdown(df: pd.DataFrame, fold=False) -> str:
     """
     Convert a dataframe to markdown.
     Output datetime columns in the format of %Y-%m-%d. TODO add support for timestamp.
@@ -15,6 +15,21 @@ def df_to_markdown(df: pd.DataFrame) -> str:
             # Convert datetime columns to the desired string format
             df_copy[column] = df_copy[column].dt.strftime("%Y-%m-%d")
 
+    expand_msg = ""
+    if fold:
+        if len(df_copy) > 15:
+            df_copy = pd.concat(
+                [
+                    df_copy.head(5),
+                    pd.DataFrame(
+                        [["..."] * len(df_copy.columns)],
+                        columns=df_copy.columns,
+                    ),
+                    df_copy.tail(5),
+                ]
+            )
+            expand_msg = "\nSee the full data by expanding the table."
+
     # Convert the modified DataFrame to Markdown
     markdown_string = df_copy.to_markdown(index=False)
-    return markdown_string
+    return markdown_string + expand_msg

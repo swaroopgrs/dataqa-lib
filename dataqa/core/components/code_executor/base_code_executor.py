@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, List
+from enum import Enum
 
 from pydantic import BaseModel, Field
 
@@ -7,6 +8,16 @@ from dataqa.core.components.base_component import (
     Component,
     ComponentConfig,
 )
+
+
+class DatabaseType(Enum):
+    duckdb = "duckdb"
+    pyspark = "pyspark"
+    sqlite = "sqlite"
+    snowflake = "snowflake"
+    redshift = "redshift"
+    sqlserver = "sqlserver"
+    databricks = "databricks"
 
 
 class CodeExecutorOutput(BaseModel):

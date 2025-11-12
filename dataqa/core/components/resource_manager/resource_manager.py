@@ -114,3 +114,23 @@ class ResourceManager:
             return self.schema.tables
 
         return []
+
+    def update_rules(
+        self, new_rules: str, module_names: Optional[List[str]]
+    ) -> None:
+        if self.rules is not None:
+            if len(self.rules.rules) == 1:
+                self.rules.rules[0].instructions = new_rules
+            else:
+                raise ValueError(
+                    "Only one rule per module is supported for updating"
+                )
+        # if module_names is None:
+        #     module_names = [module_name.split(":")[1] for module_name in self.resources if "rule" in module_name]
+        # for module in module_names:
+        #     resource = self.get_resource(resource_type=ResourceType.Rule, module_name=module)
+        #     if resource is not None:
+        #         if len(resource.data) == 1:
+        #             resource.data[0].instructions = new_rules
+        #         else:
+        #             raise ValueError("Only one rule per module is supported for updating")

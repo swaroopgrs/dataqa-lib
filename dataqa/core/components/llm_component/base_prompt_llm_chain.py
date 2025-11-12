@@ -4,24 +4,25 @@ from typing import Dict, List, Literal, Union
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import Field
 
-from dataqa.components.base_component import (
+from dataqa.core.components.base_component import (
     Component,
     ComponentConfig,
     OutputVariable,
     RunnableConfig,
     Variable,
 )
-from dataqa.llm.base_llm import BaseLLM
-from dataqa.utils.component_utils import (
+from dataqa.core.llm.base_llm import BaseLLM
+from dataqa.core.utils.component_utils import (
     build_base_model_from_parameters,
     extract,
 )
-from dataqa.utils.langgraph_utils import (
+from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
     CONFIGURABLE,
+    TOKEN,
 )
-from dataqa.utils.prompt_utils import build_prompt, prompt_type
+from dataqa.core.utils.prompt_utils import build_prompt, prompt_type
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,7 @@ class BasePromptLLMChain(Component):
         messages = self.prompt.invoke(input_data.model_dump())
 
         api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
+        token = config.get(CONFIGURABLE, {}).get(TOKEN, "")
         base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
 
         if self.config.output_parser == "basemodel":
@@ -108,6 +110,7 @@ class BasePromptLLMChain(Component):
         response = await self.llm.ainvoke(
             messages=messages,  # TODO validation
             api_key=api_key,
+            token=token,
             base_url=base_url,
             from_component=self.config.name,
             with_structured_output=with_structured_output,

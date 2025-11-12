@@ -42,11 +42,12 @@ plugins:
       handlers:
         python:
           options:
-            paths: [dataqa]
             docstring_style: google
             show_source: true
             show_root_heading: true
             show_root_toc_entry: false
+          extra:
+            paths: [dataqa]
 
 markdown_extensions:
   - pymdownx.highlight:
@@ -77,21 +78,12 @@ nav:
   - Installation: installation.md
   - User Guide:
       - Introduction: guide/introduction.md
-      - Running Examples: guide/running_examples.md
-      - Building Your First Agent: guide/building_your_first_agent.md
-      - Customizing Agents: guide/customizing_agents.md
-      - Configuration Deep Dive: guide/configuration.md
-      - Extending DataQA: guide/extending.md
+      - Building Assets: guide/building_assets.md
       - Benchmarking & Evaluation: guide/benchmarking.md
-      - Deployment Guide: guide/deployment.md
       - Troubleshooting: guide/troubleshooting.md
       - FAQ: guide/faq.md
-  - API Reference:
-      - Agent: reference/agent.md
-      - Components: reference/components.md
-      - Pipelines: reference/pipelines.md
-      - Tools: reference/tools.md
-      - Benchmarking: reference/benchmark.md
-      - Assets: reference/assets.md
-  - Contributing: contributing.md
+  - Reference:
+      - Agent Configuration: reference/agent_config.md
+      - Asset File Formats: reference/assets.md
+      - Agent API: reference/agent.md
   - Changelog: changelog.md

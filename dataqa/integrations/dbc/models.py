@@ -1,9 +1,10 @@
-# dataqa/integrations/dbc/models.py
 import uuid
 from enum import StrEnum, auto
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
+
+from dataqa.core.agent.cwd_agent.config import DialectConfig
 
 # Import the core asset models to use in IngestionData
 from dataqa.core.data_models.asset_models import DatabaseSchema, Examples, Rules
@@ -19,7 +20,7 @@ class FileType(StrEnum):
 
 class IngestionData(BaseModel):
     """
-    Defines the structured data object returned by the `asset_callable`.
+    Defines the structured data object returned by the `s3_retrieval`.
     """
 
     rules: Optional[Rules] = None
@@ -36,9 +37,13 @@ class UsecaseConfig(BaseModel):
     """
 
     config_id: uuid.UUID
-    tenant_id: str
+    tenant_id: uuid.UUID
     usecase_name: str
     usecase_description: str
+    sql_dialect: DialectConfig = Field(
+        default_factory=DialectConfig,
+        description="SQL dialect configuration for the use case.",
+    )
 
 
 class ConversationTurn(BaseModel):
@@ -46,12 +51,17 @@ class ConversationTurn(BaseModel):
     A single turn in the conversation history from a DBCRequest.
     """
 
+    question_id: uuid.UUID = Field(
+        ..., description="Unique identifier for this specific question."
+    )
     query: str = Field(
         ..., description="The user query from this conversation turn."
     )
     output_text: str = Field(
-        ...,
-        description="The final text response from the turn, including dataframe summaries.",
+        ..., description="The final text response from the turn."
+    )
+    output_dataframes: List[str] = Field(
+        default_factory=list, description="file names for the dataframes"
     )
 
 
@@ -63,16 +73,25 @@ class DBCRequest(BaseModel):
     user_query: str = Field(
         ..., description="The natural language query from the user."
     )
-    conversation_id: str = Field(
+    conversation_id: uuid.UUID = Field(
         ..., description="Unique identifier for the conversation session."
     )
-    question_id: str = Field(
+    question_id: uuid.UUID = Field(
         ..., description="Unique identifier for this specific question."
     )
     conversation_history: List[ConversationTurn] = Field(
         default_factory=list,
         description="Previous conversation turns for context.",
     )
+
+
+class StatusResponse(BaseModel):
+    """
+    An intermediate status and its streaming message in the agent's execution trace.
+    """
+
+    name: str = Field(..., description="Name of the processing step.")
+    message: str = Field(..., description="A text message to be streamed.")
 
 
 class StepResponse(BaseModel):

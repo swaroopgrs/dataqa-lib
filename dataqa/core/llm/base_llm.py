@@ -8,18 +8,18 @@ from pydantic import BaseModel, Field
 
 _BM = TypeVar("_BM", bound=BaseModel)
 _DictOrPydanticClass = Union[Dict[str, Any], Type[_BM]]
-_StrOrDictOrPydantic = Union[str, Dict[str, Any], Type[_BM], List]
+_StrOrDictOrPydantic = Union[str, Dict, _BM]
 
 
 class LLMConfig(BaseModel):
     model: str = Field(
-        description="The model name, such as deployment_name for oai llm, such as `gpt-4o-2024-05-06`, but NOT model_name like `gpt-4o`"
+        description="The model name, such as deployment_name for oai llm, such as `gpt-4o-2024-08-06`, but NOT model_name like `gpt-4o`"
     )
     with_structured_output: Optional[Union[None, _DictOrPydanticClass]] = Field(
         default=None,
         description="""
-        Parse raw llm generations to structured output.
-        The input is a dict or a BaseModel class.
+            Parse raw llm generations to structured output.
+            The input is a dict or a BaseModel class.
         """,
     )
     # with_tools TODO
@@ -29,7 +29,7 @@ class LLMMetaData(BaseModel):
     request_id: str = Field(
         description="A unique identifier for this LLM call. Usually provided by the LLM provider."
     )
-    model: str = Field(description="The model name used in this LLM call.")
+    model: str = Field(description="The LLM model.")
     num_generations: int = Field(
         default=1,
         description="The number of generations requested in this LLM call.",
@@ -39,11 +39,11 @@ class LLMMetaData(BaseModel):
     )
     start_timestamp: Union[None, str] = Field(
         default=None,
-        description="The timestamp to send request. The preferred format is `%a, %d %b %Y %H:%M:%S %Z`, e.g. `Tue, 04 Mar 2025 20:54:30 GMT`",
+        description="The timestamp to send request. The preferred format is %a, %d %b %Y %H:%M:%S %Z, e.g. 'Tue, 04 Mar 2025 16:06:22 GMT'",
     )
     end_timestamp: Union[None, str] = Field(
         default=None,
-        description="The timestamp to receive response. In the same format as `start timestamp`",
+        description="The timestamp to receive response. In the same format as start timestamp",
     )
     latency: Union[None, float] = Field(
         default=None,
@@ -85,19 +85,19 @@ class LLMError(BaseModel):
 
 
 class LLMOutput(BaseModel):
-    prompt: _StrOrDictOrPydantic = Field(description="The input prompt")
+    prompt: List = Field(description="The input prompt")
     generation: _StrOrDictOrPydantic = Field(
         default="",
         description="""
-        The LLM generations.
-        Parsed to Dict or Pydantic BaseModel is the structured output is required.
+            The raw LLM generations.
+            Parsed to Dict or Pydantic BaseModel is the structured output is required.
         """,
     )
     from_component: Optional[str] = Field(
         default="",
         description="""
-        The name of component that triggers this LLM call.
-        Set to empty if the component name is provided.
+            The name of component that triggers this LLM call.
+            Set to empty if no component name is provided.
         """,
     )
     metadata: Union[None, LLMMetaData] = Field(

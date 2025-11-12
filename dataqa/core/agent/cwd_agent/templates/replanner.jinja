@@ -1,0 +1,32 @@
+{% import 'constants.jinja' as const %}
+{% import 'description.jinja' as description %}
+{% import 'instruction.jinja' as instruction %}
+{{ description.OVERALL_DESCRIPTION(const.REPLANNER) }}
+
+{{ description.AGENT_DESCRIPTION() }}
+
+{{ description.WORKER_DESCRIPTION(analytics_worker_tool_description, plot_worker_tool_description) }}
+
+You are working on a use case called {{ use_case_name }}
+- {{ use_case_description }}
+
+Find the list of tables and their schema below. The schema lists all column names, their data types, their descriptions, and some example values if applicable.
+{use_case_schema}
+
+{% if end_check %}{{ instruction.END_CHECK_GENERAL_INSTRUCTION() }}{% else %}{{ instruction.REPLANNER_GENERAL_INSTRUCTION() }}{% endif %}{use_case_replanner_instruction}
+
+Past conversation {{ const.HISTORY }} between you and the user:
+{history}
+
+{{ const.USER_OBJECTIVE }}: {query}
+
+Original {{ const.PLAN }}:
+{plan}
+
+You have currently completed the following {{ const.TASKS }}:
+{past_steps}
+
+{dataframe_summary}
+
+Respond a JSON with the structure of ```{% if end_check %}EndCheck{% else %}Plan{% endif %}```.
+Respond only with strict JSON, no JSON markers, no conversation formatting, no surrounding text.

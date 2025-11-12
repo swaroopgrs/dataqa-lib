@@ -1,27 +1,30 @@
-from typing import Any, Dict, List, Optional, Type, Union
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import yaml
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.graph import CompiledGraph
-from pydantic import Field, create_model
+from pydantic import BaseModel, create_model
+from pydantic.fields import FieldInfo
 
-from dataqa.errors import PipelineConfigError
-from dataqa.pipelines.constants import (
+from dataqa.core.components.base_component import Component
+from dataqa.core.errors import PipelineConfigError
+from dataqa.core.pipelines.constants import (
     COMP_PREFIX,
     COMPONENT_MARKER,
-    COMPONENT_OUTPUT_SUFFIX,
     CONDITIONAL_EDGE_MARKER,
     FILE_PREFIX,
-    INPUT_SOURCE,
+    INPUT_FROM_STATE,
+    OUTPUT_TO_STATE,
     PIPELINE_END,
     PIPELINE_INPUT,
     PIPELINE_START,
     STATE_GRAPH_TYPE,
 )
-from dataqa.pipelines.schema import PipelineConfig
-from dataqa.state import BasePipelineState
-from dataqa.utils.utils import cls_from_str, load_file
+from dataqa.core.pipelines.schema import PipelineConfig
+from dataqa.core.state import BasePipelineState
+from dataqa.core.utils.utils import cls_from_str, load_file
 
 
 # TODO: Add support for loading files from resource manager
@@ -100,21 +103,41 @@ def update_edge_node_name(node: Union[str, List[str]]) -> Union[str, List[str]]:
     return [update_node_name(name) for name in node]
 
 
-def update_input_mapping(mapping: Dict[str, str]) -> Dict[str, str]:
-    new_mapping = {}
-    for field, mapped_field in mapping.items():
-        names = mapped_field.split(".")
-        if names[0] != PIPELINE_START:
-            names[0] = f"{names[0]}{COMPONENT_OUTPUT_SUFFIX}"
-        else:
-            names[0] = PIPELINE_INPUT
-        new_mapping[field] = ".".join(names)
-    return new_mapping
+def add_field(
+    fields: Dict[str, Tuple], model: Type[BaseModel], schema: Dict[str, Dict]
+):
+    for output_name, field_name in schema["output_to_state"].items():
+        if output_name not in model.model_fields:
+            raise ValueError(
+                f"Field {output_name} is not defined in the output of {schema['name']}."
+            )
+        field = model.model_fields[output_name]
+
+        # check annotation, default, default_factory, metadata
+        if field_name in fields:
+            existing_annotation, existing_field = fields[field_name]
+            if existing_annotation != field.annotation:
+                raise ValueError(
+                    f"Field {field_name} is defined multiple times with different annotations: {existing_annotation} vs {field.annotation}"
+                )
+            if existing_field.default != field.default:
+                raise ValueError(
+                    f"Field {field_name} is defined multiple times with different defaults: {existing_field.default} vs {field.default}"
+                )
+            if existing_field.default_factory != field.default_factory:
+                raise ValueError(
+                    f"Field {field_name} is defined multiple times with different default_factory: {existing_field.default_factory} vs {field.default_factory}"
+                )
+            if existing_field.metadata != field.metadata:
+                raise ValueError(
+                    f"Field {field_name} is defined multiple times with different metadata: {existing_field.metadata} vs {field.metadata}"
+                )
+        fields[field_name] = (field.annotation, field)
 
 
 def build_graph_from_config(
     pipeline_schema: PipelineConfig, pipeline_name: Optional[str] = None
-) -> CompiledGraph:
+) -> Tuple[CompiledGraph, Type[BaseModel]]:
     """
 
     :param pipeline_schema:
@@ -132,16 +155,30 @@ def build_graph_from_config(
     pipeline_state_fields = {}
 
     # First pass to initialize all the components and add their output state to pipeline state
-    for node_name in component_definitions.keys():
+    for node_name, schema in component_definitions.items():
         component_instance = load_or_get_component(
             node_name, component_definitions, components
         )
         if getattr(component_instance, COMPONENT_MARKER, False) and not getattr(
             component_instance, CONDITIONAL_EDGE_MARKER, False
         ):
-            pipeline_state_fields[f"{node_name}{COMPONENT_OUTPUT_SUFFIX}"] = (
-                component_instance.output_base_model,
-                Field(default=None, description=f"output of {node_name}"),
+            add_field(
+                fields=pipeline_state_fields,
+                model=component_instance.output_base_model,
+                schema=schema,
+            )
+    # Set default values for pipeline_state_fields
+    for field_name, (annotation, field) in pipeline_state_fields.items():
+        if hasattr(annotation, "__origin__") and annotation.__origin__ in (list, dict):
+            if field.default_factory is None:
+                pipeline_state_fields[field_name] = (
+                    annotation,
+                    Field(default_factory=annotation.__origin__, description=field.description),
+                )
+        elif field.default is None and field.default_factory is None:
+            pipeline_state_fields[field_name] = (
+                annotation,
+                Field(default=None, description=field.description),
             )
 
     pipeline_state_type = create_model(
@@ -172,41 +209,67 @@ def build_graph_from_config(
                     )
             else:
                 # conditional edge, assert that conditional edge has EXACT one parent node
-                if not len(node.parent_groups) == 1 or (
-                    isinstance(node.parent_groups[0].parent, list)
-                    and len(node.parent_groups[0].parent) != 1
-                ):
-                    raise PipelineConfigError(
-                        f"{node.name} is an conditional edge. It requires exactly one parent node."
+                for parent_group in node.parent_groups:
+                    parent = parent_group.parent
+                    if isinstance(parent, list) and len(parent) > 1:
+                        raise PipelineConfigError(
+                            f"{node.name} is an conditional edge. Each parent group could have only one parent node."
+                        )
+                    if isinstance(parent, list):
+                        parent = parent[0]
+                    graph_workflow.add_conditional_edges(
+                        update_edge_node_name(parent),
+                        component_instance.get_function(),
                     )
-                parent = node.parent_groups[0].parent
-                if isinstance(parent, list):
-                    parent = parent[0]
-                graph_workflow.add_conditional_edges(
-                    update_edge_node_name(parent),
-                    component_instance.get_function(),
+                # set input mapping
+                input_mapping = component_definitions[node.name].get(
+                    INPUT_FROM_STATE, {}
                 )
-
-            # set input mapping
-            if not component_definitions[node.name].get(INPUT_SOURCE, None):
-                raise PipelineConfigError(
-                    f"`{INPUT_SOURCE}` is required for {node.name} to define a node or an conditional edge"
+                for field, mapped_field in input_mapping.items():
+                    # replace "START" to "input"
+                    names = mapped_field.split(".")
+                    if names[0] == PIPELINE_START:
+                        names[0] = PIPELINE_INPUT
+                    # check if field exists in the input_base_model
+                    if (
+                        field
+                        not in component_instance.input_base_model.model_fields
+                    ):
+                        raise ValueError(
+                            f"Field {field} from {INPUT_FROM_STATE} does not exist in the input of {node.name}."
+                        )
+                    # check if this field exists in the state and if the type is consistent
+                    current_model = pipeline_state_type
+                    for name in names:
+                        if name not in current_model.model_fields:
+                            raise ValueError(
+                                f"Field {mapped_field} from {INPUT_FROM_STATE} of node {node.name} does not exist in the state."
+                            )
+                        current_model = current_model.model_fields[name].annotation
+                    if (
+                        component_instance.input_base_model.model_fields[
+                            field
+                        ].annotation
+                        != current_model
+                    ):
+                        raise ValueError(
+                            f"Field {field} is required to be {component_instance.input_base_model.model_fields[field].annotation} as the input of {node.name}. But "
+                            f"it is defined as {current_model} in the state."
+                        )
+                    input_mapping[field] = ".".join(names)
+                component_instance.set_input_mapping(input_mapping)
+                # set output mapping
+                # output mapping has been verified when build the state.
+                output_mapping = component_definitions[node.name].get(
+                    OUTPUT_TO_STATE, {}
                 )
-            mapping = {}
-            for field, mapped_field in component_definitions[node.name][
-                INPUT_SOURCE
-            ].items():
-                names = mapped_field.split(".")
-                if names[0] != PIPELINE_START:
-                    names[0] = f"{names[0]}{COMPONENT_OUTPUT_SUFFIX}"
-                else:
-                    names[0] = PIPELINE_INPUT
-                mapping[field] = ".".join(names)
-            component_instance.set_input_mapping(
-                update_input_mapping(
-                    component_definitions[node.name][INPUT_SOURCE]
-                )
-            )
+                if not output_mapping and not getattr(
+                    component_instance, CONDITIONAL_EDGE_MARKER, False
+                ):
+                    raise ValueError(
+                        f"Component {node.name} has empty {OUTPUT_TO_STATE}."
+                    )
+                component_instance.output_mapping = output_mapping
 
         elif node.name == PIPELINE_END:
             for parent_group in node.parent_groups:
@@ -222,7 +285,13 @@ def build_graph_from_config(
 def build_graph_from_yaml(
     pipeline_path: str, pipeline_name: Optional[str] = None
 ):
-    pipeline_config = yaml.safe_load(open(pipeline_path))
+    from pathlib import Path
+
+    pipeline_config_path = Path(pipeline_path).resolve()
+    config_dir = pipeline_config_path.parent
+    with open(pipeline_config_path, "r") as f:
+        pipeline_config_str = f.read().format(BASE_DIR=str(config_dir))
+    pipeline_config = yaml.safe_load(pipeline_config_str)
     pipeline_schema = PipelineConfig(**pipeline_config)
 
     return build_graph_from_config(pipeline_schema, pipeline_name)

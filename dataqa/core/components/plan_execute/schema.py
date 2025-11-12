@@ -44,6 +44,24 @@ class Plan(BaseModel):
         return "".join(tasks)
 
 
+class Feasibility(BaseModel):
+    """
+    Check if USER OBJECTIVE has no ambiguity and is solvable.
+
+    This model contains two attributes: solvable and prompt_back.
+    - If USER OBJECTIVE DOES NOT have ambiguity and you CAN solve it, return solvable as true, no need to generate prompt_back.
+    - If USER OBJECTIVE DOES have ambiguity or you CAN NOT solve it, return solvable as false, generate a prompt_back message to be returned to the user.
+    """
+
+    solvable: bool = Field(
+        description="If USER OBJECTIVE can be solved and has no ambiguity."
+    )
+    prompt_back: str = Field(
+        description="A prompt back message to the user if USER OBJECTIVE is not solvable.",
+        default="",
+    )
+
+
 class TaskResponse(Task):
     response: str = Field(description="Summarize the execution of one task")
 
@@ -73,6 +91,53 @@ class Response(BaseModel):
     """Response to user. It could contain a text response, some dataframes and some images."""
 
     response: str = Field(description="Text response to the user.")
+    output_df_name: List[str] = Field(
+        description="The names of a list of dataframes to be displayed to the user."
+    )
+    output_img_name: List[str] = Field(
+        description="The names of a list of images to displayed to the user."
+    )
+
+
+class EndCheck(BaseModel):
+    """
+    Evaluate if the final results have been obtained for solving USER OBJECTIVE. If so, generate the output as text, dataframes and images.
+
+    This model contains four attributes: should_continue, output_message, output_df_name, output_img_name.
+    - If should_continue=True, leave output_message, output_df_name and output_img_name as empty.
+    - If should_continue=False, generate proper values for output_message, output_df_name and output_img_name.
+
+    Example
+    -------
+    - If the final results have not been produced, we should continue to the next step and no output should be generated.
+    {
+        "should_continue": true,
+        "output_message": "",
+        "output_df_name": [],
+        output_img_name": []
+    }
+
+    - If the final results have been obtained and we are ready to return, generate the output.
+    {
+        "should_continue": false,
+        "output_message": "text message",
+        "output_df_name": ["df1", "df2"],
+        output_img_name": ["img1", "img2"]
+    }
+
+    - If the final results were not produced but we cannot continue on solving USER OBJECTIVE, generate a prompt back message.
+    {
+        "should_continue": false,
+        "output_message": "prompt back message",
+        "output_df_name": [],
+        output_img_name": []
+    }
+    """
+
+    should_continue: bool = Field(
+        description="If continue on solving USER OBJECTIVE"
+    )
+    output_message: str = Field(description="Text response to the user.")
     output_df_name: List[str] = Field(
         description="The names of a list of dataframes to be displayed to the user."
     )

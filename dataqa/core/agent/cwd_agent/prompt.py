@@ -30,7 +30,7 @@ AGENTS_DESCRIPTION = f"""This AI Assistant is equipped with five agents: {PLANNE
 WORKER_DESCRIPTION = f"""{RETRIEVAL_WORKER} is responsible for data retrieval by generating and executing SQL queries.
 {RETRIEVAL_WORKER} has access to database tables only. {RETRIEVAL_WORKER} can not access intermediate dataframes stored in memory.
 Intermediate dataframes stored in memory can only be used by {ANALYTICS_WORKER} and {PLOT_WORKER}.
-DO NOT generate plan for {RETRIEVAL_WORKER} that requires access to intermediate dataframes stored in memory.
+Do NOT generate plan for {RETRIEVAL_WORKER} that requires access to intermediate dataframes stored in memory.
 {ANALYTICS_WORKER} is equipped with the following tools:
 {{analytics_worker_tool_description}}
 {PLOT_WORKER} is equipped with the following tools:
@@ -188,7 +188,7 @@ FUNCTIONS = """
 """
 SQL_GENERATOR_PROMPT_TEMPLATE = f"""
 You are a coding assistant focused on generating SQL queries for data analysis. Your primary task is to assist users in extracting insights from structured databases. You will write SQL to query this data and perform necessary calculations. Your goal is to provide accurate, efficient, and user-friendly solutions to complex data queries.
-When naming the output dataframe, try to include filter condition in the name so that it wil be unique and easily identifiable.
+When naming the output dataframe, try to include filter condition in the name so that it will be unique and easily identifiable.
 -------------------------------------------------
 KEY RESPONSIBILITIES:
 
@@ -364,7 +364,7 @@ def instantiate_replanner_prompt_by_use_case_jinja(
     use_case_description: str,
     analytics_worker_tool_description: str,
     plot_worker_tool_description: str,
-) -> str:
+) -> Dict[Literal["action_prompt", "plan_prompt"], str]:
     env = Environment(
         loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
         trim_blocks=True,
@@ -377,8 +377,92 @@ def instantiate_replanner_prompt_by_use_case_jinja(
         use_case_description=use_case_description.strip(),
         analytics_worker_tool_description=analytics_worker_tool_description.rstrip(),
         plot_worker_tool_description=plot_worker_tool_description.rstrip(),
+        end_check=True,
     )
 
-    prompt = template.render(context)
+    action_prompt = template.render(context)
 
-    return prompt
+    context["end_check"] = False
+
+    plan_prompt = template.render(context)
+
+    return {"action_prompt": action_prompt, "plan_prompt": plan_prompt}
+
+
+def instantiate_sql_generator_prompt_by_use_case_jinja(
+    dialect: str = "snowflake", functions: str = ""
+):
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("sql_generation.jinja")
+    return template.render(dialect=dialect, functions=functions)
+
+
+def instantiate_analytics_worker_prompt_by_use_case_jinja(
+    use_case_name: str,
+    use_case_description: str,
+    analytics_worker_tool_description: str,
+):
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("analytics_worker.jinja")
+    return template.render(
+        use_case_name=use_case_name.strip(),
+        use_case_description=use_case_description.strip(),
+        analytics_worker_tool_description=analytics_worker_tool_description.rstrip(),
+    )
+
+
+def instantiate_plot_worker_prompt_by_use_case_jinja(
+    use_case_name: str,
+    use_case_description: str,
+    plot_worker_tool_description: str,
+):
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("plot_worker.jinja")
+    return template.render(
+        use_case_name=use_case_name.strip(),
+        use_case_description=use_case_description.strip(),
+        plot_worker_tool_description=plot_worker_tool_description.rstrip(),
+    )
+
+
+def instantiate_summarization_prompt_by_use_case_jinja(
+    use_case_name: str,
+    use_case_description: str,
+    analytics_worker_tool_description: str,
+    plot_worker_tool_description: str,
+) -> Dict[Literal["action_prompt", "plan_prompt"], str]:
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("summarization.jinja")
+
+    return template.render(
+        use_case_name=use_case_name.strip(),
+        use_case_description=use_case_description.strip(),
+        analytics_worker_tool_description=analytics_worker_tool_description.rstrip(),
+        plot_worker_tool_description=plot_worker_tool_description.rstrip(),
+    )
+
+
+def instantiate_sql_validation_prompt_jinja():
+    env = Environment(
+        loader=PackageLoader("dataqa.core.agent.cwd_agent", "templates"),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    template = env.get_template("sql_validation.jinja")
+    return template.render()

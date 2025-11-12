@@ -1,19 +1,29 @@
 import os
-from typing import List
+from typing import Generator, List, Union
 
 import pandas as pd
 
 from dataqa.core.agent.cwd_agent.cwd_agent import CWDAgent, CWDState
-from dataqa.core.client import CoreRequest, CoreResponse, CoreStep, DataQAClient
+from dataqa.core.client import (
+    CoreRequest,
+    CoreResponse,
+    CoreStatus,
+    CoreStep,
+    DataQAClient,
+)
 from dataqa.core.memory import Memory
 from dataqa.core.utils.agent_util import AgentResponseParser
 from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
     CONFIGURABLE,
+    PROMPT_BACK,
+    QUESTION_ID,
     THREAD_ID,
+    TOKEN,
 )
 from dataqa.integrations.local.factory import LocalAgentFactory
+from dataqa.scripts.azure_token import get_az_token_using_cert
 
 
 class LocalClient(DataQAClient):
@@ -41,19 +51,57 @@ class LocalClient(DataQAClient):
             )
         return self._agent
 
-    async def process_query(self, request: CoreRequest) -> CoreResponse:
+    def get_streaming_message(self) -> CoreStatus:
+        pass
+
+    async def process_query(
+        self,
+        request: CoreRequest,
+        streaming: bool = False,
+        summarize: bool = False,
+        prompt_back: bool = True,
+    ) -> Generator[Union[CoreStatus, CoreResponse], None, None]:
         """
         Processes a query using the agent configured in the local project.
+
+        Run in the streaming mode if `streaming` = True.
         """
         memory = Memory()
-        runnable_config = {
-            CONFIGURABLE: {
-                THREAD_ID: request.conversation_id,
-                # For local mode, we assume credentials are in env vars
-                API_KEY: os.environ.get("AZURE_OPENAI_API_KEY", ""),
-                BASE_URL: os.environ.get("OPENAI_API_BASE", ""),
+
+        if os.environ.get("CERT_PATH"):
+            # print(f"Initializing LLM using CERT_PATH: {os.environ.get('CERT_PATH')}")
+            token = ""
+            api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
+            if api_key == "":
+                print("Running Standard LLM Azure API Subscription........")
+                api_key = get_az_token_using_cert()[0]
+            else:
+                print("Running Multi-Tenant LLM Azure API Subscription........")
+                token = get_az_token_using_cert()[0]
+
+            runnable_config = {
+                CONFIGURABLE: {
+                    THREAD_ID: request.conversation_id,
+                    QUESTION_ID: request.question_id,
+                    # For local mode, we assume credentials are in env vars
+                    API_KEY: api_key,
+                    BASE_URL: os.environ.get("OPENAI_API_BASE", ""),
+                    TOKEN: token,
+                    PROMPT_BACK: prompt_back,
+                }
             }
-        }
+        else:
+            runnable_config = {
+                CONFIGURABLE: {
+                    THREAD_ID: request.conversation_id,
+                    QUESTION_ID: request.question_id,
+                    # For local mode, we assume credentials are in env vars
+                    API_KEY: os.environ.get("AZURE_OPENAI_API_KEY", ""),
+                    BASE_URL: os.environ.get("OPENAI_API_BASE", ""),
+                    TOKEN: os.environ.get("AZURE_OPENAI_API_TOKEN", ""),
+                    PROMPT_BACK: prompt_back,
+                }
+            }
 
         agent = self._get_or_create_agent(memory)
 
@@ -62,7 +110,16 @@ class LocalClient(DataQAClient):
             query=request.user_query, history=history_texts
         )
 
-        final_state, events = await agent(initial_state, runnable_config)
+        async for chunk in agent(
+            state=initial_state,
+            config=runnable_config,
+            streaming=streaming,
+            summarize=summarize,
+        ):
+            if isinstance(chunk[0], CWDState):
+                final_state, events = chunk
+            elif streaming:
+                yield CoreStatus(name=chunk[0], message=chunk[1])
 
         # Process the final state into a CoreResponse
         final_response_obj = final_state.final_response
@@ -80,17 +137,24 @@ class LocalClient(DataQAClient):
                     output_dfs.append(df)
 
             for name in final_response_obj.output_img_name:
-                img_bytes, _ = memory.get_image_data(name, runnable_config)
+                img_bytes = memory.get_image(name, runnable_config)
                 if img_bytes:
                     output_imgs.append(img_bytes)
 
         parser = AgentResponseParser(events, memory, runnable_config)
+        # print("\n" + "=" * 20 + " DEBUG INFO " + "=" * 20)
+        # print("### List of dataframes in memory")
+        # for df_name, val in memory.get_dataframes(runnable_config).items():
+        #     print(f"df_name: {df_name}\nSQL: {val[1]}\n")
+        # parser.pretty_print_output()
+        # from dataqa.core.agent.cwd_agent.error_message import agent_error_log
+        # print(f"### Total number of agent errors: {len(agent_error_log)}\nList of error logs:\n{agent_error_log}\n")
         steps = [
             CoreStep(name=f"Step {i + 1}", content=s)
             for i, s in enumerate(parser.formatted_events)
         ]
 
-        return CoreResponse(
+        yield CoreResponse(
             text=text_response,
             output_dataframes=output_dfs,
             output_images=output_imgs,

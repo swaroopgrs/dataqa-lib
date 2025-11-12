@@ -1,6 +1,6 @@
-# dataqa/integrations/dbc/sql_executor.py
-import uuid
 from typing import Callable, Dict
+
+import pandas as pd
 
 from dataqa.core.components.base_component import ComponentConfig
 from dataqa.core.components.code_executor.base_code_executor import (
@@ -19,12 +19,9 @@ class DBCSQLExecutor(CodeExecutor):
     input_base_model = "dynamically built"
     output_base_model = CodeExecutorOutput
 
-    def __init__(
-        self, sql_callable: Callable, config_id: uuid.UUID, config: Dict
-    ):
+    def __init__(self, sql_callable: Callable, config: Dict):
         super().__init__(config={"name": "dbc_sql_executor", **config})
         self.sql_callable = sql_callable
-        self.config_id = config_id
 
     async def run(self, input_data, config={}) -> CodeExecutorOutput:
         """
@@ -33,14 +30,16 @@ class DBCSQLExecutor(CodeExecutor):
         """
         try:
             # The callable expects config_id and the sql query.
-            result_df = await self.sql_callable(
-                config_id=self.config_id, sql_query=input_data.code
-            )
-
+            response = await self.sql_callable(sql_query=input_data.code)
+            result_df = response.get("data", "")
+            if isinstance(result_df, pd.DataFrame):
+                result_df = result_df.to_json(orient="records")
+            else:
+                result_df = ""
+            error = response.get("error", "")
             # The component interface expects the dataframe to be a list of JSON strings.
             return CodeExecutorOutput(
-                code=input_data.code,
-                dataframe=[result_df.to_json(orient="records")],
+                code=input_data.code, dataframe=[result_df], error=error
             )
         except Exception as e:
             return CodeExecutorOutput(code=input_data.code, error=repr(e))

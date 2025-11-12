@@ -2,7 +2,7 @@ from typing import Callable, Dict
 
 import yaml
 
-from dataqa.services.storage import BaseDataSource
+from dataqa.core.services.storage import BaseDataSource
 
 
 class DBCDataSource(BaseDataSource):

@@ -1,148 +1,78 @@
 # Installation
 
-This page will help you install DataQA and set up your environment for local development or production use.
+This guide will help you install DataQA and set up your environment to run the CWD Agent.
 
 ---
 
-## Supported Platforms
+## Prerequisites
 
 - **Python:** 3.11 or higher
-- **Package Managers:** pip, Poetry
+- **Package Manager:** pip
 
 ---
 
 # 1. Install DataQA
 
-### **Using pip (Recommended)**
+Install the latest version of the library from PyPI using pip. It's recommended to do this in a virtual environment.
 
 ```bash
+# Create and activate a virtual environment (optional but recommended)
+python -m venv .venv
+source .venv/bin/activate  # On Windows, use `.venv\Scripts\activate`
+
+# Install the library
 pip install aicoelin-dataqa
 ```
 
-### **Using Poetry**
-
-```bash
-poetry add aicoelin-dataqa
-```
-
-### **From Source (Development)**
-
-```bash
-git clone https://bitbucketdc.jpmchase.net/scm/aicoelin/dataqa-lib.git
-cd dataqa-lib
-poetry install
-```
+---
 
 # 2. Set Up Environment Variables
 
-DataQA requires environment variables for LLM access (e.g., Azure OpenAI).
-**Set these before running your agent or pipeline.**
+The DataQA Agent needs credentials to access a Large Language Model (LLM), such as Azure OpenAI. You must set these variables before running your agent.
 
-### **In your shell:**
+### **Method 1: In your shell (Recommended for testing)**
 
 ```bash
 export AZURE_OPENAI_API_KEY="your-azure-openai-api-key"
 export OPENAI_API_BASE="https://your-azure-openai-endpoint.net/"
-# Optional, if using Azure AD or certificate-based auth:
-export AZURE_OPENAI_API_TOKEN="your-azure-ad-auth-token"
-export CLIENT_ID="your-azure-tenant-id"
-export CERT_PATH="/path/to/your/cert.pem"
+
+# Optional: For certificate-based authentication
+export CLIENT_ID="your-azure-client-id"
+export TENANT_ID="your-azure-tenant-id"
+export CERT_PATH="/path/to/your/certificate.pem"
 ```
 
+### **Method 2: In a `.env` file (Recommended for projects)**
 
-### **Or in a `.env` file:**
+Create a file named `.env` in your project's root directory:
 
 ```
 AZURE_OPENAI_API_KEY="your-azure-openai-api-key"
 OPENAI_API_BASE="https://your-azure-openai-endpoint.net/"
-AZURE_OPENAI_API_TOKEN="your-azure-ad-auth-token"
-CLIENT_ID="your-azure-tenant-id"
-TENANT_ID="your-azure-tenant-id"
-CERT_PATH="/path/to/your/cert.pem"
-```
 
-> **Tip:** Use [python-dotenv](https://pypi.org/project/python-dotenv/) or your IDE to load `.env` files automatically.
+# Optional cert auth variables
+CLIENT_ID="your-azure-client-id"
+TENANT_ID="your-azure-tenant-id"
+CERT_PATH="/path/to/your/certificate.pem"
+```
+The library will automatically load these variables if `python-dotenv` is installed.
 
 ---
 
 # 3. Verify Your Installation
 
-Check that DataQA is installed and your environment is set up:
+You can quickly check that the library is installed and accessible:
 
 ```bash
-python -c "import dataqa; print(dataqa.__version__)"
+python -c "import dataqa; print(f'DataQA version: {dataqa.__version__}')"
 ```
 
-If you see the version number, you're ready to go!
-
----
-
-# 4. Run an Example to Verify Everything Works
-
-After installation, you can quickly verify your setup by running one of the included DataQA examples.
-
-### **Run the CIB Merchant Payments Example**
-
-#### **1. Set your environment variables** (see above).
-
-#### **2. Run the example script:**
-
-```bash
-python -m dataqa.examples.cib_mp.agent.cwd_agent
-```
-
-This will:
-- Initialize a sample agent using the configuration in `dataqa/examples/cib_mp/agent/`
-- Run a pre-defined query
-- Print the agent's response and execution trace to your console
-
-#### **3. Expected Output:**
-- You should see a final text response, any output dataframes, and a debug trace.
-- If you see authentication errors, check your environment variables.
-
-> **Tip:** You can open and modify the script at `dataqa/examples/cib_mp/agent/cwd_agent.py` to try your own queries.
-
----
-
-# 5. (Optional) Install Development Tools
-
-For contributors or advanced users:
-
-```bash
-# Install Poetry if you don't have it
-pip install poetry
-
-# Install pre-commit hooks, linters, and formatters
-make ci-prebuild
-make lint-format
-make precommit
-```
-
----
-
-# 6. Troubleshooting
-
----
-
-## **Missing LLM credentials**
-If you see authentication errors, double-check your environment variables.
-
-## **Unsupported Python version**
-DataQA requires Python 3.11+. Check with `python --version`.
-
-## **Dependency issues**
-Try upgrading pip: `pip install --upgrade pip`.
+If this command prints the version number without errors, your installation was successful.
 
 ---
 
 # Next Steps
 
-- [Quickstart Guide](quickstart.md)
-- [User Guide](guide/introduction.md)
-- [Building Your First Agent](guide/building_your_first_agent.md)
+You are now ready to build and run your first agent!
 
----
-
-# Need Help?
-
-- [FAQ](guide/faq.md)
+- **[Quickstart Guide](quickstart.md)**: Your next stop to get an agent running immediately.

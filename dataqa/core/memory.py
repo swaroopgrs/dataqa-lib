@@ -46,13 +46,21 @@ class Memory:
     def list_dataframes(self, config: RunnableConfig):
         return list(self.get_dataframes(config).keys())
 
-    def get_dataframe(self, name: str, config: RunnableConfig):
-        return self.get_dataframes(config).get(name)
+    def get_dataframe(
+        self, name: str, config: RunnableConfig, with_sql: bool = False
+    ):
+        if with_sql:
+            return self.get_dataframes(config).get(name, [None, None])
+        return self.get_dataframes(config).get(name, [None])[0]
 
     def put_dataframe(
-        self, name: str, df: pd.DataFrame, config: RunnableConfig
+        self,
+        name: str,
+        df: pd.DataFrame,
+        config: RunnableConfig,
+        sql: str = None,
     ):
-        self.get_dataframes(config)[name] = df
+        self.get_dataframes(config)[name] = [df, sql]
 
     def get_image(self, name: str, config: RunnableConfig) -> bytes:
         images = self.get_images(config).get(name)
@@ -99,7 +107,7 @@ class Memory:
             f"You have access to the following {len(dataframes)} dataframes:"
         ]
         for k, v in dataframes.items():
-            message.append(self.summarize_one_dataframe(k, v))
+            message.append(self.summarize_one_dataframe(k, v[0]))
         return "\n\n".join(message)
 
     def summarize(self, name):

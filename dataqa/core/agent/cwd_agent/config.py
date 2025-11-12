@@ -149,7 +149,6 @@ class CwdAgentDefinitionConfig(BaseModel):
     llm: CwdAgentLLMReferences
     resource_manager_config: ResourceManagerConfig
     retriever_config: RetrieverSelectionConfig
-    fallback_retriever_config: Optional[RetrieverSelectionConfig] = None
     workers: CwdAgentWorkersModulesConfig
     max_tasks: int = Field(
         description="The maximum number of tasks that can be executed before termination.",

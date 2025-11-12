@@ -1,4 +1,3 @@
-# dataqa/integrations/local/factory.py
 import os
 from pathlib import Path
 from typing import Dict
@@ -6,12 +5,17 @@ from typing import Dict
 import yaml
 
 from dataqa.core.agent.cwd_agent.builder import CWDAgentBuilder
+
+# from dataqa.core.agent.cwd_agent.config import CwdAgentLLMReferences
 from dataqa.core.agent.cwd_agent.cwd_agent import (
     CWDAgent,
     CwdAgentDefinitionConfig,
 )
 from dataqa.core.components.code_executor.in_memory_code_executor import (
     InMemoryCodeExecutor,
+)
+from dataqa.core.components.code_executor.api_executor import (
+    ApiCodeExecutor,
 )
 from dataqa.core.components.resource_manager.resource_manager import (
     ResourceManager,
@@ -37,6 +41,7 @@ class LocalAgentFactory:
             )
 
         config_dir = resolved_path.parent
+        config_dir = config_dir.as_posix()  # required to get a string with forward slashes from a Path object on any operating system
 
         # Load and process the main agent.yml configuration
         with open(resolved_path, "r") as f:
@@ -77,7 +82,10 @@ class LocalAgentFactory:
         sql_exec_config = (
             agent_config.workers.retrieval_worker.sql_execution_config
         )
-        sql_executor = InMemoryCodeExecutor(config=sql_exec_config)
+        if agent_config.workers.retrieval_worker.type == "ApiCodeExecutor":
+            sql_executor = ApiCodeExecutor(config=sql_exec_config)
+        else:
+            sql_executor = InMemoryCodeExecutor(config=sql_exec_config)
 
         # 4. Use the generic builder to assemble the agent
         builder = CWDAgentBuilder(config=agent_config)

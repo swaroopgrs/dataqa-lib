@@ -1,0 +1,28 @@
+{% import 'constants.jinja' as const %}
+{% import 'description.jinja' as description %}
+{% import 'instruction.jinja' as instruction %}
+{{ description.OVERALL_DESCRIPTION(const.PLOT_WORKER) }}
+
+{{ description.AGENT_DESCRIPTION() }}
+
+You are working on a use case called {{ use_case_name }}
+- {{ use_case_description }}
+
+Your ```{{ const.JOB }}``` is to complete a single {{ const.TASK }} from the {{ const.PLAN }}.
+
+**INSTRUCTION**:
+{{ instruction.GENERAL_WORKER_INSTRUCTION() }}{use_case_plot_worker_instruction}
+
+You are equipped with the following tools:
+{{ plot_worker_tool_description }}
+
+{dataframe_summary}
+
+Given the previously completed TASKS:
+{past_steps}
+and, for the following PLAN:
+{plan}
+
+You are tasked with executing TASK 1: {task}
+
+Respond only with strict JSON, no JSON markers, no conversation formatting, no surrounding text.

@@ -2,7 +2,9 @@ import logging
 from operator import add
 from typing import Annotated, Dict, List, Union
 
+from langchain_core.messages import SystemMessage
 from langchain_core.runnables.config import RunnableConfig
+from langgraph.errors import GraphRecursionError
 from langgraph.graph.graph import CompiledGraph
 from langgraph.prebuilt import create_react_agent
 from pydantic import BaseModel, Field
@@ -24,6 +26,10 @@ from dataqa.core.utils.langgraph_utils import (
     API_KEY,
     BASE_URL,
     CONFIGURABLE,
+    DEFAULT_THREAD,
+    RECURSION_LIMIT,
+    THREAD_ID,
+    TOKEN,
 )
 from dataqa.core.utils.prompt_utils import (
     build_prompt,
@@ -45,6 +51,10 @@ class PlotWorkerConfig(ComponentConfig):
         default=None,
     )
     worker_state_required: bool = True
+    max_recursion: int = Field(
+        description="The maximum number of recursions for react workers.",
+        default=10,
+    )
 
 
 class PlotWorkerInput(BaseModel):
@@ -87,6 +97,9 @@ class PlotWorker(Component):
             memory=memory, tool_names=tool_names
         )[0]
         self.workflow = self.build_workflow(memory=self.memory, llm=self.llm)
+        logger.info(
+            f"Component {self.config.name} of type {self.component_type} initialized."
+        )
 
     def build_workflow(
         self, memory: Memory, llm: AzureOpenAI, **kwargs
@@ -101,7 +114,7 @@ class PlotWorker(Component):
 
         rule = input_data.rule
         if rule:
-            rule = f"\n\n``Use Case Instruction``:\n{rule.strip()}"
+            rule = f"\n\n**USE CASE INSTRUCTIONS**:\n{rule.strip()}"
 
         messages = self.prompt.invoke(
             dict(
@@ -114,14 +127,35 @@ class PlotWorker(Component):
                 use_case_plot_worker_instruction=rule,
             )
         )
-        api_key = config.get(CONFIGURABLE, {}).get(API_KEY, "")
-        base_url = config.get(CONFIGURABLE, {}).get(BASE_URL, "")
+
+        configurable = config.get(CONFIGURABLE, {})
+        api_key = configurable.get(API_KEY, "")
+        token = configurable.get(TOKEN, "")
+        base_url = configurable.get(BASE_URL, "")
+        thread_id = configurable.get(THREAD_ID, DEFAULT_THREAD)
+
         self.workflow = self.build_workflow(
-            memory=self.memory, llm=self.llm, api_key=api_key, base_url=base_url
+            memory=self.memory,
+            llm=self.llm,
+            api_key=api_key,
+            token=token,
+            base_url=base_url,
         )
-        response = await self.workflow.ainvoke(
-            {"messages": messages.to_messages()}
-        )
+
+        input_messages = {"messages": messages.to_messages()}
+
+        try:
+            response = await self.workflow.ainvoke(
+                input=input_messages,
+                config={
+                    CONFIGURABLE: {THREAD_ID: thread_id},
+                    RECURSION_LIMIT: self.config.max_recursion,
+                },
+            )
+        except GraphRecursionError:
+            msg = f"Reach the maximum number of ReAct steps. The task cannot be completed after {self.config.max_recursion} steps."
+            response = input_messages
+            input_messages["messages"].append(SystemMessage(content=msg))
 
         return PlotWorkerOutput(
             worker_response=WorkerResponse(

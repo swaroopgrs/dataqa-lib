@@ -2,15 +2,20 @@ from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, model_validator
 
-from dataqa.errors import PipelineConfigError
-from dataqa.pipelines.constants import PIPELINE_END, PIPELINE_START
+from dataqa.core.errors import PipelineConfigError
+from dataqa.core.pipelines.constants import PIPELINE_END, PIPELINE_START
 
 
 class PipelineComponent(BaseModel):
     name: str
     type: str
     params: Dict[str, Any]
-    input_source: Optional[Dict[str, str]] = None
+    input_from_state: Optional[Dict[str, str]] = Field(
+        description="Map component input to state", default_factory=dict
+    )
+    output_to_state: Optional[Dict[str, str]] = Field(
+        description="Map component output to state", default_factory=dict
+    )
 
 
 class ParentGroup(BaseModel):

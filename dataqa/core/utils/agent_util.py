@@ -81,6 +81,22 @@ def format_tool_calls(tool_calls: List) -> str:
     return "\n".join(formatted_tool_calls)
 
 
+def process_tool_messages(tool_messages: List) -> str:
+    formatted_messages = []
+    for msg in tool_messages:
+        if msg.get("type", "") == "ai":
+            if msg.get("content", "") != "":
+                formatted_messages.append(msg.get("content", ""))
+            if len(msg.get("tool_calls", [])) > 0:
+                formatted_messages.append("Tool Calls:")
+                formatted_messages.append(
+                    format_tool_calls(msg.get("tool_calls", []))
+                )
+        elif msg.get("type", "") == "tool":
+            formatted_messages.append(msg.get("content", ""))
+    return "\n".join(formatted_messages)
+
+
 def dataframe_to_llm_judge_string(df_name: str, df: pd.DataFrame):
     if df is None:
         return f"No dataframe found for {df_name} in memory."
@@ -154,6 +170,7 @@ class AgentResponseParser:
             "step_count": count,
             "llm_info": None,
             "node": None,
+            "time": None,
         }
         formatted_output = []
         node_name = list(event[1].keys())[0]
@@ -176,14 +193,24 @@ class AgentResponseParser:
             processed_step["step_type"] = "llm"
             processed_step["node"] = node_name
             processed_step["llm_info"] = {
-                "input_token_count": event[1][node_name]["llm_output"][
-                    0
-                ].metadata.input_token,
-                "output_token_count": event[1][node_name]["llm_output"][
-                    0
-                ].metadata.output_token,
-                "time": event[1][node_name]["llm_output"][0].metadata.latency,
-                "model": event[1][node_name]["llm_output"][0].metadata.model,
+                "input_token_count": getattr(
+                    event[1][node_name]["llm_output"][0].metadata,
+                    "input_token",
+                    0,
+                ),
+                "output_token_count": getattr(
+                    event[1][node_name]["llm_output"][0].metadata,
+                    "output_token",
+                    0,
+                ),
+                "time": getattr(
+                    event[1][node_name]["llm_output"][0].metadata, "latency", 0
+                ),
+                "model": getattr(
+                    event[1][node_name]["llm_output"][0].metadata,
+                    "model",
+                    "unknown model",
+                ),
                 "prompt": event[1][node_name]["llm_output"][0].prompt[0][
                     "content"
                 ],
@@ -248,14 +275,24 @@ class AgentResponseParser:
             processed_step["step_type"] = "llm"
             processed_step["node"] = node_name
             processed_step["llm_info"] = {
-                "input_token_count": event[1][node_name]["llm_output"][
-                    0
-                ].metadata.input_token,
-                "output_token_count": event[1][node_name]["llm_output"][
-                    0
-                ].metadata.output_token,
-                "time": event[1][node_name]["llm_output"][0].metadata.latency,
-                "model": event[1][node_name]["llm_output"][0].metadata.model,
+                "input_token_count": getattr(
+                    event[1][node_name]["llm_output"][0].metadata,
+                    "input_token",
+                    0,
+                ),
+                "output_token_count": getattr(
+                    event[1][node_name]["llm_output"][0].metadata,
+                    "output_token",
+                    0,
+                ),
+                "time": getattr(
+                    event[1][node_name]["llm_output"][0].metadata, "latency", 0
+                ),
+                "model": getattr(
+                    event[1][node_name]["llm_output"][0].metadata,
+                    "model",
+                    "unknown model",
+                ),
                 "prompt": event[1][node_name]["llm_output"][0].prompt[0][
                     "content"
                 ],
@@ -274,6 +311,12 @@ class AgentResponseParser:
         elif node_name == NodeName.sql_executor.value:
             processed_step["step_type"] = "tool"
             processed_step["node"] = node_name
+            processed_step["time"] = event[1][node_name][
+                "sql_executor_output"
+            ].time
+            self.run_statistics["total_sql_execution_time"] += processed_step[
+                "time"
+            ]
             formatted_output.append(
                 indented(event[1][node_name]["sql_executor_output"].dataframe)
             )
@@ -331,9 +374,9 @@ class AgentResponseParser:
                         0
                     ].usage_metadata["output_tokens"],
                     "time": float(
-                        event[1][node_name]["messages"][0].response_metadata[
-                            "headers"
-                        ]["cmp-upstream-response-duration"]
+                        event[1][node_name]["messages"][0]
+                        .response_metadata["headers"]
+                        .get("cmp-upstream-response-duration", 0)
                     )
                     / 1000,
                     "model": event[1][node_name]["messages"][
@@ -366,6 +409,11 @@ class AgentResponseParser:
                     .response
                 )
             )
+            tool_calls = process_tool_messages(
+                event[1][node_name][f"{node_name}_state"][0].messages
+            )
+            formatted_output.append(indented(tool_calls, indent="      "))
+
             prompt = event[1][node_name][f"{node_name}_state"][0].messages[0][
                 "content"
             ]
@@ -384,6 +432,7 @@ class AgentResponseParser:
             "replan_count": 0,
             "tool_call_count": 0,
             "llm_stat": None,
+            "total_sql_execution_time": 0,
         }
         formatted_events = []
         count = 1
@@ -567,10 +616,3 @@ class AgentResponseParser:
                 "prompt": prompt,
             }
         return all_msg, all_prompt
-
-
-# if __name__ == "__main__":
-#     events_loaded = pickle.load(open("./temp/agent_events_2.pkl", "rb"))
-#     agent_response = AgentResponseParser(events_loaded)
-#     agent_response.process_events()
-#     agent_response.pretty_print_output()

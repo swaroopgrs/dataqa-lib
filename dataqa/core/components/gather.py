@@ -2,8 +2,8 @@ import logging
 
 from pydantic import BaseModel
 
-from dataqa.components.base_component import Component, ComponentConfig
-from dataqa.state import PipelineOutput
+from dataqa.core.components.base_component import Component, ComponentConfig
+from dataqa.core.state import PipelineOutput
 
 logger = logging.getLogger(__name__)
 

@@ -1,17 +1,34 @@
 # Agent API Reference
 
-This section documents the main DataQA agent class (`CWD`Agent`), its state, and its core workers.
+This section documents the main DataQA agent class (CWDAgent), its state, and its core workers.
 
 ---
 
-## CWD`Agent`
+## CWDAgent
 
-The `CWD`Agent` is the core conversational agent in DataQA.
-It implements a plan-and-execute loop, using LLMs and modular workers to answer complex data questions.
+The `CWDAgent` is the core conversational agent in DataQA. It implements a plan-and-execute loop, using LLMs and modular workers to answer complex data questions.
 
-::: dataqa.core.agent.cwd_agent.CwdAgent
+### Overview
 
-**Example Usage:**
+The CWDAgent follows a **Plan-Work-Dispatch** pattern:
+
+1. **Planner**: Creates a step-by-step plan from the user's query
+2. **Workers**: Execute tasks (RetrievalWorker, AnalyticsWorker, PlotWorker)
+3. **Replanner**: Evaluates results and updates the plan
+
+### Key Components
+
+The agent has the following components that can be configured with different LLMs:
+
+- `default`: Default LLM for components without specific assignment
+- `planner`: Creates the initial plan
+- `replanner`: Updates the plan after each task
+- `retrieval_worker`: Generates and executes SQL queries
+- `analytics_worker`: Performs data analysis using Pandas
+- `plot_worker`: Generates visualizations
+
+### Usage
+
 ```python
 from dataqa.integrations.local.client import LocalClient
 from dataqa.core.client import CoreRequest
@@ -22,13 +39,21 @@ response = await client.process_query(request)
 print(response.text)
 ```
 
+**Note**: In practice, you typically use `LocalClient` or `DBCClient` rather than instantiating `CWDAgent` directly. The client handles agent creation and configuration.
+
 ---
 
-## Agent State
+## CWDState
 
-The `CWD`State` object tracks the agent's progress, including the plan, completed steps, and generated data.
+The `CWDState` object tracks the agent's progress through a query execution, including:
 
-::: dataqa.core.agent.cwd_agent.CwdState
+- **query**: The user's original question
+- **plan**: The current plan with list of tasks
+- **worker_response**: Results from executed tasks
+- **output_dataframes**: DataFrames generated during execution
+- **final_answer**: The agent's final response text
+
+The state is passed between components (planner → worker → replanner) and updated as the agent progresses.
 
 ---
 
@@ -40,24 +65,49 @@ Workers are specialized components responsible for executing tasks in the agent'
 
 Retrieves data from the database by generating and executing SQL queries.
 
-::: dataqa.core.components.plan_execute.retrieval_worker.RetrievalWorker
+**Key Responsibilities:**
+- Generates SQL from natural language queries
+- Executes SQL against the configured data source
+- Returns DataFrames with query results
+
+**Configuration:**
+- Configured via `workers.retrieval_worker.sql_execution_config` in `agent.yaml`
+- Uses schema, rules, and examples from asset files to generate accurate SQL
 
 ### AnalyticsWorker
 
-Performs data analysis on retrieved data (e.g., aggregations, statistics).
+Performs data analysis on retrieved data using Pandas operations.
 
-::: dataqa.core.components.plan_execute.analytics_worker.AnalyticsWorker
+**Key Responsibilities:**
+- Performs aggregations, statistics, and calculations
+- Uses built-in analytics tools (e.g., `summarize_dataframe`, `calculate_correlation`)
+- Operates on DataFrames from previous tasks
+
+**Available Tools:**
+- Data summarization
+- Statistical calculations
+- Data transformations
+- Filtering and grouping operations
 
 ### PlotWorker
 
 Generates plots and visualizations from dataframes.
 
-::: dataqa.core.components.plan_execute.plot_worker.PlotWorker
+**Key Responsibilities:**
+- Creates charts and graphs from data
+- Uses matplotlib and seaborn for visualization
+- Returns image files or plot objects
+
+**Available Tools:**
+- Line plots
+- Bar charts
+- Scatter plots
+- Heatmaps
+- Custom visualizations
 
 ---
 
 ## See Also
 
-- [Building Your First Agent](../guide/building_your_first_agent.md)
-- [Customizing Agents](../guide/customizing_agents.md)
-- [API Reference: Components](components.md)
+- [Building Assets](../guide/building_assets.md)
+- [Agent Configuration](agent_config.md)

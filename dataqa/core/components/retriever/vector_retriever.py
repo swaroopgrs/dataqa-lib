@@ -8,16 +8,18 @@ import numpy as np
 import yaml
 from numpy.linalg import norm
 
-from dataqa.components.resource_manager.resource_manager import ResourceManager
-from dataqa.components.retriever.base_retriever import (
+from dataqa.core.components.resource_manager.resource_manager import (
+    ResourceManager,
+)
+from dataqa.core.components.retriever.base_retriever import (
     Retriever,
     RetrieverConfig,
     RetrieverInput,
     RetrieverOutput,
 )
-from dataqa.data_models.asset_models import Resource, RetrievedAsset
-from dataqa.llm.openai import OpenAIEmbedding
-from dataqa.utils.data_model_util import create_base_model
+from dataqa.core.data_models.asset_models import Resource, RetrievedAsset
+from dataqa.core.llm.openai import OpenAIEmbedding
+from dataqa.core.utils.data_model_util import create_base_model
 
 logger = logging.getLogger(__name__)
 
@@ -45,14 +47,15 @@ class VectorRetriever(Retriever):
         Create a new instance of the VectorRetriever class.
 
         Args:
-           config (Dict): The configuration for the retriever.
-           resource_manager (ResourceManager): The resource manager.
-           input_config (List): The configuration for the input fields.
-           output_config (List): The configuration for the output fields.
-           embedding_model (OpenAIEmbedding): The embedding model to use for vectorization.
+            config (Dict): The configuration for the retriever.
+            resource_manager (ResourceManager): The resource manager.
+            input_config (List): The configuration for the input fields.
+            output_config (List): The configuration for the output fields.
+            embedding_model (OpenAIEmbedding): The embedding model to use for vectorization.
 
         Returns:
            VectorRetriever: A new instance of the VectorRetriever class.
+
         """
         retriever_config = RetrieverConfig.model_validate(config)
         super().__init__(retriever_config)
@@ -61,7 +64,6 @@ class VectorRetriever(Retriever):
         self.input_base_model = create_base_model(
             input_base_model_name, input_config
         )
-
         output_base_model_name = f"{self.config.name}_output"
         if output_config is None:
             output_config = self.create_output_config(
@@ -75,9 +77,7 @@ class VectorRetriever(Retriever):
         self.output_base_model = create_base_model(
             output_base_model_name, output_config, RetrieverOutput
         )
-
         self.embedding_model = embedding_model
-
         logger.info(
             f"Component {self.config.name} of type {self.component_type} created."
         )
@@ -90,7 +90,7 @@ class VectorRetriever(Retriever):
 
     def prepare_input(self, state: Dict[str, Any]):
         """
-        temporary, to be replaced by generic component input preparation function
+        temporary. to be replaced by generic component input preparation function
         :param state:
         :return:
         """
@@ -104,19 +104,20 @@ class VectorRetriever(Retriever):
         Retrieves assets from the resource based on the query.
 
         Args:
-           query (RetrieverInput): The query to match against the resource.
-           resource (Resource): The resource to retrieve assets from.
+            query (RetrieverInput): The query to match against the resource.
+            resource (Resource): The resource to retrieve assets from.
 
         Returns:
-           list[RetrievedAsset]: A list of retrieved assets.
+            List[RetrievedAsset]: A list of retrieved assets.
         """
+
         all_retrieved = []
 
         arrays = [e.embedding_vector for e in resource.data]
         matrix = np.stack(arrays)
 
         query_embedding = await self.embedding_model(
-            query.query, **self.embedding_model.config
+            query.query, **embedding_model_config
         )
         query_embedding = np.array(query_embedding)
 
@@ -133,14 +134,15 @@ class VectorRetriever(Retriever):
             query_array = np.transpose(np.array(query_embedding))
             dot_prod = matrix.dot(query_array)
             dot_prod_flatten = dot_prod.flatten()
-            scores = dot_prod_flatten / (norm(query_array) * norm_all)
+            norm_query = norm(query_array)
+            scores = dot_prod_flatten / (norm_query * norm_all)
         else:
             raise NotImplementedError
-        top_k_idx = np.flip(
+        top_n_idx = np.flip(
             scores.argsort()[-self.config.parameters["top_k"] :]
         )
 
-        for i in top_k_idx:
+        for i in top_n_idx:
             record = resource.data[i]
             retrieved_record = {
                 "asset_type": resource.type,
@@ -162,6 +164,7 @@ class VectorRetriever(Retriever):
         :param query: RetrieverInput for tag retrieval method
         :return: output base model for retriever component
         """
+
         resource_type_module_combinations = list(
             itertools.product(
                 self.config.resource_type, self.config.module_name
@@ -180,6 +183,7 @@ class VectorRetriever(Retriever):
             if resource is None:
                 continue
             retrieved_asset = await self.retrieve_assets(input_data, resource)
+
             retrieved_asset_all.extend(retrieved_asset)
             output_str = self.prepare_output_string(retrieved_asset, resource)
             if self.output_field_name is not None:
@@ -189,8 +193,10 @@ class VectorRetriever(Retriever):
                     self.get_state_name(resource_type, module_name)
                 ] = output_str
         retrieve_time = time.time() - start_time
+
         component_output["metadata"] = {"time": retrieve_time}
         component_output["output_data"] = retrieved_asset_all
+
         return self.output_base_model.model_validate(component_output)
 
 
@@ -198,7 +204,7 @@ if __name__ == "__main__":
     import asyncio
 
     config = yaml.safe_load(
-        open("examples/ccb_risk/config/config_ccb_risk.yml", "r")
+        open("examples/ccb_risk/config/config_ccb_risk.yaml", "r")
     )
     my_resource_manager = ResourceManager(
         config["components"][4]["params"]["config"]
@@ -206,40 +212,41 @@ if __name__ == "__main__":
     my_resource_manager.load_schema_embedding(
         data_file_path="examples/ccb_risk/data/schema_embedding.pkl"
     )
+
     from scripts.azure_token import get_az_token_using_cert
 
     api_key = get_az_token_using_cert()[0]
 
     embedding_model_config = {
-        "azure_endpoint": "https://llmopenai-bi-us-east.openai.azure.com/openai/deployments/jpmc-ada-002-text-embedding/embeddings?api-version=2023-05-15",
-        "openai_api_version": "2024-02-15",
-        "api_key": api_key,
-        "embedding_model_name": "text-embedding-ada-002",
+        "azure_endpoint": "https://llmopenai-02.jpmchase.net/WKSP0001016-exp-usnc/",
+        "openai_api_version": "2024-02-15-preview",
+        "openai_api_key": api_key,
+        "embedding_model_name": "text-embedding-ada-002-2",
     }
     embedding_model = OpenAIEmbedding()
-    question = "How have median cash buffers trended for Chase deposit customers since 2021?"
-    mock_state = {"query": question}
-    component_config = config["components"][6:7]
-    retriever_node_config = component_config["params"]
-    r_config = {"name": component_config["name"]}
-    r_config.update(retriever_node_config["config"])
-    r_input = retriever_node_config["input_config"]
-    r_output = retriever_node_config["output_config"]
 
-    vector_retriever = VectorRetriever(
-        r_config, my_resource_manager, r_input, r_output, embedding_model
-    )
-    vector_retriever_input = vector_retriever.prepare_input(mock_state)
-    my_retrieved_asset = asyncio.run(
-        vector_retriever.run(vector_retriever_input)
-    )
-    print("*" * 50)
-    print(
-        f"Component {vector_retriever.config.name} of type {vector_retriever.component_type} created."
-    )
-    print("*" * 50)
-    print(f"Retrieved {len(my_retrieved_asset.output_data)} records")
-    print("*" * 50)
-    print(
-        f"Underlying string:\n{my_retrieved_asset.dict()[r_output[0]['name']]}"
-    )
+    question = "How have median cash buffers trended for Chase deposit customers since 2019?"
+    mock_state = {"query": question}
+
+    for component_config in config["components"][6:7]:
+        retriever_node_config = component_config["params"]
+        r_config = retriever_node_config["config"]
+        r_config["name"] = component_config["name"]
+        r_input = retriever_node_config["input_config"]
+        r_output = retriever_node_config["output_config"]
+        vector_retriever = VectorRetriever(
+            r_config, my_resource_manager, r_input, r_output, embedding_model
+        )
+        vector_retriever_input = vector_retriever.prepare_input(mock_state)
+        my_retrieved_asset = asyncio.run(
+            vector_retriever.run(vector_retriever_input)
+        )
+        print(
+            f"Component {vector_retriever.config.name} of type {vector_retriever.component_type} created."
+        )
+        print(f"Input: {vector_retriever_input.query}")
+        print(f"Retrieved {len(my_retrieved_asset.output_data)} records:")
+        print(
+            f"\nRetrieved string:\n {my_retrieved_asset.dict()[r_output[0]['name']]}"
+        )
+        print("***********\n\n")

@@ -1,4 +1,3 @@
-# dataqa/integrations/dbc/agent_template.yml
 # This file defines the generic STRUCTURE of a CWD Agent for the DBC integration.
 # It is loaded exclusively by the DBC_CWDAgentFactory and lives within the dbc module.
 
@@ -74,3 +73,7 @@ timeout: 300
 # These values will be dynamically overridden at runtime by the factory.
 use_case_name: "placeholder_name"
 use_case_description: "placeholder_description"
+
+dialect:
+  value: "placeholder_sql_dialect"
+  functions: |

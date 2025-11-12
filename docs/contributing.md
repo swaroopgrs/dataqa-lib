@@ -105,7 +105,7 @@ Be respectful and inclusive.
 
 # 9. Need Help?
 
-- [FAQ](/guide/faq.md)
+- [FAQ](guide/faq.md)
 
 ---
 

@@ -3,14 +3,14 @@ from typing import Dict, List, Tuple, Union
 
 from pydantic import BaseModel, Field
 
-from dataqa.components.base_component import (
+from dataqa.core.components.base_component import (
     Component,
     ComponentConfig,
     RunnableConfig,
     Variable,
 )
-from dataqa.utils.component_utils import build_base_model_from_parameters
-from dataqa.utils.prompt_utils import build_prompt, prompt_type
+from dataqa.core.utils.component_utils import build_base_model_from_parameters
+from dataqa.core.utils.prompt_utils import build_prompt, prompt_type
 
 logger = logging.getLogger(__name__)
 

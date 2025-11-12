@@ -61,11 +61,11 @@ def my_custom_tool(memory):
 DEFAULT_ANALYTICS_TOOLS["MyCustomTool"] = my_custom_tool
 ```
 
-See [Extending DataQA](../guide/extending.md) for more details.
+**Note:** For advanced customization, refer to the source code in `dataqa.core.tools`.
 
 ---
 
 ## See Also
 
-- [Extending DataQA](../guide/extending.md)
-- [API Reference: Components](components.md)
+- [Components API Reference](components.md)
+- [Agent API Reference](agent.md)

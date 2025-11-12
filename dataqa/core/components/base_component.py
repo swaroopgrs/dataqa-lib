@@ -1,4 +1,5 @@
 import logging
+import time
 import warnings
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Type, Union
@@ -7,6 +8,11 @@ from langchain_core.runnables.config import RunnableConfig
 from pydantic import BaseModel, Field
 
 from dataqa.core.components.base_utils import get_field
+from dataqa.core.utils.langgraph_utils import (
+    CONFIGURABLE,
+    QUESTION_ID,
+    THREAD_ID,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,15 +138,33 @@ class Component(ABC):
 
     async def __call__(self, state, config: Optional[RunnableConfig] = {}):
         # build input data from state
-        input_data = {
+        input_data: Dict[str, BaseModel] = {
             field: get_field(state, mapped_field)
             for field, mapped_field in self.input_mapping.items()
         }
 
         input_data = self.input_base_model(**input_data)
 
+        thread_id = config.get(CONFIGURABLE, {}).get(THREAD_ID, "")
+        question_id = config.get(CONFIGURABLE, {}).get(QUESTION_ID, "")
+
+        logger.debug(
+            f"Conversation ID: {thread_id}; question ID: {question_id}. Input data for {self.config.name} of type {self.component_type}:\n{input_data}"
+        )
+
         # run
+        logger.info(
+            f"Conversation ID: {thread_id}; question ID: {question_id}. Starting to run component {self.config.name} of type {self.component_type}."
+        )
+        start_time = time.monotonic()
         response = await self.run(input_data=input_data, config=config)
+        run_time = time.monotonic() - start_time
+        logger.info(
+            f"Conversation ID: {thread_id}; question ID: {question_id}. Finished running component {self.config.name} of type {self.component_type} in {round(run_time, 2)} seconds."
+        )
+        logger.debug(
+            f"Conversation ID: {thread_id}; question ID: {question_id}. Output of {self.config.name} of type {self.component_type}:\n{response}"
+        )
 
         # validate output and update state
         assert isinstance(response, self.output_base_model)

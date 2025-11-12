@@ -57,9 +57,9 @@ class KnowledgeBase:
                 try:
                     parsed_data = record_base_model.model_validate(record)
                     parsed_data_list.append(parsed_data)
-                except:
+                except Exception as e:
                     logger.error(
-                        f"Failed to parse record for {name} retrievable. Record:\n{record}"
+                        f"Failed to parse record for {name} retrievable. Record:\n{record}. Error: {e}"
                     )
 
             knowledge_base.append(
