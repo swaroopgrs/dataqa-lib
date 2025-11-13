@@ -1,19 +1,55 @@
 # Quickstart
 
-This guide will get you from zero to a fully running DataQA CWD Agent in under 5 minutes. We'll use a sample CSV file and a minimal configuration.
+Get your first DataQA CWD Agent running in minutes. This guide includes installation, setup, and your first query.
 
 ---
 
-## 1. Project Setup
+## 1. Installation
 
-First, create a new directory for your project and navigate into it.
+### Prerequisites
+
+- **Python:** 3.11 or higher
+- **Package Manager:** pip or Poetry
+
+### Install DataQA
+
+```bash
+# Using pip
+pip install aicoelin-dataqa
+
+# Or using Poetry
+poetry add aicoelin-dataqa
+```
+
+### Set Up Environment Variables
+
+The agent needs LLM credentials (e.g., Azure OpenAI). Set these before running:
+
+**Option 1: Environment Variables**
+```bash
+export AZURE_OPENAI_API_KEY="your-azure-openai-api-key"
+export OPENAI_API_BASE="https://your-azure-openai-endpoint.net/"
+```
+
+**Option 2: `.env` File**
+Create a `.env` file in your project root:
+```
+AZURE_OPENAI_API_KEY="your-azure-openai-api-key"
+OPENAI_API_BASE="https://your-azure-openai-endpoint.net/"
+```
+
+---
+
+## 2. Project Setup
+
+Create a new directory for your project:
 
 ```bash
 mkdir my-data-agent
 cd my-data-agent
 ```
 
-Your final project structure will look like this:
+Your project structure will look like this:
 ```
 my-data-agent/
 ├── data/
@@ -25,9 +61,9 @@ my-data-agent/
 
 ---
 
-## 2. Create the Data and Schema
+## 3. Create Sample Data
 
-**A. Create your data file:** `data/sales_data.csv`
+Create `data/sales_data.csv`:
 ```csv
 product_id,region,sales_date,units_sold,revenue
 101,North,2024-01-15,50,5000
@@ -37,7 +73,11 @@ product_id,region,sales_date,units_sold,revenue
 102,South,2024-03-05,35,5250
 ```
 
-**B. Describe your data in `data/schema.yml`:** This file tells the agent what your data means.
+---
+
+## 4. Create Schema File
+
+Create `data/schema.yml` to describe your data:
 ```yaml
 tables:
   - table_name: sales_report
@@ -62,33 +102,29 @@ tables:
 
 ---
 
-## 3. Configure the Agent
+## 5. Configure the Agent
 
-Create the main agent configuration file: `agent.yaml`
+Create `agent.yaml`:
 ```yaml
-# 1. A name for your agent instance
 agent_name: "SalesAgent"
 
-# 2. Define the LLM to use
 llm_configs:
   default_llm:
     type: "dataqa.llm.openai.AzureOpenAI"
     config:
-      model: "gpt-4o-2024-08-06" # Your Azure deployment name
+      model: "gpt-4o-2024-08-06"
       api_version: "2024-08-01-preview"
       api_type: "azure_ad"
       temperature: 0
 
-# 3. Assign the LLM to agent components
 llm:
   default: default_llm
 
-# 4. Point to your data assets directory
 resource_manager_config:
+  type: "dataqa.core.components.resource_manager.resource_manager.ResourceManager"
   config:
-    asset_directory: "<CONFIG_DIR>/data/" # <CONFIG_DIR> is a placeholder for this file's directory
+    asset_directory: "<CONFIG_DIR>/data/"
 
-# 5. Tell the agent how to find and use your assets
 retriever_config:
   type: dataqa.core.components.retriever.base_retriever.AllRetriever
   config:
@@ -97,71 +133,50 @@ retriever_config:
     resource_types: ["schema"]
     module_names: ["planner", "retrieval_worker"]
 
-# 6. Configure the SQL execution environment
 workers:
   retrieval_worker:
     sql_execution_config:
       name: "sql_executor"
       data_files:
         - path: "<CONFIG_DIR>/data/sales_data.csv"
-          table_name: sales_report # The table name you used in schema.yml
+          table_name: sales_report
 
-# 7. Provide context for prompts
 use_case_name: "Sales Reporting"
 use_case_description: "An agent that answers questions about sales performance from the sales_report table."
+
 dialect:
-  value: "sqlite" # DuckDB (default) uses sqlite syntax for many functions
+  value: "sqlite"
 ```
+
+**Note:** `<CONFIG_DIR>` is automatically replaced with the directory containing `agent.yaml`.
 
 ---
 
-## 4. Set Up Environment Variables
+## 6. Run Your First Query
 
-Before running, you need to set your LLM credentials. Create a `.env` file or export them in your shell:
-
-```bash
-export AZURE_OPENAI_API_KEY="your-azure-openai-api-key"
-export OPENAI_API_BASE="https://your-azure-openai-endpoint.net/"
-```
-
-Or create a `.env` file:
-```
-AZURE_OPENAI_API_KEY="your-azure-openai-api-key"
-OPENAI_API_BASE="https://your-azure-openai-endpoint.net/"
-```
-
----
-
-## 5. Write the Python Script
-
-Create your Python script to run the agent: `run_agent.py`
+Create `run_agent.py`:
 ```python
 import asyncio
 from dataqa.integrations.local.client import LocalClient
 from dataqa.core.client import CoreRequest
 
 async def main():
-    # Make sure your environment variables are set!
-    # export AZURE_OPENAI_API_KEY="..."
-    # export OPENAI_API_BASE="..."
-
     client = LocalClient(config_path="agent.yaml")
-
+    
     request = CoreRequest(
         user_query="What was the total revenue for the North region?",
         conversation_id="quickstart-1",
         question_id="q1"
     )
-
-    # The client returns a generator. The final item is the CoreResponse.
+    
     response_generator = client.process_query(request)
     final_response = None
     async for response in response_generator:
         final_response = response
-
+    
     print("--- Final Answer ---")
     print(final_response.text)
-
+    
     print("\n--- Output DataFrames ---")
     for i, df in enumerate(final_response.output_dataframes):
         print(f"DataFrame {i+1}:")
@@ -171,24 +186,19 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
----
-
-## 6. Run Your Agent!
-
-Ensure your LLM environment variables are set, then run the script:
-
+Run it:
 ```bash
 python run_agent.py
 ```
 
-You should see the agent's final answer and the resulting DataFrame printed to your console!
+You should see the agent's answer and the resulting DataFrame!
 
 ---
 
-## Next Steps
+## What's Next?
 
-Congratulations! You've successfully built and run a DataQA CWD Agent.
+- **[Understanding the CWD Agent](guide/understanding_the_cwd_agent.md)**: Understand how the agent works
+- **[Knowledge Asset Tools](guide/knowledge_asset_tools.md)**: Generate and enhance assets with DataScanner and Rule Inference
+- **[Create Knowledge Assets Manually](guide/creating_knowledge_assets.md)**: Learn to create comprehensive schema, rules, and examples
+- **[Configure Your Agent](guide/configuring_your_agent.md)**: Deep dive into agent configuration
 
-- **[User Guide: Introduction](guide/introduction.md)**: Understand how the CWD Agent works.
-- **[Building Assets](guide/building_assets.md)**: Learn how to create comprehensive `schema.yml`, `rules.yml`, and `examples.yml` files to make your agent smarter.
-- **[Configuration Reference](reference/agent_config.md)**: Explore all configuration options.

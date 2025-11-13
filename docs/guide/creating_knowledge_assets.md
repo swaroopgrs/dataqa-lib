@@ -1,27 +1,26 @@
-# Building Your Agent's Knowledge Base
+# Creating Knowledge Assets Manually
 
-This is the most important guide for making your CWD Agent smart and accurate. Your agent's performance depends directly on the quality of the knowledge you provide in three key files: `schema.yml`, `rules.yml`, and `examples.yml`.
+This guide teaches you how to manually create the three knowledge asset files that power your CWD Agent: `schema.yml`, `rules.yml`, and `examples.yml`. These files teach your agent about your data, business logic, and query patterns.
+
+**Note:** This guide is standalone and can be used whether you're building agents locally or using LLMSuite Database Connect (DBC) integration. The knowledge asset format is the same.
+
+**Tip:** Before writing from scratch, consider using [Knowledge Asset Tools](knowledge_asset_tools.md) to automatically generate or enhance assets from your data.
 
 ---
 
-## Your Project Structure
+## Overview
 
-A typical agent project has the following structure. All asset files live in a dedicated directory (e.g., `data/`) which you specify in your main `agent.yaml`.
+Your agent's intelligence comes from three YAML files:
 
-```
-my-agent/
-├── data/
-│   ├── schema.yml      # The MAP of your data
-│   ├── rules.yml       # The RULEBOOK for business logic
-│   └── examples.yml    # The PLAYBOOK of how to act
-└── agent.yaml          # The main agent configuration
-```
+1. **`schema.yml`** - The Map: Describes your database structure
+2. **`rules.yml`** - The Rulebook: Defines business logic and instructions
+3. **`examples.yml`** - The Playbook: Provides perfect query examples
 
 ---
 
 ## 1. `schema.yml`: The Map of Your Data
 
-**Purpose:** This file describes your database structure. It's how the agent knows what tables and columns exist and what they mean. Without a clear schema, the agent is blind.
+**Purpose:** This file describes your database structure. It's how the agent knows what tables and columns exist and what they mean.
 
 ### Basic Structure
 
@@ -38,25 +37,25 @@ tables:
         description: "The sales region, such as 'North', 'South', or 'West'."
 ```
 
-### Detailed Guide & Best Practices
+### Best Practices
 
 #### 1. **Descriptions are Everything**
 
-The `description` fields for tables and columns are what the LLM reads to understand your data and map user questions to the correct fields.
+The `description` fields are what the LLM reads to understand your data and map user questions to the correct fields.
 
--   **Bad Column Description:** `acct_st` → `"Account Status"`
--   **Good Column Description:** `acct_st` → `"The current status of the account, also referred to as 'Account State'. Use this column to filter for active or inactive accounts."`
-
-**Why it matters:** When a user asks "show me active accounts," the agent needs to know that `acct_st` contains this information and what values represent "active."
+- **Bad:** `acct_st` → `"Account Status"`
+- **Good:** `acct_st` → `"The current status of the account, also referred to as 'Account State'. Use this column to filter for active or inactive accounts. Common values: 'ACTIVE', 'INACTIVE', 'CLOSED'."`
 
 #### 2. **Explain the "What" and the "How"**
 
--   For a **table description**, explain what a single row represents (e.g., `"Each row represents a single credit card transaction for a customer."`).
--   For a **column description**, mention common synonyms or business jargon (e.g., `"The `xref_c1` column is the unique customer identifier, often called 'ECID' in reports."`).
+- **Table description:** Explain what a single row represents
+  - Example: `"Each row represents a single credit card transaction for a customer."`
+- **Column description:** Mention synonyms, business jargon, and usage
+  - Example: `"The xref_c1 column is the unique customer identifier, often called 'ECID' in reports."`
 
 #### 3. **Use `values` for Categorical Columns**
 
-This is extremely powerful for columns with a fixed set of codes or categories. It prevents the agent from guessing values and helps it map user language (e.g., "open accounts") to the correct code (`'A1'`).
+For columns with fixed codes or categories, define the values explicitly:
 
 ```yaml
 - name: account_condition_code
@@ -71,9 +70,11 @@ This is extremely powerful for columns with a fixed set of codes or categories. 
       description: "Account transferred"
 ```
 
-#### 4. **Define Relationships with `primary_keys` and `foreign_keys`**
+This prevents the agent from guessing values and helps it map user language (e.g., "open accounts") to the correct code.
 
-Explicitly defining keys helps the agent construct correct `JOIN` statements between tables.
+#### 4. **Define Relationships**
+
+Explicitly define primary and foreign keys to help the agent construct correct JOINs:
 
 ```yaml
 tables:
@@ -83,8 +84,7 @@ tables:
       - name: customer_id
         type: integer
         description: "Unique customer identifier"
-      # ... more columns ...
-      
+        
   - table_name: orders
     primary_keys: ["order_id"]
     foreign_keys:
@@ -98,10 +98,9 @@ tables:
       - name: customer_id
         type: integer
         description: "References customers.customer_id"
-      # ... more columns ...
 ```
 
-#### 5. **Complete Example**
+### Complete Example
 
 ```yaml
 tables:
@@ -133,7 +132,7 @@ tables:
 
 ## 2. `rules.yml`: The Rulebook for Business Logic
 
-**Purpose:** This file injects explicit instructions and business logic that cannot be inferred from the schema alone, like complex calculations or company policies.
+**Purpose:** This file injects explicit instructions and business logic that cannot be inferred from the schema alone.
 
 ### Basic Structure
 
@@ -147,11 +146,14 @@ rules:
           - When asked for delinquency rate, calculate it as the sum of delinquent balances divided by the total outstanding balance.
 ```
 
-### Detailed Guide & Best Practices
+### Best Practices
 
 #### 1. **Target the Right Component**
 
-Rules are injected into specific agent components. For users, the most important one is `retrieval_worker`, which influences **SQL generation**.
+Rules are injected into specific agent components:
+
+- **`retrieval_worker`**: Most common - influences SQL generation
+- **`planner`**: Guides high-level planning strategy
 
 ```yaml
 rules:
@@ -174,14 +176,10 @@ rules:
 
 #### 2. **Be Specific and Actionable**
 
-Vague rules are ignored.
-
--   **Bad Rule:** `"Handle dates correctly."`
--   **Good Rule:** `"When a user asks for data 'year to date' or 'YTD', filter the date column from January 1st of the current year up to today's date using: WHERE sales_date >= DATE('now', 'start of year') AND sales_date <= DATE('now')."`
+- **Bad:** `"Handle dates correctly."`
+- **Good:** `"When a user asks for data 'year to date' or 'YTD', filter the date column from January 1st of the current year up to today's date using: WHERE sales_date >= DATE('now', 'start of year') AND sales_date <= DATE('now')."`
 
 #### 3. **Define Business KPIs**
-
-The `rules.yml` file is the perfect place to define how Key Performance Indicators (KPIs) are calculated. This ensures consistency and accuracy.
 
 ```yaml
 rules:
@@ -194,7 +192,7 @@ rules:
           - Monthly Recurring Revenue (MRR) is: SUM(monthly_subscription_fee) WHERE subscription_status = 'ACTIVE'
 ```
 
-#### 4. **Complete Example**
+### Complete Example
 
 ```yaml
 rules:
@@ -215,16 +213,6 @@ rules:
         instructions: |
           - When users ask for "last month", use: WHERE transaction_date >= DATE('now', 'start of month', '-1 month') AND transaction_date < DATE('now', 'start of month')
           - When users ask for "year to date" or "YTD", use: WHERE transaction_date >= DATE('now', 'start of year') AND transaction_date <= DATE('now')
-          
-  - module_name: "planner"
-    rules:
-      - rule_name: "multi_step_queries"
-        instructions: |
-          - For comparison queries (e.g., "compare this month to last month"), always create separate tasks:
-            1. Retrieve data for period A
-            2. Retrieve data for period B
-            3. Calculate the difference or ratio
-          - Never try to do comparisons in a single SQL query.
 ```
 
 ---
@@ -244,10 +232,9 @@ examples:
           question: "What was our YoY revenue growth for auto loans?"
           reasoning: |
             1. The user wants Year-over-Year (YoY) revenue growth.
-            2. This requires comparing revenue from the current period to the same period in the previous year.
-            3. I will use the LAG() window function partitioned by month to get the prior year's revenue.
+            2. This requires comparing current period to same period last year.
+            3. I will use the LAG() window function partitioned by month.
             4. The product filter should be 'Auto Loan'.
-            5. The final formula is (current_revenue - prior_year_revenue) / prior_year_revenue.
           code: |
             WITH MonthlyRevenue AS (
               SELECT
@@ -271,17 +258,12 @@ examples:
             WHERE prior_year_revenue IS NOT NULL;
 ```
 
-### Detailed Guide & Best Practices
+### Best Practices
 
-#### 1. **Focus on SQL Generation**
+#### 1. **The `reasoning` Block is Your Teaching Moment**
 
-Provide examples for the `retrieval_worker` to teach it how to write perfect SQL for your use case.
+The `reasoning` text teaches the agent *how to think*. It should be a clear, step-by-step breakdown:
 
-#### 2. **The `<reasoning>` Block is Your Teaching Moment**
-
-The text inside `reasoning` is crucial. It teaches the agent *how to think*. It should be a clear, step-by-step breakdown of how you get from the user's question to the final SQL query.
-
-**Good reasoning:**
 ```yaml
 reasoning: |
   1. The user wants "active customers" - I need to check the schema for how active is defined.
@@ -291,17 +273,17 @@ reasoning: |
   5. The final query should SELECT customer_id, customer_name FROM customers WHERE account_status = 'ACTIVE' AND EXISTS (SELECT 1 FROM transactions WHERE transactions.customer_id = customers.customer_id AND transaction_date >= DATE('now', '-30 days'))
 ```
 
-#### 3. **The `code` Block Must Be Perfect**
+#### 2. **The `code` Block Must Be Perfect**
 
-The SQL inside `code` must be syntactically correct and produce the right answer. The agent will learn to mimic this structure, style, and logic.
+The SQL in `code` must be syntactically correct and produce the right answer. The agent will learn to mimic this structure, style, and logic.
 
-#### 4. **Cover Common and Complex Cases**
+#### 3. **Cover Common and Complex Cases**
 
--   **Ambiguous Terms:** If "active user" is an ambiguous term, provide an example that shows the canonical definition in the reasoning and the correct `WHERE` clause in the code.
--   **Difficult Joins:** If there's a tricky but common join path across multiple tables, create an example for it.
--   **Complex Calculations:** Show examples for common but complex calculations like Year-over-Year growth, moving averages, etc.
+- **Ambiguous Terms:** If "active user" is ambiguous, provide an example showing the canonical definition
+- **Difficult Joins:** Create examples for tricky but common join paths
+- **Complex Calculations:** Show examples for YoY growth, moving averages, etc.
 
-#### 5. **Complete Example**
+### Complete Example
 
 ```yaml
 examples:
@@ -325,60 +307,115 @@ examples:
               AND sales_date < DATE('now', 'start of month')
             GROUP BY region
             ORDER BY total_revenue DESC;
-            
-      - query: "What are the top 3 products by sales volume?"
-        example:
-          question: "What are the top 3 products by sales volume?"
-          reasoning: |
-            1. "Sales volume" means units_sold, not revenue.
-            2. I need to aggregate by product_id and sum units_sold.
-            3. Then order by total units descending and limit to 3.
-          code: |
-            SELECT
-              product_id,
-              SUM(units_sold) as total_units
-            FROM sales_report
-            GROUP BY product_id
-            ORDER BY total_units DESC
-            LIMIT 3;
-            
-      - query: "Compare revenue this quarter to last quarter"
-        example:
-          question: "Compare revenue this quarter to last quarter"
-          reasoning: |
-            1. This is a comparison query that requires two separate calculations.
-            2. I'll create a query that calculates revenue for both periods in one result.
-            3. I'll use CASE statements to separate current quarter and last quarter.
-            4. Current quarter: Q1 = Jan-Mar, Q2 = Apr-Jun, Q3 = Jul-Sep, Q4 = Oct-Dec
-            5. I'll need to determine which quarter we're in and calculate accordingly.
-          code: |
-            SELECT
-              CASE 
-                WHEN CAST(STRFTIME('%m', sales_date) AS INTEGER) BETWEEN 1 AND 3 THEN 'Q1'
-                WHEN CAST(STRFTIME('%m', sales_date) AS INTEGER) BETWEEN 4 AND 6 THEN 'Q2'
-                WHEN CAST(STRFTIME('%m', sales_date) AS INTEGER) BETWEEN 7 AND 9 THEN 'Q3'
-                ELSE 'Q4'
-              END as quarter,
-              SUM(revenue) as total_revenue
-            FROM sales_report
-            WHERE sales_date >= DATE('now', 'start of year', '-3 months')
-              AND sales_date < DATE('now', 'start of month')
-            GROUP BY quarter
-            ORDER BY quarter;
 ```
 
 ---
 
 ## Asset File Format Reference
 
-For complete field-level reference, see [Asset File Formats](../reference/assets.md).
+Complete reference for the structure and fields of knowledge asset files.
+
+### `schema.yml` Format
+
+Describes the structure of your database.
+
+**Root Structure:**
+```yaml
+tables:
+  - table_name: string                  # REQUIRED
+    description: string                  # REQUIRED
+    primary_keys: list[string]          # Optional
+    foreign_keys: list[object]          # Optional
+    columns: list[object]                # REQUIRED
+```
+
+**Table Fields:**
+- **`table_name`**: The name of the table as used in SQL queries
+- **`description`**: Detailed description of what the table contains
+- **`primary_keys`**: List of column names forming the primary key
+- **`foreign_keys`**: List of foreign key definitions
+- **`columns`**: List of column definitions
+
+**Column Fields:**
+- **`name`**: Column name (REQUIRED)
+- **`type`**: SQL data type (REQUIRED)
+- **`description`**: Detailed description (REQUIRED)
+- **`example_values`**: Sample values (Optional)
+- **`values`**: For categorical columns, list of possible values (Optional)
+
+**Foreign Key Definition:**
+```yaml
+foreign_keys:
+  - column: string                      # Column in this table
+    reference_table: string              # Referenced table
+    reference_column: string             # Column in referenced table
+```
+
+**Categorical Value Definition:**
+```yaml
+values:
+  - value: any                          # The actual value
+    description: string                  # Human-readable meaning
+```
+
+---
+
+### `rules.yml` Format
+
+Defines business logic and instructions.
+
+**Root Structure:**
+```yaml
+rules:
+  - module_name: string                 # REQUIRED
+    rules: list[object]                 # REQUIRED
+```
+
+**Rule Fields:**
+- **`module_name`**: Component to apply rule to (e.g., "retrieval_worker", "planner")
+- **`rules`**: List of rule definitions
+
+**Rule Definition:**
+- **`rule_name`**: Unique name for the rule (REQUIRED)
+- **`instructions`**: Instruction text for the LLM (REQUIRED, multi-line string)
+
+**Module Names:**
+- `"planner"`: Rules for the planning component
+- `"replanner"`: Rules for the replanning component
+- `"retrieval_worker"`: Rules for SQL generation (most common)
+- `"analytics_worker"`: Rules for data analysis
+- `"plot_worker"`: Rules for visualization generation
+
+---
+
+### `examples.yml` Format
+
+Provides few-shot examples for the agent.
+
+**Root Structure:**
+```yaml
+examples:
+  - module_name: string                 # REQUIRED
+    examples: list[object]              # REQUIRED
+```
+
+**Example Fields:**
+- **`query`**: The user-like query (REQUIRED)
+- **`example`**: The example content (REQUIRED)
+  - **`question`**: The user's question (typically same as query)
+  - **`reasoning`**: Step-by-step logic explanation (REQUIRED, multi-line string)
+  - **`code`**: The perfect SQL code (REQUIRED, multi-line string)
+
+**Module Names:**
+- `"retrieval_worker"`: Examples for SQL generation (most common)
+- `"analytics_worker"`: Examples for data analysis
+- `"plot_worker"`: Examples for visualization
 
 ---
 
 ## Next Steps
 
-- **[Configuration Reference](../reference/agent_config.md)**: See the detailed guide for the main `agent.yaml` file.
-- **[Troubleshooting](troubleshooting.md)**: Tips for when your agent isn't behaving as expected.
-- **[Benchmarking](benchmarking.md)**: Learn how to test and evaluate your agent's performance.
-
+- **[Knowledge Asset Tools](knowledge_asset_tools.md)**: Generate and enhance assets with DataScanner and Rule Inference
+- **[Evaluate Your Agent](evaluating_your_agent.md)**: Test your agent's performance
+- **[Configure Your Agent](configuring_your_agent.md)**: Set up your agent configuration
 

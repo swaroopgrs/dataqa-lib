@@ -33,32 +33,16 @@ theme:
     - search.share
     - content.code.copy
     - content.code.annotate
-    - content.code.mermaid # Enable Mermaid diagrams
 
 plugins:
   - search
-  - mkdocstrings:
-      default_handler: python
-      handlers:
-        python:
-          options:
-            docstring_style: google
-            show_source: true
-            show_root_heading: true
-            show_root_toc_entry: false
-          extra:
-            paths: [dataqa]
 
 markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  - pymdownx.superfences:
-      custom_fences:
-        - name: mermaid
-          class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.superfences
   - admonition
   - pymdownx.details
   - pymdownx.tabbed:
@@ -75,15 +59,15 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Quickstart: quickstart.md
-  - Installation: installation.md
   - User Guide:
-      - Introduction: guide/introduction.md
-      - Building Assets: guide/building_assets.md
-      - Benchmarking & Evaluation: guide/benchmarking.md
-      - Troubleshooting: guide/troubleshooting.md
-      - FAQ: guide/faq.md
-  - Reference:
+      - Understanding the CWD Agent: guide/understanding_the_cwd_agent.md
+      - Try the Examples: guide/trying_the_examples.md
+      - Configure Your Agent: guide/configuring_your_agent.md
+      - Knowledge Asset Tools: guide/knowledge_asset_tools.md
+      - Create Knowledge Assets Manually: guide/creating_knowledge_assets.md
+      - Evaluate Your Agent: guide/evaluating_your_agent.md
+  - API Reference:
+      - Overview: reference/index.md
       - Agent Configuration: reference/agent_config.md
-      - Asset File Formats: reference/assets.md
       - Agent API: reference/agent.md
   - Changelog: changelog.md

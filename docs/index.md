@@ -6,27 +6,27 @@ A powerful, config-driven framework for building intelligent agents that answer 
 
 ---
 
-## What is the DataQA CWD Agent?
+## What is DataQA?
 
 The **DataQA CWD Agent** is an intelligent system designed to understand your data and answer complex questions. It follows a "Plan, Work, Dispatch" loop to break down your query, retrieve data using SQL, perform analysis, and deliver a clear, accurate answer.
 
-Instead of writing complex code, you teach the agent about your data through simple YAML files.
+Instead of writing complex code, you teach the agent about your data through simple YAML files: `schema.yml`, `rules.yml`, and `examples.yml`.
 
 ## Who is this for?
 
-- **Data Analysts & Scientists** who want to enable natural language querying for their datasets.
-- **Teams** that need a robust, reliable way to build and maintain a conversational data assistant.
-- **Developers** creating data-centric applications without wanting to manage complex agentic loops.
+- **Data Analysts & Scientists** who want to enable natural language querying for their datasets
+- **Teams** that need a robust, reliable way to build and maintain a conversational data assistant
+- **Developers** creating data-centric applications without wanting to manage complex agentic loops
 
 ---
 
 ## Key Features
 
-- **Conversational CWD Agent:** A powerful plan-and-execute loop for tackling multi-step questions.
-- **Knowledge-Driven:** Define your data's schema, business rules, and query examples in simple YAML files.
-- **Config, Not Code:** Most agent behavior is defined in a central `agent.yaml` file.
-- **Built-in Tools:** Comes with tools for SQL generation, data analysis (Pandas), and plotting out-of-the-box.
-- **Local First:** Designed for easy local setup and testing before deployment.
+- **Conversational CWD Agent:** A powerful plan-and-execute loop for tackling multi-step questions
+- **Knowledge-Driven:** Define your data's schema, business rules, and query examples in simple YAML files
+- **Config, Not Code:** Most agent behavior is defined in a central `agent.yaml` file
+- **Built-in Tools:** Comes with tools for SQL generation, data analysis (Pandas), and plotting out-of-the-box
+- **Knowledge Asset Tools:** Use DataScanner and Rule Inference to generate and enhance knowledge assets
 
 ---
 
@@ -34,11 +34,11 @@ Instead of writing complex code, you teach the agent about your data through sim
 
 <div class="grid cards" markdown>
 
--   **Quickstart Guide**
+-   **Quickstart**
 
     ---
 
-    Get your first agent running in 5 minutes. This is the best place to start.
+    Get your first agent running in minutes. Includes installation and setup.
 
     [:octicons-arrow-right-24: Quickstart Guide](quickstart.md)
 
@@ -46,31 +46,43 @@ Instead of writing complex code, you teach the agent about your data through sim
 
     ---
 
-    Learn the core concepts and master the art of configuring your agent's knowledge base.
+    Learn how to build agents, create knowledge assets, and evaluate performance.
 
-    [:octicons-arrow-right-24: User Guide](guide/introduction.md)
+    [:octicons-arrow-right-24: User Guide](guide/understanding_the_cwd_agent.md)
 
--   **Building Assets**
-
-    ---
-
-    Deep dive into creating the `schema.yml`, `rules.yml`, and `examples.yml` files that power your agent.
-
-    [:octicons-arrow-right-24: Building Assets](guide/building_assets.md)
-
--   **Configuration Reference**
+-   **API Reference**
 
     ---
 
-    Detailed reference for the `agent.yaml` configuration file.
+    Detailed reference for configuration files and API.
 
-    [:octicons-arrow-right-24: Configuration Reference](reference/agent_config.md)
+    [:octicons-arrow-right-24: API Reference](reference/index.md)
 
 </div>
 
 ---
 
-## Community & Support
+## Quick Example
 
-- [Troubleshooting Guide](guide/troubleshooting.md)
-- [FAQ](guide/faq.md)
+```python
+from dataqa.integrations.local.client import LocalClient
+from dataqa.core.client import CoreRequest
+
+client = LocalClient(config_path="agent.yaml")
+request = CoreRequest(
+    user_query="What was the total revenue for the North region?",
+    conversation_id="demo-1"
+)
+response = await client.process_query(request)
+print(response.text)
+```
+
+---
+
+## Next Steps
+
+- **[Quickstart](quickstart.md)**: Get started in minutes
+- **[Knowledge Asset Tools](guide/knowledge_asset_tools.md)**: Generate and enhance assets with DataScanner and Rule Inference
+- **[Create Knowledge Assets](guide/creating_knowledge_assets.md)**: Learn how to create schema, rules, and examples
+- **[User Guide](guide/understanding_the_cwd_agent.md)**: Deep dive into the CWD Agent
+
